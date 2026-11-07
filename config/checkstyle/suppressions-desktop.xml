@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suppressions PUBLIC
+    "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"
+    "https://checkstyle.org/dtds/suppressions_1_2.dtd">
+<!-- Desktop only; no suppressions are shared with Applet crypto or ASCII rules. -->
+<suppressions>
+    <!-- Dedicated close-watchdog uses a background thread, not JavaFX UI thread.
+         Only exempt the sleep rule, never raw-APDU logging or other regex rules. -->
+    <suppress id="desktopThreadSleep" files="[\\/]App\.java$"/>
+</suppressions>

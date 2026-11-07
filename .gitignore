@@ -1,0 +1,90 @@
+
+# --- Build output ---
+target/
+build/
+dist/
+out/
+bin/
+*.class
+*.jar
+deliverables/
+
+# CAP/JCA/EXP là BẰNG CHỨNG (Q-17) nên được commit, nhưng chỉ trong artifacts/.
+*.cap
+*.jca
+*.exp
+!artifacts/**/*.cap
+!artifacts/**/*.jca
+!artifacts/**/*.exp
+
+# --- Gate 0: binary sinh ra từ các probe/sample, không cần đưa lên Git ---
+artifacts/helloworld/
+artifacts/crypto-probe/probe.cap
+artifacts/crypto-probe/probe.jca
+artifacts/crypto-probe/probe.exp
+artifacts/tx-probe/txprobe.cap
+artifacts/tx-probe/txprobe.jca
+artifacts/tx-probe/txprobe.exp
+# Snapshot trung gian, không phải input của các script verify hiện tại.
+artifacts/tx-probe/snapshot-*.hex
+
+# --- Node / NestJS ---
+node_modules/
+coverage/
+.nyc_output/
+*.tsbuildinfo
+.eslintcache
+
+# --- Bí mật (Q-05) ---
+.env
+.env.*
+!.env.example
+# secrets/* chứ không phải secrets/: git không mở lại được file nằm trong thư mục đã bị loại.
+secrets/*
+!secrets/README.md
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# EEPROM / database snapshots can contain card secrets.
+*.eeprom
+*.eep
+*.img
+*.dump
+*.sql.gz
+.serena/project.local.yml
+
+# --- Rác sinh ra khi chạy ---
+hs_err_pid*.log
+replay_pid*.log
+*.hprof
+*.stackdump
+*.orig
+*.rej
+
+# --- Cache công cụ ---
+.cache/
+
+# --- Công cụ / IDE ---
+.idea/
+.serena/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.iml
+.serena/cache/
+*.log.tmp
+
+# --- Tài liệu nội bộ ---
+docs/
+
+# --- Hệ điều hành ---
+Thumbs.db
+desktop.ini
+.DS_Store
+
+AGENTS.md
+logs

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suppressions PUBLIC
+    "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"
+    "https://checkstyle.org/dtds/suppressions_1_2.dtd">
+<!-- Applet product only; Gate 0 probes are intentionally outside run-lint.ps1 scope. -->
+<suppressions>
+    <!-- Status Word constants belong in Sw.java. Do not exempt other regex checks. -->
+    <suppress id="appletSwLiterals" files="[\\/]Sw\.java$"/>
+</suppressions>

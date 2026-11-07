@@ -1,0 +1,10 @@
+{
+  "comment": "Template cho backend/ — copy sang backend/ khi tới BE-01.",
+  "semi": true,
+  "singleQuote": true,
+  "trailingComma": "all",
+  "printWidth": 100,
+  "tabWidth": 2,
+  "arrowParens": "always",
+  "endOfLine": "lf"
+}

@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json.schemastore.org/eslintrc",
+  "comment": "Template cho backend/ — copy sang backend/ khi tới BE-01. Quy tắc gốc: docs/dev/quy-uoc-code.md",
+
+  "root": true,
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "project": "./tsconfig.json",
+    "sourceType": "module",
+    "ecmaVersion": 2023
+  },
+  "plugins": ["@typescript-eslint", "import"],
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended-type-checked",
+    "plugin:@typescript-eslint/stylistic-type-checked",
+    "prettier"
+  ],
+  "rules": {
+    "@typescript-eslint/no-explicit-any": "error",
+    "@typescript-eslint/no-floating-promises": "error",
+    "@typescript-eslint/no-misused-promises": "error",
+    "@typescript-eslint/consistent-type-imports": "error",
+    "@typescript-eslint/explicit-function-return-type": ["warn", { "allowExpressions": true }],
+
+    "no-empty": ["error", { "allowEmptyCatch": false }],
+    "no-console": ["warn", { "allow": ["error"] }],
+    "eqeqeq": ["error", "always"],
+    "curly": ["error", "all"],
+    "import/order": [
+      "error",
+      {
+        "groups": ["builtin", "external", "internal", "parent", "sibling", "index"],
+        "newlines-between": "always",
+        "alphabetize": { "order": "asc", "caseInsensitive": true }
+      }
+    ],
+
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "CallExpression[callee.property.name='upsert']",
+        "message": "Q-43: không dùng upsert cho ledger — dùng $transaction + bắt P2002 để không che xung đột payload."
+      },
+      {
+        "selector": "MemberExpression[property.name='env'][object.name='process']",
+        "message": "Q-40: đọc biến môi trường qua config module đã validate, không đọc process.env rải rác."
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["**/*.spec.ts", "**/*.e2e-spec.ts"],
+      "rules": {
+        "@typescript-eslint/no-unsafe-assignment": "off",
+        "no-console": "off"
+      }
+    }
+  ],
+  "ignorePatterns": ["dist", "node_modules", "coverage", "*.js"]
+}

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE module PUBLIC
+    "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+    "https://checkstyle.org/dtds/configuration_1_3.dtd">
+
+<!--
+  Chỉ dùng cho tầng Applet Java Card.
+  Quy tắc hình thức; ràng buộc kiến trúc nằm trong docs/dev/quy-uoc-code.md.
+  Ánh xạ: Q-01 định dạng, Q-02 tên tiếng Anh, Q-04 không số ma thuật,
+  Q-07 không nuốt lỗi, Q-10 cấm thư viện/kiểu không có trên Java Card,
+  Q-15 Status Word tập trung.
+-->
+<module name="Checker">
+    <property name="charset" value="UTF-8"/>
+    <property name="fileExtensions" value="java"/>
+    <property name="severity" value="error"/>
+
+    <module name="SuppressionFilter">
+        <property name="file" value="${config_loc}/suppressions-applet.xml"/>
+        <property name="optional" value="true"/>
+    </module>
+
+    <module name="FileTabCharacter"/>
+
+    <module name="FileLength">
+        <property name="max" value="900"/>
+    </module>
+
+    <module name="LineLength">
+        <property name="max" value="120"/>
+        <property name="ignorePattern" value="^import |^\s*\*|^\s*//"/>
+    </module>
+
+    <!-- Q-02: mã nguồn Applet chỉ ASCII. Comment tiếng Việt đặt ở tài liệu. -->
+    <module name="RegexpSingleline">
+        <property name="format" value="[^\x00-\x7F]"/>
+        <property name="message"
+                  value="Q-02: mã nguồn Applet phải là ASCII thuần; comment tiếng Việt đặt trong docs/dev."/>
+    </module>
+
+    <module name="RegexpSingleline">
+        <property name="format" value="\bnew\s+(String|StringBuilder|StringBuffer)\b"/>
+        <property name="message" value="Q-10: không dùng String/StringBuilder trong Applet."/>
+    </module>
+
+    <module name="RegexpSingleline">
+        <property name="format" value="\b(String|StringBuilder|StringBuffer|ArrayList|HashMap)\s+\w+\s*="/>
+        <property name="message" value="Q-10: không dùng String/collection trong Applet."/>
+    </module>
+
+    <module name="TreeWalker">
+        <module name="AvoidStarImport"/>
+        <!-- Q-10: cấm thư viện không có trên Java Card. -->
+        <module name="IllegalImport">
+            <property name="illegalPkgs" value="java.util, java.lang.reflect, java.text"/>
+        </module>
+
+        <!-- Q-03: đặt tên. -->
+        <module name="TypeName"/>
+        <module name="MethodName">
+            <property name="format" value="^[a-z][a-zA-Z0-9]*$"/>
+        </module>
+        <module name="LocalVariableName"/>
+        <module name="ParameterName"/>
+        <module name="MemberName"/>
+        <module name="ConstantName"/>
+
+        <!-- Q-15: không literal Status Word ngoài lớp Sw. -->
+        <module name="RegexpSinglelineJava">
+            <property name="id" value="appletSwLiterals"/>
+            <property name="format" value="0x(9000|6982|6983|6985|6700|6A80|6A86|6D00|6E00)\b"/>
+            <property name="message"
+                      value="Q-15: dùng hằng trong lớp Sw, không dùng literal Status Word."/>
+        </module>
+
+        <module name="WhitespaceAround">
+            <property name="allowEmptyConstructors" value="true"/>
+            <property name="allowEmptyMethods" value="true"/>
+        </module>
+        <module name="WhitespaceAfter"/>
+        <module name="NeedBraces"/>
+        <module name="ParenPad"/>
+        <module name="NoWhitespaceBefore"/>
+
+        <!-- Q-07: không nuốt lỗi. -->
+        <module name="EmptyCatchBlock">
+            <property name="exceptionVariableName" value="(?!)"/>
+            <property name="commentFormat" value="(?!)"/>
+        </module>
+
+        <module name="EqualsHashCode"/>
+        <module name="SimplifyBooleanExpression"/>
+        <module name="SimplifyBooleanReturn"/>
+        <module name="FallThrough"/>
+        <module name="MissingSwitchDefault"/>
+        <module name="OneStatementPerLine"/>
+        <module name="ModifierOrder"/>
+        <module name="RedundantModifier"/>
+        <module name="DeclarationOrder"/>
+
+        <!-- Q-04: số ma thuật. -->
+        <module name="MagicNumber">
+            <property name="ignoreNumbers" value="-1, 0, 1, 2"/>
+            <property name="ignoreHashCodeMethod" value="true"/>
+            <property name="ignoreAnnotation" value="true"/>
+        </module>
+
+    </module>
+</module>
