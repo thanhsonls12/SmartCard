@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>vn.labaccess</groupId>
+    <artifactId>desktop</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+    <name>LabAccess Desktop - Gate 0 smoke UI</name>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>25</maven.compiler.release>
+        <javafx.version>25</javafx.version>
+        <!-- Chi dung cho kiem thu giao dien: bat che do tu bam nut de chup anh.
+             Mac dinh false; chay that thi bo qua. -->
+        <labaccess.demo>false</labaccess.demo>
+        <!-- Cong simulator; doi duoc khi can test (vi du tro vao mot cong treo). -->
+        <labaccess.port>9025</labaccess.port>
+    </properties>
+
+    <dependencies>
+        <!-- JavaFX 25: controls keo theo graphics + base tuong ung -->
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
+
+        <!-- JAR Oracle da cai vao local repo bang install:install-file.
+             KHONG phai artifact tren Maven Central. -->
+        <dependency>
+            <groupId>local.oracle.javacard</groupId>
+            <artifactId>socketprovider</artifactId>
+            <version>26.0</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-maven-plugin</artifactId>
+                <version>0.0.8</version>
+                <configuration>
+                    <mainClass>vn.labaccess.desktop/vn.labaccess.desktop.App</mainClass>
+                    <!-- javafx:run fork JVM rieng, nen -D cua Maven khong tu sang.
+                         Chuyen tiep tuong minh qua <options>. -->
+                    <options>
+                        <option>-Dlabaccess.demo=${labaccess.demo}</option>
+                        <option>-Dlabaccess.port=${labaccess.port}</option>
+                    </options>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- Chạy khi cần: mvn -Pquality checkstyle:check
+             Không gắn vào build thường để `javafx:run` không bị chặn bởi lint. -->
+        <profile>
+            <id>quality</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-checkstyle-plugin</artifactId>
+                        <version>3.6.0</version>
+                        <configuration>
+                            <configLocation>${project.basedir}/../config/checkstyle/checkstyle-desktop.xml</configLocation>
+                            <propertyExpansion>config_loc=${project.basedir}/../config/checkstyle</propertyExpansion>
+                            <includeTestSourceDirectory>false</includeTestSourceDirectory>
+                            <failOnViolation>true</failOnViolation>
+                            <violationSeverity>error</violationSeverity>
+                            <consoleOutput>true</consoleOutput>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>
