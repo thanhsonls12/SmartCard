@@ -1,0 +1,11 @@
+{
+  "curve": "P-256",
+  "curveSource": "tham so P-256 tuong minh (p,a,b,G,r), G 65 byte co tien to 0x04",
+  "hash": "SHA-256",
+  "signatureFormat": "DER",
+  "messageUtf8": "LABACCESS-G0-ECDSA-message-v1",
+  "messageHex": "4c41424143434553532d47302d45434453412d6d6573736167652d7631",
+  "publicKey1Hex": "042d1410463382536b976383c58e3aa8efd19cef851446c6e8efe8fec3ccb7c2ca2230e2c01d7cf2be51b2ae3caa32f12daa6acdddcd117ef4ef1190d149d38b28",
+  "publicKey2Hex": "04523c6e396b11b6e9f5f1b0f91500ada555b8a09bafab5bbd2572e4d75c2c2b728ed8916a442d4aa8dd13f1a5bf6a0ee50389f369975e62a0c1529234af4f4c2b",
+  "signatureHex": "30440220531e89d807438c6e33047e17a81d605be02336de36be175d091ec835d4d90966022026b3dcc668dff2c93f202f48ee8e70897bfab416f50f75d4d2659d6ae6e9469f"
+}

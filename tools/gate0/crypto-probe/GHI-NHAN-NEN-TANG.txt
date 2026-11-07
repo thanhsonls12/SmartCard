@@ -1,0 +1,116 @@
+LabAccess — Gate 0 crypto probe: ghi nhan hanh vi nen tang
+==========================================================
+Nen tang do: Oracle Java Card SDK 26.0 Simulator, the Java Card 3.2 / GP 2.3,
+ATR 3B9F968131FE454F52434C2D4A43332E324750322E3323, ket noi T=1 qua socket 127.0.0.1:9025.
+
+Tat ca ket luan duoi day la KET QUA DO THUC TE tren simulator, khong phai suy doan
+tu tai lieu. Moi ket luan deu co the tai lap bang cach chay lai client probe.
+
+
+1. AES-128-GCM — CO ho tro
+   - javacardx.crypto.AEADCipher.getInstance(AEADCipher.ALG_AES_GCM, false) thanh cong.
+     getCipherAlgorithm() tra ve -15 (CIPHER_AES_GCM).
+   - Ma hoa: init(key, MODE_ENCRYPT, nonce, 0, 12) -> updateAAD(aad) ->
+     doFinal(pt, 0, len, out, off) -> retrieveTag(out, off, 16). Chay dung.
+   - Giai ma: CHI mot thu tu duy nhat chay duoc (P1=4 trong INS 0x14):
+         init(key, MODE_DECRYPT, nonce, 0, 12)
+         updateAAD(aad, 0, aadLen)
+         doFinal(ciphertext, 0, ctLen, out, 0)      <-- giai ma truoc
+         verifyTag(tag, 0, 16, 16)                  <-- roi moi xac thuc tag
+     Cac thu tu khac deu bi tu choi:
+         P1=1  doFinal tren (ct||tag) lien nhau  -> SW=6A80/6982, so byte tra ve sai
+         P1=2  update -> verifyTag -> doFinal(0) -> CryptoException ILLEGAL_USE (5)
+         P1=3  update -> doFinal(0) -> verifyTag -> CryptoException ILLEGAL_USE (5)
+     Vi vay applet PHAI dem plaintext trong bo dem noi bo va chi tra ra APDU sau khi
+     verifyTag tra ve true. Neu verifyTag that bai, bo dem bi xoa va the tra 6982.
+
+2. ECDSA P-256 / SHA-256 — CO ho tro, nhung KHONG dung duoc NamedParameterSpec
+   - NamedParameterSpec.getInstance(SECP256R1) tra ve id 4099 (goi duoc).
+   - KeyPair.genKeyPair(NamedParameterSpec) nem CryptoException NO_SUCH_ALGORITHM (3).
+     => Khong the sinh khoa theo ten duong cong tren runtime nay.
+   - Duong chay duoc la dat tham so tuong minh, va CO MOT DIEM BAT BUOC:
+     setG phai nhan 65 byte co tien to 0x04 (dang uncompressed point),
+     KHONG phai 64 byte (X||Y). Voi 64 byte, setG nem ILLEGAL_VALUE (1).
+     Phai dat tham so cho CA public key va private key.
+   - Signature.getInstance(Signature.ALG_ECDSA_SHA_256, false) thanh cong;
+     chu ky tra ve dang DER (bat dau 0x30), dai 70-72 byte.
+   - Da kiem chung doc lap bang Node.js (verify-ecdsa.mjs): chu ky that xac nhan true,
+     message doi 1 byte -> false, chu ky doi 1 byte -> false, dung khoa cua cap khac -> false.
+     Dieu nay chung minh duong cong dung la P-256 va hash dung la SHA-256.
+
+3. Quan sat khac (khong thuoc G0-11/G0-13)
+   - Simulator tra SW=9000 cho SELECT voi AID khong ton tai, va cho ca SELECT
+     khong co du lieu AID (du sau do khong con applet nao duoc chon — lenh sau do
+     nhan 6D00). Vi vay KHONG the dung SELECT lam phep thu am tren nen tang nay;
+     phai dung mot lenh that su bi tu choi (vi du INS khong ho tro).
+
+
+Cach tai lap (lenh day du)
+--------------------------
+Tat ca lenh chay tu PowerShell, gia su:
+  JAVA_HOME = C:\Program Files\Java\jdk-25.0.5.0.2
+  JC_HOME_TOOLS = D:\JavaCard\sdk-26\tools
+  JC_HOME_SIMULATOR = D:\JavaCard\sdk-26\simulator
+
+1) Khoi dong Simulator (port 9025)
+   $p = Start-Process -FilePath "$env:JC_HOME_SIMULATOR\runtime\bin\jcsw.exe" `
+        -ArgumentList '-p=9025' -WorkingDirectory "$env:JC_HOME_SIMULATOR\runtime\bin" `
+        -RedirectStandardOutput D:\SmartCard\logs\simulator.log `
+        -RedirectStandardError  D:\SmartCard\logs\simulator.log.err `
+        -PassThru -WindowStyle Hidden
+   (cho toi khi cong 9025 o trang thai Listen)
+
+2) Build applet probe
+   javac -g -d D:\SmartCard\tools\gate0\crypto-probe\bin `
+         -source 10 -target 10 -Xlint:-options `
+         -cp "$env:JC_HOME_TOOLS\lib\api_classic-3.2.0.jar" `
+         D:\SmartCard\tools\gate0\crypto-probe\src\vn\labaccess\probe\CryptoProbe.java
+
+3) Convert ra CAP (chay trong thu muc bin)
+   cd D:\SmartCard\tools\gate0\crypto-probe\bin
+   "%JC_HOME_TOOLS%\bin\converter.bat" -config ..\configurations\CryptoProbe.conf
+   -> D:\SmartCard\tools\gate0\crypto-probe\deliverables\CryptoProbe\vn\labaccess\probe\javacard\probe.cap
+   LUU Y: converter tra exit code 0 ca khi bao loi — phai doc dong "conversion completed
+   with 0 errors" va kiem tra file CAP co ton tai.
+
+4) Kiem CAP
+   "%JC_HOME_TOOLS%\bin\verifycap.bat" ^
+     D:\SmartCard\tools\gate0\crypto-probe\deliverables\CryptoProbe\vn\labaccess\probe\javacard\probe.cap
+
+5) Build cac tool Java (InstallKeepApplet, RemoveApplet, IdentifyProbe)
+   javac -g -d D:\SmartCard\tools\gate0\out ^
+     -p "$env:JC_HOME_SIMULATOR\client\AMService;$env:JC_HOME_SIMULATOR\client\COMService" ^
+     (moi file .java trong D:\SmartCard\tools\gate0\src)
+
+6) Cai applet probe (khong go applet, khong gui DELETE)
+   java --module-path "$env:JC_HOME_SIMULATOR\client\AMService;$env:JC_HOME_SIMULATOR\client\COMService;D:\SmartCard\tools\gate0\out" ^
+        --add-modules ALL-MODULE-PATH ^
+        -m vn.labaccess.tools.gate/vn.labaccess.tools.gate0.InstallKeepApplet ^
+        -cap=D:\SmartCard\tools\gate0\crypto-probe\deliverables\CryptoProbe\vn\labaccess\probe\javacard\probe.cap ^
+        -pkg=f04c41424700 -applet=f04c4142470001 -inst=f04c4142470001 -script=install
+
+7) Go applet probe (chi khi bao tri)
+   java ... -m vn.labaccess.tools.gate/vn.labaccess.tools.gate0.RemoveApplet -pkg=f04c41424700
+
+8) Chay kiem chung GCM + xuat artifact ECDSA
+   java --module-path "<AMService>;<COMService>;D:\SmartCard\tools\gate0\out;D:\SmartCard\tools\gate0\crypto-probe\client\out" ^
+        --add-modules ALL-MODULE-PATH ^
+        -m vn.labaccess.probe.client/vn.labaccess.probe.client.ProbeClient
+
+9) Kiem chu ky ECDSA doc lap bang Node.js
+   node D:\SmartCard\tools\gate0\crypto-probe\verify-ecdsa.mjs
+
+10) Test nhan dien am (3 truong hop SELECT + probe sau moi truong hop)
+   java ... -m vn.labaccess.tools.gate/vn.labaccess.tools.gate0.IdentifyProbe
+
+11) UI smoke (JavaFX)
+   cd D:\SmartCard\desktop
+   mvn -o javafx:run                                  (chay that)
+   mvn -o javafx:run -Dlabaccess.demo=true            (tu bam nut de chup anh)
+   mvn -o javafx:run -Dlabaccess.port=9031            (tro vao cong khac khi test)
+
+AID
+---
+  Package  : F04C41424700
+  Applet   : F04C4142470001
+  Instance : F04C4142470001
