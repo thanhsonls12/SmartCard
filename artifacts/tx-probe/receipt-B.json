@@ -1,0 +1,10 @@
+{
+  "label": "B",
+  "domain": "LABACCESS-RECEIPT-v1",
+  "cardIdHex": "4c41423030303031",
+  "payloadHex": "014c414230303030310000000202ffff0004a1a2a3a4a5a6a7a8a9aaabacadaeafb0",
+  "signatureDerHex": "3044022058e8d2710b76ac282699fc57768958c368a49df3d694b38c3489d429bb450f5002205346857f1d0d13b54facf0a4ba23dde40c758220fb05e088bddeaa74ba3adc37",
+  "publicKeyHex": "04a9ad4a76ab480968cf88a789005c5faaabc0c400d3b2c8678f44b64515b92c42577282a7ef00666d83836179f07a45e4e94c983c13415b8c18b780d0945fd186",
+  "payloadLength": 34,
+  "signatureLength": 70
+}
