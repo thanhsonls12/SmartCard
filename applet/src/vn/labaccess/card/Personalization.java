@@ -17,33 +17,17 @@ final class Personalization {
     }
 
     void process(byte[] buffer, short lc) {
-        boolean adminVerified = false;
         try {
             if (state.isIssued()) {
                 ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
             }
             PersonalizePayload.validate(buffer, lc);
-            verifyAdminPin(buffer);
-            adminVerified = true;
+            AdminPinVerifier.verify(pins.admin(), buffer, PersonalizePayload.OFFSET_ADMIN_PIN);
             personalize(buffer);
         } finally {
-            if (adminVerified) {
-                pins.admin().reset();
-            }
+            pins.admin().reset();
             clearCommandSecrets(buffer, lc);
             state.clearCommandData();
-        }
-    }
-
-    private void verifyAdminPin(byte[] buffer) {
-        boolean verified = pins.admin().check(buffer,
-                PersonalizePayload.OFFSET_ADMIN_PIN, Protocol.ADMIN_PIN_LENGTH);
-        if (!verified) {
-            byte triesRemaining = pins.admin().getTriesRemaining();
-            if (triesRemaining == (byte) 0) {
-                ISOException.throwIt(Sw.PIN_BLOCKED);
-            }
-            ISOException.throwIt((short) (Sw.VERIFY_FAIL_WITH_RETRIES + triesRemaining));
         }
     }
 

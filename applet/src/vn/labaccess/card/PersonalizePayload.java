@@ -20,8 +20,6 @@ final class PersonalizePayload {
 
     private static final short UNSIGNED_BYTE_MASK = 0x00FF;
 
-    private static final byte ASCII_ZERO = (byte) '0';
-    private static final byte ASCII_NINE = (byte) '9';
     private static final byte ASCII_DASH = (byte) '-';
     private static final byte ASCII_UPPER_A = (byte) 'A';
     private static final byte ASCII_UPPER_Z = (byte) 'Z';
@@ -77,9 +75,9 @@ final class PersonalizePayload {
         if ((short) (nameLengthOffset + 1 + displayNameLength) != lc) {
             ISOException.throwIt(Sw.WRONG_LENGTH);
         }
-        requireDigits(buffer, OFFSET_ADMIN_PIN, Protocol.ADMIN_PIN_LENGTH);
+        PinFormat.requireDigits(buffer, OFFSET_ADMIN_PIN, Protocol.ADMIN_PIN_LENGTH);
         requireStudentIdCharacters(buffer, studentIdLength);
-        requireDigits(buffer, studentPinOffset, Protocol.STUDENT_PIN_LENGTH);
+        PinFormat.requireDigits(buffer, studentPinOffset, Protocol.STUDENT_PIN_LENGTH);
     }
 
     private static void requireNonZeroCardId(byte[] buffer) {
@@ -95,7 +93,8 @@ final class PersonalizePayload {
         for (short index = (short) 0; index < length; index++) {
             byte value = buffer[(short) (OFFSET_STUDENT_ID + index)];
             boolean allowed = (value >= ASCII_UPPER_A && value <= ASCII_UPPER_Z)
-                    || (value >= ASCII_ZERO && value <= ASCII_NINE)
+                    || (value >= Protocol.ASCII_DIGIT_ZERO
+                            && value <= Protocol.ASCII_DIGIT_NINE)
                     || value == ASCII_DASH;
             if (!allowed) {
                 ISOException.throwIt(Sw.WRONG_DATA);
@@ -103,12 +102,4 @@ final class PersonalizePayload {
         }
     }
 
-    private static void requireDigits(byte[] buffer, short offset, short length) {
-        for (short index = (short) 0; index < length; index++) {
-            byte value = buffer[(short) (offset + index)];
-            if (value < ASCII_ZERO || value > ASCII_NINE) {
-                ISOException.throwIt(Sw.WRONG_DATA);
-            }
-        }
-    }
 }

@@ -4,6 +4,9 @@ final class Protocol {
 
     static final byte CLA_APPLICATION = (byte) 0x80;
     static final byte INS_GET_STATUS = (byte) 0x10;
+    static final byte INS_VERIFY_STUDENT_PIN = (byte) 0x20;
+    static final byte INS_CHANGE_STUDENT_PIN = (byte) 0x21;
+    static final byte INS_UNBLOCK_STUDENT_PIN = (byte) 0x23;
     static final byte INS_PERSONALIZE = (byte) 0x30;
     static final byte INS_GET_CARD_PUBLIC_KEY = (byte) 0x61;
 
@@ -24,6 +27,16 @@ final class Protocol {
 
     static final byte STUDENT_PIN_LENGTH = (byte) 6;
     static final byte STUDENT_PIN_MAX_TRIES = (byte) 3;
+    static final byte ASCII_DIGIT_ZERO = (byte) '0';
+    static final byte ASCII_DIGIT_NINE = (byte) '9';
+
+    static final byte VERIFY_STUDENT_PIN_DATA_LENGTH = STUDENT_PIN_LENGTH;
+    static final byte CHANGE_STUDENT_PIN_DATA_LENGTH = (byte) (STUDENT_PIN_LENGTH * 2);
+    static final byte UNBLOCK_STUDENT_PIN_DATA_LENGTH = (byte) (ADMIN_PIN_LENGTH + STUDENT_PIN_LENGTH);
+    static final short CHANGE_OLD_PIN_OFFSET = (short) 0;
+    static final short CHANGE_NEW_PIN_OFFSET = (short) STUDENT_PIN_LENGTH;
+    static final short UNBLOCK_ADMIN_PIN_OFFSET = (short) 0;
+    static final short UNBLOCK_NEW_STUDENT_PIN_OFFSET = (short) ADMIN_PIN_LENGTH;
 
     static final byte P1_GET_STATUS = (byte) 0x00;
     static final byte P2_GET_STATUS = (byte) 0x00;
