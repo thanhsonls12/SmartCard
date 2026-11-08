@@ -32,6 +32,11 @@ function Invoke-Native {
     return [pscustomobject]@{ Output = @($output); ExitCode = $code }
 }
 
+function New-TestPin {
+    param([int]$Length)
+    -join (1..$Length | ForEach-Object { [char](Get-Random -Minimum 48 -Maximum 58) })
+}
+
 if ([string]::IsNullOrWhiteSpace($JavaHome) -or -not (Test-Path (Join-Path $JavaHome 'bin/javac.exe'))) {
     Stop-Test "JAVA_HOME invalid: '$JavaHome'"
 }
@@ -57,7 +62,7 @@ $javac = Join-Path $JavaHome 'bin/javac.exe'
 $java = Join-Path $JavaHome 'bin/java.exe'
 $classpath = "$amserviceJar;$socketJar"
 
-Write-Host '=== LabAccess PERSONALIZE selftest ==='
+Write-Host '=== LabAccess PERSONALIZE and PIN runtime selftest ==='
 Write-Host '[1/3] Compile harness'
 $result = Invoke-Native { & $javac -g -d $toolsOut -cp $classpath $source }
 $result.Output | ForEach-Object { Write-Host "      $_" }
@@ -65,29 +70,43 @@ if ($result.ExitCode -ne 0) {
     Stop-Test "javac failed with exit code $($result.ExitCode)"
 }
 
-$pinBytes = 1..8 | ForEach-Object { Get-Random -Minimum 48 -Maximum 58 }
-$adminPin = -join ($pinBytes | ForEach-Object { [char]$_ })
+$testCapFiles = @(Get-ChildItem -Path (Join-Path $buildDir 'test-deliverables') -Recurse -Filter *.cap -File)
+if ($testCapFiles.Count -ne 1) {
+    Stop-Test 'Expected exactly one isolated test CAP; run build.ps1 first'
+}
+$testCapPath = $testCapFiles[0].FullName
+$testPins = @()
+while ($testPins.Count -lt 4) {
+    $length = if ($testPins.Count -eq 0) { 8 } else { 6 }
+    $candidate = New-TestPin $length
+    if ($candidate -notin $testPins) {
+        $testPins += $candidate
+    }
+}
+$adminPin = $testPins[0]
 $stamp = Get-Date -Format 'yyyyMMdd-HHmm'
-$logFile = Join-Path $logDir "gate1-personalize-$stamp.log"
+$logFile = Join-Path $logDir "gate1-pin-runtime-$stamp.log"
 Write-Host '[2/3] Run test AID EE01 scenarios'
 $result = Invoke-Native {
-    $adminPin | & $java --module-path "$amserviceJar;$socketJar" --add-modules ALL-MODULE-PATH `
-        -cp $toolsOut PersonalizeSelfTest $propsFile
+    ($testPins -join "`n") | & $java --module-path "$amserviceJar;$socketJar" --add-modules ALL-MODULE-PATH `
+        -cp $toolsOut PersonalizeSelfTest $propsFile $testCapPath
 }
 $result.Output | ForEach-Object { Write-Host $_ }
 [System.IO.File]::WriteAllLines($logFile, [string[]]$result.Output,
     (New-Object System.Text.UTF8Encoding($false)))
 
-$pinHex = @($pinBytes | ForEach-Object { $_.ToString('x2') })
-$pinHexCompact = $pinHex -join ''
-$pinHexSpaced = $pinHex -join ' '
-$pinHexColon = $pinHex -join ':'
-$needles = @($adminPin, $pinHexCompact, $pinHexSpaced, $pinHexColon)
+$needles = @()
+foreach ($pin in $testPins) {
+    $bytes = [System.Text.Encoding]::ASCII.GetBytes($pin)
+    $hex = @($bytes | ForEach-Object { $_.ToString('x2') })
+    $needles += $pin, ($hex -join ''), ($hex -join ' '), ($hex -join ':')
+}
+$testPins = $null
 $adminPin = $null
-$pinBytes = $null
-$pinHex = $null
+$bytes = $null
+$hex = $null
 
-Write-Host '[3/3] Scan logs for the test admin PIN'
+Write-Host '[3/3] Scan logs for test PIN values'
 $scanCount = 0
 $leaks = @()
 $readErrors = @()

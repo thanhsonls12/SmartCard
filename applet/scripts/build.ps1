@@ -129,12 +129,34 @@ if (-not ($r.Output -match 'conversion completed with 0 errors and 0 warnings'))
     Stop-Build 'converter' "converter khong bao '0 errors and 0 warnings' (xem $convertLog)"
 }
 
+$testConfFile = Join-Path $confDir 'labaccess-test.conf'
+if (-not (Test-Path $testConfFile)) {
+    Stop-Build 'converter' "Khong thay file cau hinh test: $testConfFile"
+}
+$testCapDir = Join-Path $buildDir 'test-deliverables'
+New-Item -ItemType Directory -Force -Path $testCapDir | Out-Null
+Push-Location $confDir
+try {
+    $testConvert = Invoke-Native { & $converter -config 'labaccess-test.conf' }
+} finally {
+    Pop-Location
+}
+$testConvertLog = Join-Path $logDir 'converter-test.log'
+$testConvert.Output | Set-Content -Path $testConvertLog -Encoding UTF8
+$testConvert.Output | ForEach-Object { Write-Host "      $_" }
+if (($testConvert.ExitCode -ne 0) -or (-not ($testConvert.Output -match 'conversion completed with 0 errors and 0 warnings'))) {
+    Stop-Build 'converter test' "converter test that bai (xem $testConvertLog)"
+}
 $capFiles = @(Get-ChildItem -Path $deliverablesDir -Recurse -Filter *.cap -File)
-if ($capFiles.Count -eq 0) {
-    Stop-Build 'converter' "Khong sinh ra file .cap trong $deliverablesDir"
+$testCapDir = Join-Path $buildDir 'test-deliverables'
+$testCapFiles = @(Get-ChildItem -Path $testCapDir -Recurse -Filter *.cap -File)
+if ($capFiles.Count -eq 0 -or $testCapFiles.Count -eq 0) {
+    Stop-Build 'converter' 'Khong sinh du ca CAP production va CAP test'
 }
 $capFile = $capFiles[0].FullName
+$testCapFile = $testCapFiles[0].FullName
 Write-Host "      OK: $capFile ($($capFiles[0].Length) byte)"
+Write-Host "      OK test: $testCapFile ($($testCapFiles[0].Length) byte)"
 Write-Host ""
 
 Write-Host "[3/3] verifycap"
@@ -149,13 +171,24 @@ if ($r.ExitCode -ne 0) {
 if (-not ($r.Output -match 'Verification completed with 0 warnings and 0 errors')) {
     Stop-Build 'verifycap' "verifycap khong bao '0 warnings and 0 errors' (xem $verifyLog)"
 }
-Write-Host "      OK"
+$testVerifyLog = Join-Path $logDir 'verifycap-test.log'
+$testVerify = Invoke-Native { & $verifier $testCapFile }
+$testVerify.Output | Set-Content -Path $testVerifyLog -Encoding UTF8
+$testVerify.Output | ForEach-Object { Write-Host "      $_" }
+if (($testVerify.ExitCode -ne 0) -or (-not ($testVerify.Output -match 'Verification completed with 0 warnings and 0 errors'))) {
+    Stop-Build 'verifycap test' "verifycap test that bai (xem $testVerifyLog)"
+}
+Write-Host "      OK production + test"
 Write-Host ""
 
 $sha = (Get-FileHash $capFile -Algorithm SHA256).Hash
+$testSha = (Get-FileHash $testCapFile -Algorithm SHA256).Hash
 Write-Host "=== BUILD THANH CONG ===" -ForegroundColor Green
 Write-Host "CAP   : $capFile"
 Write-Host "Size  : $($capFiles[0].Length) byte"
 Write-Host "SHA256: $sha"
+Write-Host "TEST CAP   : $testCapFile"
+Write-Host "TEST SIZE  : $($testCapFiles[0].Length) byte"
+Write-Host "TEST SHA256: $testSha"
 Write-Host "Log   : $logDir"
 exit 0
