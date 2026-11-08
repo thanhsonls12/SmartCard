@@ -10,6 +10,10 @@ final class Protocol {
     static final byte INS_PERSONALIZE = (byte) 0x30;
     static final byte INS_GET_PROFILE = (byte) 0x31;
     static final byte INS_GET_PROFILE_CRYPTO_META = (byte) 0x40;
+    static final byte INS_GRANT_QUOTA = (byte) 0x50;
+    static final byte INS_START_VISIT = (byte) 0x51;
+    static final byte INS_END_VISIT = (byte) 0x52;
+    static final byte INS_GET_LAST_RECEIPT = (byte) 0x60;
     static final byte INS_GET_CARD_PUBLIC_KEY = (byte) 0x61;
 
     static final byte PROTOCOL_VERSION = (byte) 0x01;
@@ -55,6 +59,45 @@ final class Protocol {
     static final short PROFILE_META_RESPONSE_LENGTH =
             (short) (PROFILE_META_OFFSET_CIPHERTEXT_HASH + PROFILE_META_CIPHERTEXT_HASH_LENGTH);
 
+    static final short MAX_BALANCE = (short) 9999;
+    static final short COUNTER_LENGTH = (short) 4;
+    static final short GRANT_QUOTA_DATA_LENGTH = (short) (ADMIN_PIN_LENGTH + 2);
+    static final short GRANT_ADMIN_PIN_OFFSET = (short) 0;
+    static final short GRANT_DELTA_OFFSET = (short) ADMIN_PIN_LENGTH;
+    static final short STATE_OFFSET_BALANCE = (short) 0;
+    static final short STATE_OFFSET_COUNTER = (short) 2;
+    static final short STATE_RESPONSE_LENGTH = (short) (STATE_OFFSET_COUNTER + COUNTER_LENGTH);
+
+    static final short VISIT_ID_LENGTH = (short) 16;
+    static final byte[] UNASSIGNED_VISIT_ID = new byte[VISIT_ID_LENGTH];
+
+    static final byte OPERATION_GRANT_QUOTA = (byte) 0x01;
+    static final byte OPERATION_START_VISIT = (byte) 0x02;
+    static final byte OPERATION_END_VISIT = (byte) 0x03;
+    static final short GRANT_VISIT_DELTA = (short) 1;
+    static final short START_VISIT_DELTA = (short) -1;
+    static final short END_VISIT_DELTA = (short) 0;
+
+    static final byte RECEIPT_VERSION = (byte) 0x01;
+    static final short RECEIPT_OFFSET_VERSION = (short) 0;
+    static final short RECEIPT_OFFSET_CARD_ID = (short) 1;
+    static final short RECEIPT_OFFSET_COUNTER = (short) 9;
+    static final short RECEIPT_OFFSET_OPERATION = (short) 13;
+    static final short RECEIPT_OFFSET_DELTA = (short) 14;
+    static final short RECEIPT_OFFSET_BALANCE = (short) 16;
+    static final short RECEIPT_OFFSET_VISIT_ID = (short) 18;
+    static final short RECEIPT_PAYLOAD_LENGTH = (short) 34;
+    static final short RECEIPT_SIGNATURE_MAX_LENGTH = (short) 72;
+    static final short RECEIPT_LENGTH_FIELD_LENGTH = (short) 1;
+    static final short RECEIPT_RESPONSE_MAX_LENGTH = (short) (RECEIPT_PAYLOAD_LENGTH
+            + RECEIPT_LENGTH_FIELD_LENGTH + RECEIPT_SIGNATURE_MAX_LENGTH);
+    static final byte[] RECEIPT_DOMAIN = {
+            (byte) 'L', (byte) 'A', (byte) 'B', (byte) 'A', (byte) 'C', (byte) 'C',
+            (byte) 'E', (byte) 'S', (byte) 'S', (byte) '-', (byte) 'R', (byte) 'E',
+            (byte) 'C', (byte) 'E', (byte) 'I', (byte) 'P', (byte) 'T', (byte) '-',
+            (byte) 'v', (byte) '1'
+    };
+    static final short RECEIPT_DOMAIN_LENGTH = (short) 20;
 
     static final byte VERIFY_STUDENT_PIN_DATA_LENGTH = STUDENT_PIN_LENGTH;
     static final byte CHANGE_STUDENT_PIN_DATA_LENGTH = (byte) (STUDENT_PIN_LENGTH * 2);

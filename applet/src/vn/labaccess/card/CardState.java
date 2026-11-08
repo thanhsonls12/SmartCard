@@ -9,6 +9,9 @@ final class CardState {
     private static final short PROFILE_PLAINTEXT_MAX = (short) 144;
 
     private final byte[] cardId = new byte[Protocol.CARD_ID_LENGTH];
+    private final QuotaLedger quota = new QuotaLedger();
+    private final VisitLedger visits = new VisitLedger();
+    private final Receipt receipt = new Receipt();
     private final byte[] profileCiphertext = new byte[PROFILE_CIPHERTEXT_MAX];
     private short profileCiphertextLength;
 
@@ -20,6 +23,7 @@ final class CardState {
 
     private byte lifecycle;
     private boolean keysReady;
+    private ReceiptSigner receiptSigner;
 
     CardState() {
     }
@@ -56,6 +60,9 @@ final class CardState {
         keysReady = false;
         profileCiphertextLength = 0;
         profilePlaintextLength = 0;
+        quota.reset();
+        visits.reset();
+        receipt.reset();
         Util.arrayFillNonAtomic(cardId, (short) 0, Protocol.CARD_ID_LENGTH,
                 Protocol.CARD_ID_UNASSIGNED);
         Util.arrayFillNonAtomic(profileCiphertext, (short) 0, PROFILE_CIPHERTEXT_MAX,
@@ -93,6 +100,26 @@ final class CardState {
 
     byte[] cardId() {
         return cardId;
+    }
+
+    QuotaLedger quota() {
+        return quota;
+    }
+
+    VisitLedger visits() {
+        return visits;
+    }
+
+    Receipt receipt() {
+        return receipt;
+    }
+
+    ReceiptSigner receiptSigner() {
+        return receiptSigner;
+    }
+
+    void setReceiptSigner(ReceiptSigner signer) {
+        receiptSigner = signer;
     }
 
     void setCardId(byte[] source, short offset) {

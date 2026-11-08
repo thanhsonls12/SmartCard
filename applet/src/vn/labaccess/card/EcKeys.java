@@ -2,6 +2,7 @@ package vn.labaccess.card;
 
 import javacard.framework.Util;
 import javacard.security.ECKey;
+import javacard.security.ECPrivateKey;
 import javacard.security.ECPublicKey;
 import javacard.security.KeyPair;
 
@@ -78,5 +79,9 @@ final class EcKeys {
 
     ECPublicKey publicKey() {
         return (ECPublicKey) pair.getPublic();
+    }
+
+    ECPrivateKey privateKey() {
+        return (ECPrivateKey) pair.getPrivate();
     }
 }

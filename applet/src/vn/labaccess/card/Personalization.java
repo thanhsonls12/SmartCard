@@ -44,6 +44,7 @@ final class Personalization {
             }
             crypto.generateAesKey();
             ecKeys.generatePair();
+            state.setReceiptSigner(new ReceiptSigner(ecKeys.privateKey()));
             buildProfilePlaintext(buffer);
             short recordLength = crypto.encryptRecord(
                     state.profilePlaintext(), state.profilePlaintextLength(),
@@ -74,6 +75,7 @@ final class Personalization {
             JCSystem.abortTransaction();
         }
         state.resetUnissued();
+        state.setReceiptSigner(null);
         if (crypto != null) {
             crypto.clearAesKey();
         }
