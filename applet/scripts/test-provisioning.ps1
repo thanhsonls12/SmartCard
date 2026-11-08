@@ -2,11 +2,8 @@
 param(
     [string]$JavaHome = $env:JAVA_HOME,
     [string]$JcHomeSimulator = $env:JC_HOME_SIMULATOR,
-    [string]$AdminPin,
-    [string]$Aid = 'F04C414201EE01',
     [ValidateSet('full', 'negative')]
-    [string]$CaseSet = 'full',
-    [string]$CapPath
+    [string]$CaseSet = 'full'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,6 +11,7 @@ $ErrorActionPreference = 'Stop'
 $appletRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $buildDir = Join-Path $appletRoot 'build'
 $toolsOut = Join-Path $buildDir 'tools'
+$buildLogDir = Join-Path $buildDir 'logs'
 $repoRoot = (Resolve-Path (Join-Path $appletRoot '..')).Path
 $logDir = Join-Path $repoRoot 'logs'
 $selfTestSrc = Join-Path $PSScriptRoot 'ProvisioningSelfTest.java'
@@ -48,7 +46,7 @@ foreach ($p in @($amserviceJar, $socketJar, $propsFile)) {
     }
 }
 
-New-Item -ItemType Directory -Force -Path $toolsOut, $logDir | Out-Null
+New-Item -ItemType Directory -Force -Path $toolsOut, $buildLogDir, $logDir | Out-Null
 $javac = Join-Path $JavaHome 'bin/javac.exe'
 $java = Join-Path $JavaHome 'bin/java.exe'
 
@@ -59,37 +57,78 @@ $r.Output | ForEach-Object { Write-Host "      $_" }
 if ($r.ExitCode -ne 0) {
     Stop-Test "javac harness tra exit code $($r.ExitCode)"
 }
+Write-Host "      OK: ProvisioningSelfTest.java"
 
-if (-not $AdminPin) {
-    $AdminPin = -join (1..8 | ForEach-Object { Get-Random -Minimum 0 -Maximum 10 })
-}
-if ($AdminPin -notmatch '^[0-9]{8}$') {
-    Stop-Test "Admin PIN thu phai la 8 chu so ASCII."
-}
+$adminPinBytes = 1..8 | ForEach-Object { Get-Random -Minimum 48 -Maximum 58 }
+$adminPin = -join ($adminPinBytes | ForEach-Object { [char]$_ })
 
 Write-Host "[2/3] chay harness"
 $stamp = Get-Date -Format 'yyyyMMdd-HHmm'
 $logFile = Join-Path $logDir "gate1-provisioning-$CaseSet-$stamp.log"
-$capArg = if ($CapPath) { $CapPath } else { $null }
 $r = Invoke-Native {
-    $AdminPin | & $java --module-path "$amserviceJar;$socketJar" --add-modules ALL-MODULE-PATH `
-        -cp $toolsOut ProvisioningSelfTest $propsFile $Aid $CaseSet $capArg
+    $adminPin | & $java --module-path "$amserviceJar;$socketJar" --add-modules ALL-MODULE-PATH `
+        -cp $toolsOut ProvisioningSelfTest $propsFile $CaseSet
 }
 $r.Output | ForEach-Object { Write-Host $_ }
 [System.IO.File]::WriteAllLines($logFile, [string[]]$r.Output, (New-Object System.Text.UTF8Encoding($false)))
 
+$hexPinBytes = @($adminPinBytes | ForEach-Object { $_.ToString('x2') })
+$hexPinCompactLower = $hexPinBytes -join ''
+$hexPinCompactUpper = $hexPinCompactLower.ToUpperInvariant()
+$hexPinSpacedLower = $hexPinBytes -join ' '
+$hexPinSpacedUpper = $hexPinSpacedLower.ToUpperInvariant()
+$hexPinColonLower = $hexPinBytes -join ':'
+$hexPinColonUpper = $hexPinColonLower.ToUpperInvariant()
+$pinNeedles = @($adminPin, $hexPinCompactLower, $hexPinCompactUpper,
+    $hexPinSpacedLower, $hexPinSpacedUpper, $hexPinColonLower, $hexPinColonUpper)
+$adminPinBytes = $null
+
 Write-Host ""
 Write-Host "[3/3] kiem log khong lo PIN"
 $leaks = @()
-foreach ($file in @(Get-ChildItem -Path (Join-Path $repoRoot 'logs') -File -Include *.log, *.out, *.err -Recurse) +
-                  @(Get-ChildItem -Path (Join-Path $buildDir 'logs') -File -Recurse -ErrorAction SilentlyContinue)) {
-    $content = Get-Content -Path $file.FullName -Raw -ErrorAction SilentlyContinue
-    if ($content -and $content.Contains($AdminPin)) {
-        $leaks += $file.FullName
+$readErrors = @()
+$scanCount = 0
+$logRoots = @((Join-Path $repoRoot 'logs'), $buildLogDir)
+foreach ($root in $logRoots) {
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+        Stop-Test "Thieu thu muc log bat buoc: $root"
+    }
+    try {
+        $files = @(Get-ChildItem -LiteralPath $root -File -Recurse -ErrorAction Stop)
+    } catch {
+        Stop-Test "Khong liet ke duoc thu muc log bat buoc: $root"
+    }
+    foreach ($file in $files) {
+        if ($file.Extension -notin @('.log', '.out', '.err', '.txt')) {
+            continue
+        }
+        $scanCount++
+        try {
+            $content = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction Stop
+        } catch {
+            $readErrors += $file.FullName
+            continue
+        }
+        if (-not $content) {
+            continue
+        }
+        if (@($pinNeedles | Where-Object { $_ -and $content.Contains($_) }).Count -gt 0) {
+            $leaks += $file.FullName
+        }
     }
 }
-$AdminPin = $null
+$adminPin = $null
+$pinNeedles = $null
+$hexPinBytes = $null
 
+Write-Host "      Da doc $scanCount file log trong $($logRoots -join '; ')"
+if ($readErrors.Count -gt 0) {
+    foreach ($err in $readErrors) {
+        Write-Host "      KHONG DOC DUOC: $err" -ForegroundColor Red
+    }
+    Write-Host "SELFTEST THAT BAI: co file log khong doc duoc, khong the xac minh khong lo PIN" -ForegroundColor Red
+    exit 1
+}
 if ($leaks.Count -gt 0) {
     foreach ($leak in $leaks) {
         Write-Host "      LO PIN trong: $leak" -ForegroundColor Red
@@ -97,7 +136,7 @@ if ($leaks.Count -gt 0) {
     Write-Host "SELFTEST THAT BAI: admin PIN xuat hien trong log" -ForegroundColor Red
     exit 1
 }
-Write-Host "      OK: khong file log nao chua gia tri PIN thu"
+Write-Host "      OK: khong file log nao chua PIN dang chuoi hoac hex"
 
 Write-Host ""
 Write-Host "Log: $logFile"

@@ -108,15 +108,19 @@ public final class InstallApplet {
         byte[] adminPin = new byte[0];
         Card card = null;
         int exitCode = EXIT_FAILED;
+        String currentStep = "doc admin PIN";
         try {
             adminPin = readAdminPin();
+            currentStep = "ket noi the";
             card = connect(host, port);
+            currentStep = "INSTALL va kiem tra";
             exitCode = runSteps(mode, capPath, propsPath, card.getBasicChannel(), adminPin);
         } catch (IllegalArgumentException e) {
-            log("LOI: " + e.getMessage());
-            exitCode = EXIT_BAD_ARGUMENTS;
+            log("LOI tai buoc " + currentStep + ": IllegalArgumentException (chi tiet bo qua)");
+            exitCode = currentStep.equals("doc admin PIN") ? EXIT_BAD_ARGUMENTS : EXIT_FAILED;
         } catch (Exception e) {
-            log("LOI: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            log("LOI tai buoc " + currentStep + ": " + e.getClass().getSimpleName()
+                    + " (chi tiet bo qua de tranh ghi du lieu nhay cam)");
             exitCode = EXIT_FAILED;
         } finally {
             java.util.Arrays.fill(adminPin, (byte) 0);
@@ -178,7 +182,8 @@ public final class InstallApplet {
         try {
             card.disconnect(true);
         } catch (Exception e) {
-            log("Canh bao: dong ket noi loi: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            log("Canh bao: dong ket noi loi: " + e.getClass().getSimpleName()
+                    + " (chi tiet bo qua)");
         }
         return exitCode;
     }
@@ -207,13 +212,12 @@ public final class InstallApplet {
         List<ResponseAPDU> responses;
         boolean ok;
         try {
-            responses = session.run(channel, LOG_COMMAND,
-                    r -> r.getSW() != 0x9000 && r.getSW() != 0x6985);
+            responses = session.run(channel, LOG_COMMAND, STOP_ON_ERROR);
             ok = true;
-            log("    load package: " + responses.size() + " response, tat ca 9000/6985");
+            log("    load package: " + responses.size() + " response, tat ca 9000");
         } catch (ScriptFailedException e) {
             ok = false;
-            log("    load package: DUNG vi response khac 9000/6985");
+            log("    load package: DUNG vi response khac 9000");
         }
         record("load package " + PKG_HEX, ok, "");
         log("");
@@ -223,15 +227,19 @@ public final class InstallApplet {
     private static boolean stepInstall(String propsPath, CardChannel channel, byte[] adminPin)
             throws IOException, java.security.NoSuchProviderException {
         log("[3/3] INSTALL instance " + INST_HEX);
+        boolean ok;
         byte[] payload = provisioningPayload(adminPin);
-        log(String.format("    provisioning: format=%02X pinLength=%d hop le",
-                payload[0], payload[1]));
-        AMService ams = openService(propsPath);
-        AMSession session = ams.openSession(ISD_AID)
-                .install("aid:" + PKG_HEX, "aid:" + APPLET_HEX, "aid:" + INST_HEX, payload)
-                .close();
-        boolean ok = runScript(session, channel, "install instance", false);
-        java.util.Arrays.fill(payload, (byte) 0);
+        try {
+            log(String.format("    provisioning: format=%02X pinLength=%d hop le",
+                    payload[0], payload[1]));
+            AMService ams = openService(propsPath);
+            AMSession session = ams.openSession(ISD_AID)
+                    .install("aid:" + PKG_HEX, "aid:" + APPLET_HEX, "aid:" + INST_HEX, payload)
+                    .close();
+            ok = runScript(session, channel, "install instance");
+        } finally {
+            java.util.Arrays.fill(payload, (byte) 0);
+        }
         record("install instance " + INST_HEX, ok, "");
         log("");
         return ok;
@@ -247,27 +255,36 @@ public final class InstallApplet {
 
     private static byte[] readAdminPin() throws IOException {
         byte[] pin = new byte[ADMIN_PIN_LENGTH];
-        int count = 0;
-        int value = -1;
-        while (count < ADMIN_PIN_LENGTH && (value = System.in.read()) != -1) {
-            if (value == 10 || value == 13) {
-                break;
+        boolean accepted = false;
+        try {
+            int count = 0;
+            int value;
+            while ((value = System.in.read()) != -1) {
+                if (value == 10 || value == 13) {
+                    break;
+                }
+                if (count == ADMIN_PIN_LENGTH) {
+                    throw new IllegalArgumentException(
+                            "Admin PIN phai co dung " + ADMIN_PIN_LENGTH + " chu so");
+                }
+                pin[count++] = (byte) value;
             }
-            pin[count] = (byte) value;
-            count++;
-        }
-        if (count != ADMIN_PIN_LENGTH) {
-            java.util.Arrays.fill(pin, (byte) 0);
-            throw new IllegalArgumentException(
-                    "Admin PIN phai co dung " + ADMIN_PIN_LENGTH + " chu so");
-        }
-        for (int index = 0; index < ADMIN_PIN_LENGTH; index++) {
-            if (pin[index] < 48 || pin[index] > 57) {
+            if (count != ADMIN_PIN_LENGTH) {
+                throw new IllegalArgumentException(
+                        "Admin PIN phai co dung " + ADMIN_PIN_LENGTH + " chu so");
+            }
+            for (int index = 0; index < ADMIN_PIN_LENGTH; index++) {
+                if (pin[index] < 48 || pin[index] > 57) {
+                    throw new IllegalArgumentException("Admin PIN chi duoc chua chu so 0-9");
+                }
+            }
+            accepted = true;
+            return pin;
+        } finally {
+            if (!accepted) {
                 java.util.Arrays.fill(pin, (byte) 0);
-                throw new IllegalArgumentException("Admin PIN chi duoc chua chu so 0-9");
             }
         }
-        return pin;
     }
 
     private static boolean removeInstance(String propsPath, CardChannel channel)
@@ -275,7 +292,7 @@ public final class InstallApplet {
         log("    xoa instance");
         AMService ams = openService(propsPath);
         AMSession session = ams.openSession(ISD_AID).uninstall("aid:" + INST_HEX).close();
-        return runRemoval(session, channel, "uninstall instance");
+        return runRemoval(session, channel, "uninstall instance", INST_HEX);
     }
 
     private static boolean removePackage(String propsPath, CardChannel channel)
@@ -283,31 +300,65 @@ public final class InstallApplet {
         log("    xoa package");
         AMService ams = openService(propsPath);
         AMSession session = ams.openSession(ISD_AID).unload("aid:" + PKG_HEX).close();
-        return runRemoval(session, channel, "unload package");
+        return runRemoval(session, channel, "unload package", PKG_HEX);
     }
 
-    private static boolean runRemoval(AMSession session, CardChannel channel, String label) {
-        int[] notFound = { 0 };
-        Predicate<ResponseAPDU> stopUnlessRemoved = r -> {
-            log(String.format("    <- SW=%04X  dataLen=%d", r.getSW(), r.getData().length));
-            if (r.getSW() == SW_REFERENCED_DATA_NOT_FOUND) {
-                notFound[0]++;
+    private static boolean runRemoval(AMSession session, CardChannel channel, String label,
+            String expectedAidHex) {
+        int[] deleteCount = { 0 };
+        int[] notFoundCount = { 0 };
+        boolean[] deleteTargetsExpectedAid = { false };
+        ScriptVisitor<CommandAPDU> visitor = command -> {
+            byte[] bytes = command.getBytes();
+            log(String.format("    -> %02X %02X %02X %02X  (%d byte)",
+                    bytes[0], bytes[1], bytes[2], bytes[3], bytes.length));
+            deleteTargetsExpectedAid[0] = isDeleteForAid(command, expectedAidHex);
+            return command;
+        };
+        Predicate<ResponseAPDU> stopUnlessRemoved = response -> {
+            log(String.format("    <- SW=%04X  dataLen=%d", response.getSW(), response.getData().length));
+            if (response.getSW() == SW_OK) {
+                deleteCount[0]++;
                 return false;
             }
-            return r.getSW() != SW_OK;
+            if (response.getSW() == SW_REFERENCED_DATA_NOT_FOUND
+                    && deleteTargetsExpectedAid[0]) {
+                notFoundCount[0]++;
+                return false;
+            }
+            return true;
         };
         try {
-            List<ResponseAPDU> responses = session.run(channel, LOG_COMMAND, stopUnlessRemoved);
-            log(String.format("    %s: %d response, %d response SW=6A88 (doi tuong khong ton tai)",
-                    label, responses.size(), notFound[0]));
+            List<ResponseAPDU> responses = session.run(channel, visitor, stopUnlessRemoved);
+            log(String.format("    %s: %d response, %d response 9000, %d response 6A88 on expected DELETE",
+                    label, responses.size(), deleteCount[0], notFoundCount[0]));
             return true;
         } catch (ScriptFailedException e) {
-            log("    " + label + ": DUNG vi response khac 9000/6A88 (" + e.getMessage() + ")");
+            log("    " + label + ": DUNG vi SW khong duoc phep");
             return false;
         } catch (RuntimeException e) {
-            log("    " + label + ": loi " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            log("    " + label + ": loi " + e.getClass().getSimpleName());
             return false;
         }
+    }
+
+    private static boolean isDeleteForAid(CommandAPDU command, String expectedAidHex) {
+        if (command.getCLA() != 0x80 || command.getINS() != 0xE4
+                || command.getP1() != 0 || command.getP2() != 0) {
+            return false;
+        }
+        byte[] data = command.getData();
+        byte[] expectedAid = hex(expectedAidHex);
+        if (data.length != expectedAid.length + 2 || (data[0] & 0xFF) != 0x4F
+                || (data[1] & 0xFF) != expectedAid.length) {
+            return false;
+        }
+        for (int index = 0; index < expectedAid.length; index++) {
+            if (data[index + 2] != expectedAid[index]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static AMService openService(String propsPath)
@@ -324,21 +375,16 @@ public final class InstallApplet {
     }
 
     private static boolean runScript(AMSession session, CardChannel channel, String label) {
-        return runScript(session, channel, label, true);
-    }
-
-    private static boolean runScript(AMSession session, CardChannel channel, String label,
-            boolean echoDetail) {
         try {
             List<ResponseAPDU> responses = session.run(channel, LOG_COMMAND, STOP_ON_ERROR);
             log("    " + label + ": " + responses.size() + " response, tat ca 9000");
             return true;
         } catch (ScriptFailedException e) {
-            log("    " + label + ": DUNG vi response khac 9000"
-                    + (echoDetail ? " (" + e.getMessage() + ")" : ""));
+            log("    " + label + ": DUNG vi SW khac 9000");
             return false;
         } catch (RuntimeException e) {
-            log("    " + label + ": loi " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            log("    " + label + ": loi " + e.getClass().getSimpleName()
+                    + " (chi tiet bo qua de tranh ghi du lieu nhay cam)");
             return false;
         }
     }
