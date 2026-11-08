@@ -6,7 +6,7 @@ final class Provisioning {
 
     static final short ADMIN_PIN_PAYLOAD_LENGTH = (short) 10;
 
-    private static final byte UNSIGNED_BYTE_MASK = (byte) 0xFF;
+    private static final short UNSIGNED_BYTE_MASK = 0x00FF;
 
     private static final byte PAYLOAD_VERSION_OFFSET = (byte) 0;
     private static final byte PAYLOAD_PIN_LENGTH_OFFSET = (byte) 1;
@@ -20,11 +20,11 @@ final class Provisioning {
         short cursor = offset;
 
         requireAvailable(cursor, end, (short) 1);
-        short packageAidLength = (short) (buffer[cursor] & UNSIGNED_BYTE_MASK);
+        short instanceAidLength = (short) (buffer[cursor] & UNSIGNED_BYTE_MASK);
         cursor += 1;
 
-        requireAvailable(cursor, end, packageAidLength);
-        cursor += packageAidLength;
+        requireAvailable(cursor, end, instanceAidLength);
+        cursor += instanceAidLength;
 
         requireAvailable(cursor, end, (short) 1);
         short controlInfoLength = (short) (buffer[cursor] & UNSIGNED_BYTE_MASK);
