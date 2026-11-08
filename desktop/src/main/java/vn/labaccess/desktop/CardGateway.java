@@ -14,19 +14,8 @@ import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
 import javax.smartcardio.TerminalFactory;
 
-/**
- * Lop giu ket noi the, tach khoi su kien nut bam.
- *
- * Phai goi tuan tu tren cung mot luong nen (executor cua App). Cac getter KHONG
- * bi khoa boi thao tac I/O de FX thread khong bi treo khi connect dang cho the.
- *
- * Nhan dien applet khong tin vao SW cua SELECT: sau SELECT phai chay mot probe
- * ung dung va doi chieu TOAN BO data + SW, vi Simulator tra 9000 ca khi khong
- * tim thay AID (xem docs/plan/ket-qua-gate0.md).
- */
 final class CardGateway {
 
-    /** Ket qua mot thao tac: ok = thanh cong, text = mo ta de hien thi. */
     record Result(boolean ok, String text) {
         static Result ok(String text) {
             return new Result(true, text);
@@ -37,43 +26,50 @@ final class CardGateway {
         }
     }
 
-    /** AID Applet HelloWorld (instance = class AID). */
-    private static final byte[] HELLOWORLD_AID = HexFormat.of().parseHex("A00000006203010C0101");
+    record Status(int protocolVersion, int lifecycle, String instanceAid, String cardId) {
+    }
 
-    /** Du lieu echo co dinh cua sample: ASCII "12345". */
-    private static final byte[] ECHO_DATA = HexFormat.of().parseHex("3132333435");
+    private static final byte[] INSTANCE_AID = HexFormat.of().parseHex("F04C4142010101");
 
-    /** Phan hoi echo hop le: 80 20 00 00 05 3132333435 90 00. */
-    private static final byte[] ECHO_EXPECTED = {
-            (byte) 0x80, 0x20, 0x00, 0x00, 0x05, 0x31, 0x32, 0x33, 0x34, 0x35, (byte) 0x90, 0x00
+    private static final byte CLA_APPLICATION = (byte) 0x80;
+    private static final byte INS_GET_STATUS = (byte) 0x10;
+    private static final int PROTOCOL_VERSION = 0x01;
+
+    private static final int LIFECYCLE_UNPERSONALIZED = 0x00;
+    private static final int LIFECYCLE_ISSUED = 0x01;
+
+    private static final byte[] MAGIC = {
+            'L', 'A', 'B', 'A', 'C', 'C', 'E', 'S', 'S'
     };
+
+    private static final int OFFSET_PROTOCOL_VERSION = 9;
+    private static final int OFFSET_AID_LENGTH = 10;
+    private static final int OFFSET_INSTANCE_AID = 11;
+    private static final int CARD_ID_LENGTH = 8;
+
 
     private final String host;
     private final int port;
 
-    /* Chi duoc dong vao tu luong nen. */
     private TerminalFactory factory;
     private CardTerminal terminal;
     private Card card;
     private CardChannel channel;
 
-    /** true chi khi SELECT tra 9000 VA probe ung dung khop tung byte. */
     private volatile boolean ready;
-
-    /** Ban sao trang thai cho UI, cap nhat tren luong nen. */
     private volatile boolean connectedFlag;
+    private volatile Status status;
 
     CardGateway(String host, int port) {
         this.host = host;
         this.port = port;
     }
 
-    /** Mo terminal qua socket provider, cho the, roi connect("*"). */
     Result connect() throws CardException, java.security.NoSuchAlgorithmException,
             java.security.NoSuchProviderException {
 
         if (card != null) {
-            return Result.fail("Da ket noi roi, phai Disconnect truoc");
+            return Result.fail("Đã kết nối rồi, phải Disconnect trước");
         }
 
         factory = TerminalFactory.getInstance(
@@ -83,132 +79,151 @@ final class CardGateway {
 
         List<CardTerminal> terminals = factory.terminals().list();
         if (terminals.isEmpty()) {
-            throw new CardException("Khong co terminal nao tu socket provider");
+            throw new CardException("Không có terminal nào từ socket provider");
         }
         terminal = terminals.get(0);
 
         if (!terminal.isCardPresent() && !terminal.waitForCardPresent(10_000)) {
-            throw new CardException("Khong co the tren terminal " + terminal.getName());
+            throw new CardException("Không có thẻ trên terminal " + terminal.getName());
         }
 
         card = terminal.connect("*");
         channel = card.getBasicChannel();
         ready = false;
+        status = null;
         connectedFlag = true;
 
         ATR atr = card.getATR();
         return Result.ok("terminal=" + terminal.getName() + " | ATR=" + hex(atr.getBytes()));
     }
 
-    /**
-     * Nhan dien Applet HelloWorld: SELECT AID roi chay probe ung dung.
-     *
-     * HelloWorld chua co GET_STATUS nen probe tam thoi la lenh echo. Khi chuyen
-     * sang Applet LabAccess, thay probeEcho() bang GET_STATUS theo header da chot.
-     */
     Result identify() throws CardException {
-        return identify(HELLOWORLD_AID, false);
+        return identifyWith(INSTANCE_AID);
     }
 
-    /** Nhan dien voi SELECT khong co du lieu AID (dung cho test am). */
-    Result identifyNoAid() throws CardException {
-        return identify(null, true);
-    }
-
-    /** Nhan dien voi mot AID bat ky (dung cho test am: AID khong ton tai). */
-    Result identifyWith(byte[] aid) throws CardException {
-        return identify(aid, false);
-    }
-
-    private Result identify(byte[] aid, boolean noAid) throws CardException {
+    Result identifyWith(byte[] instanceAid) throws CardException {
         requireConnected();
-
-        /* Moi lan nhan dien deu phai bat dau tu trang thai chua san sang */
         ready = false;
+        status = null;
 
-        CommandAPDU select = noAid
-                ? new CommandAPDU(0x00, 0xA4, 0x04, 0x00, new byte[0])
-                : new CommandAPDU(0x00, 0xA4, 0x04, 0x00, aid, 256);
-
-        ResponseAPDU selectResponse = channel.transmit(select);
-        boolean selectOk = selectResponse.getSW() == Sw.OK;
-
-        /* Luon chay probe ung dung, ke ca khi SELECT bao loi */
-        Result probe = probeEcho();
-
-        /* Chi ghi AID cong khai va SW; khong log raw CommandAPDU.
-           Cac lenh nghiep vu sau nay co the chua PIN ngay trong APDU. */
-        String detail = String.format(
-                "SELECT AID=%s SW=%04X | probe=%s | ket luan: %s",
-                noAid ? "<rong>" : hex(aid),
-                selectResponse.getSW(),
-                probe.text(),
-                (selectOk && probe.ok()) ? "SAN SANG" : "CHUA SAN SANG");
-
-        if (!selectOk) {
-            return Result.fail(detail + String.format(" (SELECT SW=%04X)", selectResponse.getSW()));
-        }
-        if (!probe.ok()) {
-            /* SELECT 9000 nhung applet khong tra loi dung: khong duoc coi la san sang */
-            return Result.fail(detail + " (" + probe.text() + ")");
+        ResponseAPDU selectResponse = channel.transmit(
+                new CommandAPDU(0x00, 0xA4, 0x04, 0x00, instanceAid, 256));
+        if (selectResponse.getSW() != Sw.OK) {
+            return Result.fail(String.format(
+                    "SELECT AID=%s SW=%04X | kết luận: CHƯA SẴN SÀNG",
+                    hex(instanceAid), selectResponse.getSW()));
         }
 
+        ResponseAPDU response = channel.transmit(
+                new CommandAPDU(CLA_APPLICATION, INS_GET_STATUS, 0x00, 0x00, 256));
+        Result checked = checkStatus(response, instanceAid);
+        if (!checked.ok()) {
+            return checked;
+        }
         ready = true;
-        return Result.ok(detail);
+        return checked;
     }
 
-    /**
-     * Gui echo va doi chieu toan bo data + SW voi phan hoi mong doi.
-     * KHONG phu thuoc trang thai ready — day chinh la buoc dung de xac lap ready.
-     */
-    Result probeEcho() throws CardException {
-        requireConnected();
-        CommandAPDU echo = new CommandAPDU(0x80, 0x20, 0x00, 0x00, ECHO_DATA);
-        return checkEcho(channel.transmit(echo));
-    }
-
-    /** Echo danh cho nguoi dung: chi khi da san sang. */
-    Result echo() throws CardException {
-        requireConnected();
-        if (!ready) {
-            return Result.fail("Chua san sang (phai SELECT + kiem tra thanh cong)");
-        }
-        return probeEcho();
-    }
-
-    private Result checkEcho(ResponseAPDU response) {
+    Result checkStatus(ResponseAPDU response, byte[] requestedAid) {
         byte[] data = response.getData();
-        byte[] actual = new byte[data.length + 2];
-        System.arraycopy(data, 0, actual, 0, data.length);
-        actual[data.length] = (byte) (response.getSW() >> 8);
-        actual[data.length + 1] = (byte) (response.getSW() & 0xFF);
+        int sw = response.getSW();
 
-        String text = String.format("Data=%s SW=%04X", hex(data), response.getSW());
+        if (sw != Sw.OK) {
+            return Result.fail(String.format(
+                    "GET_STATUS SW=%04X | kết luận: CHƯA SẴN SÀNG", sw));
+        }
+        if (data.length < OFFSET_INSTANCE_AID) {
+            return Result.fail(String.format(
+                    "GET_STATUS SW=%04X nhưng chỉ có %d byte | kết luận: CHƯA SẴN SÀNG",
+                    sw, data.length));
+        }
+        for (int i = 0; i < MAGIC.length; i++) {
+            if (data[i] != MAGIC[i]) {
+                return Result.fail("GET_STATUS sai magic: " + hex(Arrays.copyOf(data, MAGIC.length))
+                        + " | kết luận: CHƯA SẴN SÀNG");
+            }
+        }
 
-        if (response.getSW() != Sw.OK) {
-            return Result.fail(text);
+        int version = data[OFFSET_PROTOCOL_VERSION] & 0xFF;
+        if (version != PROTOCOL_VERSION) {
+            return Result.fail(String.format(
+                    "GET_STATUS protocol=%02X không hỗ trợ | kết luận: CHƯA SẴN SÀNG", version));
         }
-        if (!Arrays.equals(actual, ECHO_EXPECTED)) {
-            return Result.fail(text + " | du lieu echo khong khop 80200000053132333435");
+
+        int aidLength = data[OFFSET_AID_LENGTH] & 0xFF;
+        int expectedLength = OFFSET_INSTANCE_AID + aidLength + 1 + CARD_ID_LENGTH;
+        if (data.length != expectedLength) {
+            return Result.fail(String.format(
+                    "GET_STATUS %d byte, theo aidLen=%d phải là %d | kết luận: CHƯA SẴN SÀNG",
+                    data.length, aidLength, expectedLength));
         }
-        return Result.ok(text);
+
+        byte[] returnedAid = Arrays.copyOfRange(data, OFFSET_INSTANCE_AID,
+                OFFSET_INSTANCE_AID + aidLength);
+        if (!Arrays.equals(returnedAid, requestedAid)) {
+            return Result.fail(String.format(
+                    "GET_STATUS trả AID=%s khác AID đã yêu cầu=%s | kết luận: CHƯA SẴN SÀNG",
+                    hex(returnedAid), hex(requestedAid)));
+        }
+
+        int lifecycle = data[OFFSET_INSTANCE_AID + aidLength] & 0xFF;
+        byte[] cardId = Arrays.copyOfRange(data, OFFSET_INSTANCE_AID + aidLength + 1,
+                expectedLength);
+
+        Result lifecycleProblem = checkLifecycle(lifecycle, cardId);
+        if (lifecycleProblem != null) {
+            return lifecycleProblem;
+        }
+
+        Status current = new Status(version, lifecycle, hex(returnedAid), hex(cardId));
+        status = current;
+
+        return Result.ok(String.format(
+                "AID=%s protocol=%02X lifecycle=%s cardId=%s | kết luận: SẴN SÀNG",
+                current.instanceAid(), current.protocolVersion(),
+                lifecycleText(current.lifecycle()), current.cardId()));
     }
 
-    /**
-     * Gui mot INS khong duoc ho tro de tao ra mot lan that bai THAT SU tren the.
-     * Chi dung cho buoc kiem tra am cua demo.
-     */
-    Result failProbe() throws CardException {
-        requireConnected();
-        CommandAPDU command = new CommandAPDU(0x80, 0xFF, 0x00, 0x00);
-        ResponseAPDU response = channel.transmit(command);
-        ready = false;
-        return Result.fail(String.format("INS khong ho tro -> SW=%04X", response.getSW()));
+    private Result checkLifecycle(int lifecycle, byte[] cardId) {
+        if (lifecycle != LIFECYCLE_UNPERSONALIZED && lifecycle != LIFECYCLE_ISSUED) {
+            return Result.fail(String.format(
+                    "GET_STATUS lifecycle=%02X chưa được giao thức định nghĩa | kết luận: CHƯA SẴN SÀNG",
+                    lifecycle));
+        }
+        boolean cardIdAssigned = !isAllZero(cardId);
+        if (lifecycle == LIFECYCLE_UNPERSONALIZED && cardIdAssigned) {
+            return Result.fail(String.format(
+                    "lifecycle=00 UNPERSONALIZED nhưng cardId=%s đã gán | kết luận: CHƯA SẴN SÀNG",
+                    hex(cardId)));
+        }
+        if (lifecycle == LIFECYCLE_ISSUED && !cardIdAssigned) {
+            return Result.fail(String.format(
+                    "lifecycle=01 ISSUED nhưng cardId toàn 00 | kết luận: CHƯA SẴN SÀNG"));
+        }
+        return null;
     }
 
-    /** Dong ket noi, giai phong terminal. Khong gui DELETE nao len the. */
+    private static boolean isAllZero(byte[] value) {
+        for (byte b : value) {
+            if (b != 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+    static String lifecycleText(int lifecycle) {
+        if (lifecycle == 0x00) {
+            return "00 UNPERSONALIZED";
+        }
+        if (lifecycle == 0x01) {
+            return "01 ISSUED";
+        }
+        return String.format("%02X KHÔNG RÕ", lifecycle);
+    }
+
     Result disconnect() throws CardException {
         ready = false;
+        status = null;
         channel = null;
         terminal = null;
         factory = null;
@@ -221,10 +236,9 @@ final class CardGateway {
             card = null;
             connectedFlag = false;
         }
-        return wasConnected ? Result.ok("Da dong ket noi") : Result.ok("Von da ngat ket noi");
+        return wasConnected ? Result.ok("Đã đóng kết nối") : Result.ok("Vốn đã ngắt kết nối");
     }
 
-    /** Co the goi tu bat ky luong nao (chi doc co volatile). */
     boolean isConnected() {
         return connectedFlag;
     }
@@ -233,9 +247,13 @@ final class CardGateway {
         return ready;
     }
 
+    Status status() {
+        return status;
+    }
+
     private void requireConnected() {
         if (card == null || channel == null) {
-            throw new IllegalStateException("Chua ket noi");
+            throw new IllegalStateException("Chưa kết nối");
         }
     }
 

@@ -16,24 +16,16 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.Separator;
 import javafx.scene.control.TextArea;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
-/**
- * Gate 0 — smoke UI: Connect / SELECT+kiem tra / Echo / Disconnect qua
- * javax.smartcardio va socket provider cua Oracle Simulator.
- *
- * Khong co logic nghiep vu. Moi thao tac the chay tren mot executor nen tuan tu;
- * giao dien chi duoc cap nhat qua Platform.runLater.
- *
- * Khi dong cua so: dat closing=true, dung demo, khoa moi nut, roi moi xep hang
- * viec ngat ket noi tren cung executor I/O. Khong thao tac nao duoc xep sau do.
- */
 public class App extends Application {
 
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
@@ -42,7 +34,6 @@ public class App extends Application {
             System.getProperty("labaccess.host", "127.0.0.1"),
             Integer.getInteger("labaccess.port", 9025));
 
-    /* Executor tuan tu: the khong an toan da luong. */
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "card-io");
         t.setDaemon(true);
@@ -52,19 +43,21 @@ public class App extends Application {
     private TextArea logArea;
     private Label statusLabel;
 
+    private Label valueAid;
+    private Label valueProtocol;
+    private Label valueLifecycle;
+    private Label valueCardId;
+    private Label valueResult;
+
     private Button btnConnect;
-    private Button btnSelect;
-    private Button btnEcho;
+    private Button btnIdentify;
     private Button btnDisconnect;
 
-    /* Timeline phai giu thanh field de stop() duoc khi dong cua so. */
     private Timeline demoTimeline;
 
-    /* Bat true khi viec don dep da chay xong, cho watchdog biet khong can cuong che. */
     private final java.util.concurrent.atomic.AtomicBoolean cleanupDone =
             new java.util.concurrent.atomic.AtomicBoolean(false);
 
-    /* Trang thai chi doc/ghi tren FX thread. */
     private boolean busy;
     private boolean closing;
     private boolean uiConnected;
@@ -82,20 +75,41 @@ public class App extends Application {
                 + ":" + Integer.getInteger("labaccess.port", 9025));
 
         btnConnect = new Button("Connect");
-        btnSelect = new Button("SELECT + kiem tra");
-        btnEcho = new Button("Echo");
+        btnIdentify = new Button("SELECT + GET_STATUS");
         btnDisconnect = new Button("Disconnect");
 
         btnConnect.setOnAction(e -> doConnect());
-        btnSelect.setOnAction(e -> doSelect());
-        btnEcho.setOnAction(e -> doEcho());
+        btnIdentify.setOnAction(e -> doIdentify());
         btnDisconnect.setOnAction(e -> doDisconnect());
 
-        HBox buttons = new HBox(10, btnConnect, btnSelect, btnEcho, btnDisconnect);
+        HBox buttons = new HBox(10, btnConnect, btnIdentify, btnDisconnect);
         buttons.setAlignment(Pos.CENTER_LEFT);
         buttons.setPadding(new Insets(10));
 
-        statusLabel = new Label("Chua ket noi");
+        valueAid = infoValue();
+        valueProtocol = infoValue();
+        valueLifecycle = infoValue();
+        valueCardId = infoValue();
+        valueResult = infoValue();
+
+        GridPane info = new GridPane();
+        info.setHgap(12);
+        info.setVgap(6);
+        info.setPadding(new Insets(4, 10, 10, 10));
+        info.add(infoCaption("Instance AID"), 0, 0);
+        info.add(valueAid, 1, 0);
+        info.add(infoCaption("Protocol"), 0, 1);
+        info.add(valueProtocol, 1, 1);
+        info.add(infoCaption("Lifecycle"), 0, 2);
+        info.add(valueLifecycle, 1, 2);
+        info.add(infoCaption("Card ID"), 0, 3);
+        info.add(valueCardId, 1, 3);
+        info.add(infoCaption("Nhận diện"), 0, 4);
+        info.add(valueResult, 1, 4);
+
+        VBox top = new VBox(buttons, new Separator(), info);
+
+        statusLabel = new Label("Chưa kết nối");
         statusLabel.setId("status");
         statusLabel.setStyle("-fx-font-family: 'Consolas', monospace; -fx-font-size: 12px;");
         HBox statusBar = new HBox(statusLabel);
@@ -108,23 +122,24 @@ public class App extends Application {
         VBox.setVgrow(logArea, Priority.ALWAYS);
 
         BorderPane root = new BorderPane();
-        root.setTop(buttons);
+        root.setTop(top);
         root.setCenter(logArea);
         root.setBottom(statusBar);
 
-        Scene scene = new Scene(root, 980, 560);
-        stage.setTitle("LabAccess Gate 0 — JavaFX smoke (PID " + pid + ")");
+        Scene scene = new Scene(root, 980, 620);
+        stage.setTitle("LabAccess — nhận diện applet (PID " + pid + ")");
         stage.setScene(scene);
         stage.setOnCloseRequest(e -> {
             if (closing) {
-                return;   /* dang dong, bo qua yeu cau lap lai */
+                return;
             }
-            e.consume();  /* hoan viec dong lai cho toi khi da ngat ket noi */
+            e.consume();
             closing = true;
             shutdown();
         });
         stage.show();
 
+        clearInfo();
         updateButtons();
 
         if (Boolean.getBoolean("labaccess.demo")) {
@@ -133,50 +148,75 @@ public class App extends Application {
         }
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Actions                                                            */
-    /* ------------------------------------------------------------------ */
+    private static Label infoCaption(String text) {
+        Label label = new Label(text);
+        label.setStyle("-fx-font-family: 'Consolas', monospace; -fx-font-size: 12px;"
+                + " -fx-text-fill: #555555;");
+        return label;
+    }
+
+    private static Label infoValue() {
+        Label label = new Label("-");
+        label.setId("value");
+        label.setStyle("-fx-font-family: 'Consolas', monospace; -fx-font-size: 12px;");
+        return label;
+    }
 
     private void doConnect() {
         runOp("CONNECT", gateway::connect, ok -> {
             uiConnected = ok;
             uiReady = false;
+            clearInfo();
         });
     }
 
-    /** SELECT + kiem tra: chi dat ready khi ca SW lan probe deu dat. */
-    private void doSelect() {
-        runOp("SELECT + kiem tra", gateway::identify, ok -> uiReady = ok);
-    }
-
-    /** Test am: SELECT khong co AID -> Simulator tra 9000 nhung probe phai hong. */
-    private void doSelectNoAid() {
-        runOp("SELECT khong AID + kiem tra", gateway::identifyNoAid, ok -> uiReady = ok);
-    }
-
-    private void doEcho() {
-        runOp("ECHO", gateway::echo, null);
+    private void doIdentify() {
+        runOp("SELECT + GET_STATUS", gateway::identify, ok -> {
+            uiReady = ok;
+            showStatus();
+        });
     }
 
     private void doDisconnect() {
         runOp("DISCONNECT", gateway::disconnect, ok -> {
             uiConnected = false;
             uiReady = false;
+            clearInfo();
         });
     }
 
-    /**
-     * Chay mot thao tac the tren luong nen, khoa nut trong luc xu ly.
-     * onResult nhan CA true va false de UI khong giu trang thai cu khi that bai.
-     * Tu choi moi thao tac moi khi dang dong cua so.
-     */
+    private void showStatus() {
+        CardGateway.Status status = gateway.status();
+        if (!uiReady || status == null) {
+            valueAid.setText("-");
+            valueProtocol.setText("-");
+            valueLifecycle.setText("-");
+            valueCardId.setText("-");
+            valueResult.setText("CHƯA SẴN SÀNG");
+            return;
+        }
+        valueAid.setText(status.instanceAid());
+        valueProtocol.setText(String.format("%02X", status.protocolVersion()));
+        valueLifecycle.setText(CardGateway.lifecycleText(status.lifecycle()));
+        valueCardId.setText(status.cardId());
+        valueResult.setText("SẴN SÀNG");
+    }
+
+    private void clearInfo() {
+        valueAid.setText("-");
+        valueProtocol.setText("-");
+        valueLifecycle.setText("-");
+        valueCardId.setText("-");
+        valueResult.setText("CHƯA SẴN SÀNG");
+    }
+
     private void runOp(String label, Callable<CardGateway.Result> op, Consumer<Boolean> onResult) {
         if (closing) {
-            log("[" + label + "] bo qua — dang dong cua so");
+            log("[" + label + "] bỏ qua — đang đóng cửa sổ");
             return;
         }
         if (busy) {
-            log("[" + label + "] bo qua — dang xu ly thao tac khac");
+            log("[" + label + "] bỏ qua — đang xử lý thao tác khác");
             return;
         }
         busy = true;
@@ -207,75 +247,62 @@ public class App extends Application {
     }
 
     private void updateButtons() {
-        /* Dang dong: khoa toan bo, khong cho bat ky thao tac moi */
         if (closing) {
             btnConnect.setDisable(true);
-            btnSelect.setDisable(true);
-            btnEcho.setDisable(true);
+            btnIdentify.setDisable(true);
             btnDisconnect.setDisable(true);
-            statusLabel.setText("Trang thai: dang dong cua so");
+            statusLabel.setText("Trạng thái: đang đóng cửa sổ");
             return;
         }
 
-        boolean connected = uiConnected;
-        boolean ready = uiReady;
+        btnConnect.setDisable(busy || uiConnected);
+        btnIdentify.setDisable(busy || !uiConnected);
+        btnDisconnect.setDisable(busy || !uiConnected);
 
-        btnConnect.setDisable(busy || connected);
-        btnSelect.setDisable(busy || !connected);
-        /* Echo chi bat sau khi SELECT + kiem tra thanh cong */
-        btnEcho.setDisable(busy || !connected || !ready);
-        btnDisconnect.setDisable(busy || !connected);
-
-        String state = busy ? "dang xu ly"
-                : !connected ? "chua ket noi"
-                : !ready ? "da ket noi, chua san sang"
-                : "da ket noi, san sang";
-        statusLabel.setText("Trang thai: " + state);
+        String state = busy ? "đang xử lý"
+                : !uiConnected ? "chưa kết nối"
+                : !uiReady ? "đã kết nối, chưa sẵn sàng"
+                : "đã kết nối, sẵn sàng";
+        statusLabel.setText("Trạng thái: " + state);
     }
-
-    /* ------------------------------------------------------------------ */
 
     private void log(String message) {
         System.out.println("[" + LocalTime.now().format(TS) + "] " + message);
         if (logArea != null) {
-            logArea.appendText("[" + LocalTime.now().format(TS) + "] " + message + System.lineSeparator());
+            logArea.appendText("[" + LocalTime.now().format(TS) + "] " + message
+                    + System.lineSeparator());
             logArea.setScrollTop(Double.MAX_VALUE);
         }
     }
 
-    /**
-     * Dong cua so theo kieu hoan: dung demo, khoa nut, ngat ket noi the tren
-     * luong nen (khong chan UI), roi moi thoat.
-     */
     private void shutdown() {
-        log("Dong cua so — dung demo va ngat ket noi tren luong nen");
+        log("Đóng cửa sổ — dừng demo và ngắt kết nối trên luồng nền");
 
         if (demoTimeline != null) {
             demoTimeline.stop();
             demoTimeline = null;
-            log("DEMO: da dung Timeline");
+            log("DEMO: đã dừng Timeline");
         }
 
-        updateButtons();   /* closing=true => khoa het */
+        updateButtons();
 
-        String pending = busy ? "co thao tac dang chay, se xep sau khi xong" : "khong co thao tac dang chay";
-        log("Dong cua so — " + pending);
+        String pending = busy ? "có thao tác đang chạy, sẽ xếp sau khi xong"
+                : "không có thao tác đang chạy";
+        log("Đóng cửa sổ — " + pending);
 
-        /* Xep hang viec don dep SAU cung tren cung executor I/O */
         worker.submit(() -> {
             String line;
             try {
-                line = "[OK]   Dong ket noi: " + gateway.disconnect().text();
+                line = "[OK]   Đóng kết nối: " + gateway.disconnect().text();
             } catch (Exception ex) {
-                line = "[ERROR] Loi khi dong ket noi: " + ex;
+                line = "[ERROR] Lỗi khi đóng kết nối: " + ex;
             }
             final String lineFinal = line;
             cleanupDone.set(true);
             Platform.runLater(() -> {
                 log(lineFinal);
-                log("Dong cua so — thoat");
+                log("Đóng cửa sổ — thoát");
                 worker.shutdownNow();
-                /* cac luong card-io la daemon nen JVM thoat du I/O con treo */
                 Platform.exit();
             });
         });
@@ -283,10 +310,6 @@ public class App extends Application {
         startCloseWatchdog();
     }
 
-    /**
-     * Neu mot thao tac the dang bi treo vo han, viec don dep xep sau se khong bao gio
-     * chay va cua so khong dong duoc. Watchdog cuong che thoat sau 5 giay.
-     */
     private void startCloseWatchdog() {
         Thread watchdog = new Thread(() -> {
             try {
@@ -298,7 +321,7 @@ public class App extends Application {
                 return;
             }
             Platform.runLater(() -> {
-                log("Dong cua so — qua 5s chua don dep xong, cuong che thoat");
+                log("Đóng cửa sổ — quá 5s chưa dọn dẹp xong, cưỡng chế thoát");
                 Platform.exit();
             });
         }, "close-watchdog");
@@ -306,24 +329,11 @@ public class App extends Application {
         watchdog.start();
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Demo: tu bam dung cac nut do, khong di tat qua logic              */
-    /* ------------------------------------------------------------------ */
-
     private void startDemo() {
-        log("DEMO: tu dong bam nut theo thu tu (cung handler voi nguoi dung)");
+        log("DEMO: tự động bấm nút theo thứ tự (cùng handler với người dùng)");
         Runnable[] steps = {
                 () -> fire(btnConnect, "Connect"),
-                /* Am 1: Echo phai bi khoa truoc khi san sang */
-                () -> fire(btnEcho, "Echo truoc SELECT (ky vong bi khoa)"),
-                () -> fire(btnSelect, "SELECT + kiem tra"),
-                () -> fire(btnEcho, "Echo"),
-                /* Am 2: SELECT khong AID -> SW 9000 nhung probe hong => chua san sang */
-                () -> runDemoSelectNoAid(),
-                /* Sau buoc am, Echo phai bi khoa lai */
-                () -> fire(btnEcho, "Echo sau nhan dien that bai (ky vong bi khoa)"),
-                () -> fire(btnSelect, "SELECT + kiem tra"),
-                () -> fire(btnEcho, "Echo"),
+                () -> fire(btnIdentify, "SELECT + GET_STATUS"),
                 () -> fire(btnDisconnect, "Disconnect"),
         };
 
@@ -331,10 +341,10 @@ public class App extends Application {
         for (int i = 0; i < steps.length; i++) {
             final Runnable step = steps[i];
             demoTimeline.getKeyFrames()
-                    .add(new KeyFrame(Duration.millis(800 + i * 2000L), e -> step.run()));
+                    .add(new KeyFrame(Duration.millis(800 + i * 5000L), e -> step.run()));
         }
         demoTimeline.getKeyFrames().add(new KeyFrame(
-                Duration.millis(800 + steps.length * 2000L),
+                Duration.millis(800 + steps.length * 5000L),
                 e -> {
                     log("DEMO: xong");
                     updateButtons();
@@ -344,20 +354,10 @@ public class App extends Application {
 
     private void fire(Button button, String name) {
         if (button.isDisabled()) {
-            log("DEMO: bo qua buoc " + name + " (nut dang bi khoa)");
+            log("DEMO: bỏ qua bước " + name + " (nút đang bị khoá)");
             return;
         }
         button.fire();
-    }
-
-    /** Buoc demo: nhan dien bang SELECT khong co AID (khong co nut rieng tren UI). */
-    private void runDemoSelectNoAid() {
-        if (busy || closing) {
-            log("DEMO: bo qua buoc SELECT khong AID (dang ban hoac dang dong)");
-            return;
-        }
-        doSelectNoAid();
-        log("DEMO: sau buoc nay Echo phai bi khoa neu xu ly dung");
     }
 
     public static void main(String[] args) {
