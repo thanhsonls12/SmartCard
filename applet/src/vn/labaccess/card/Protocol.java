@@ -8,6 +8,8 @@ final class Protocol {
     static final byte INS_CHANGE_STUDENT_PIN = (byte) 0x21;
     static final byte INS_UNBLOCK_STUDENT_PIN = (byte) 0x23;
     static final byte INS_PERSONALIZE = (byte) 0x30;
+    static final byte INS_GET_PROFILE = (byte) 0x31;
+    static final byte INS_GET_PROFILE_CRYPTO_META = (byte) 0x40;
     static final byte INS_GET_CARD_PUBLIC_KEY = (byte) 0x61;
 
     static final byte PROTOCOL_VERSION = (byte) 0x01;
@@ -29,6 +31,30 @@ final class Protocol {
     static final byte STUDENT_PIN_MAX_TRIES = (byte) 3;
     static final byte ASCII_DIGIT_ZERO = (byte) '0';
     static final byte ASCII_DIGIT_NINE = (byte) '9';
+
+    static final short STUDENT_ID_MAX_LENGTH = (short) 32;
+    static final short DISPLAY_NAME_MAX_LENGTH = (short) 96;
+
+    static final short PROFILE_OFFSET_SCHEMA_VERSION = (short) 0;
+    static final short PROFILE_OFFSET_STUDENT_ID_LENGTH = (short) 1;
+    static final short PROFILE_OFFSET_STUDENT_ID = (short) 2;
+    static final short PROFILE_MIN_LENGTH = (short) 5;
+    static final short PROFILE_MAX_LENGTH = (short) 131;
+
+    static final short PROFILE_META_OFFSET_RECORD_VERSION = (short) 0;
+    static final short PROFILE_META_OFFSET_ALGORITHM_ID = (short) 1;
+    static final short PROFILE_META_OFFSET_SCHEMA_VERSION = (short) 2;
+    static final short PROFILE_META_OFFSET_CIPHERTEXT_LENGTH = (short) 3;
+    static final short PROFILE_META_OFFSET_NONCE =
+            (short) (PROFILE_META_OFFSET_CIPHERTEXT_LENGTH + 2);
+    static final short PROFILE_META_OFFSET_TAG =
+            (short) (PROFILE_META_OFFSET_NONCE + ProfileCrypto.GCM_NONCE_LENGTH);
+    static final short PROFILE_META_OFFSET_CIPHERTEXT_HASH =
+            (short) (PROFILE_META_OFFSET_TAG + ProfileCrypto.GCM_TAG_LENGTH);
+    static final short PROFILE_META_CIPHERTEXT_HASH_LENGTH = (short) 32;
+    static final short PROFILE_META_RESPONSE_LENGTH =
+            (short) (PROFILE_META_OFFSET_CIPHERTEXT_HASH + PROFILE_META_CIPHERTEXT_HASH_LENGTH);
+
 
     static final byte VERIFY_STUDENT_PIN_DATA_LENGTH = STUDENT_PIN_LENGTH;
     static final byte CHANGE_STUDENT_PIN_DATA_LENGTH = (byte) (STUDENT_PIN_LENGTH * 2);
@@ -65,5 +91,13 @@ final class Protocol {
 
     static short cardIdOffset(byte instanceAidLength) {
         return (short) (lifecycleOffset(instanceAidLength) + 1);
+    }
+
+    static short profileDisplayNameLengthOffset(short studentIdLength) {
+        return (short) (PROFILE_OFFSET_STUDENT_ID + studentIdLength);
+    }
+
+    static short profileResponseLength(short studentIdLength, short displayNameLength) {
+        return (short) (profileDisplayNameLengthOffset(studentIdLength) + 1 + displayNameLength);
     }
 }

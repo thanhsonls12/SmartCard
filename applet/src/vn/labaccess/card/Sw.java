@@ -18,6 +18,8 @@ final class Sw {
 
     static final short PIN_BLOCKED = (short) 0x6983;
 
+    static final short SECURITY_STATUS_NOT_SATISFIED = (short) 0x6982;
+
     static final short CONDITIONS_NOT_SATISFIED = (short) 0x6985;
 
     static final short INTERNAL_ERROR = (short) 0x6F00;

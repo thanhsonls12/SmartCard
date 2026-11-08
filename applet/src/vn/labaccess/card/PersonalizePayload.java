@@ -15,9 +15,6 @@ final class PersonalizePayload {
 
     static final byte ADMIN_PIN_LENGTH_FIELD = (byte) 8;
 
-    static final short STUDENT_ID_MAX_LENGTH = (short) 32;
-    static final short DISPLAY_NAME_MAX_LENGTH = (short) 96;
-
     private static final short UNSIGNED_BYTE_MASK = 0x00FF;
 
     private static final byte ASCII_DASH = (byte) '-';
@@ -60,7 +57,7 @@ final class PersonalizePayload {
         }
         requireNonZeroCardId(buffer);
         short studentIdLength = studentIdLength(buffer);
-        if (studentIdLength < (short) 1 || studentIdLength > STUDENT_ID_MAX_LENGTH) {
+        if (studentIdLength < (short) 1 || studentIdLength > Protocol.STUDENT_ID_MAX_LENGTH) {
             ISOException.throwIt(Sw.WRONG_DATA);
         }
         short studentPinOffset = studentPinOffset(buffer);
@@ -69,7 +66,8 @@ final class PersonalizePayload {
             ISOException.throwIt(Sw.WRONG_LENGTH);
         }
         short displayNameLength = (short) (buffer[nameLengthOffset] & UNSIGNED_BYTE_MASK);
-        if (displayNameLength < (short) 1 || displayNameLength > DISPLAY_NAME_MAX_LENGTH) {
+        if (displayNameLength < (short) 1
+                || displayNameLength > Protocol.DISPLAY_NAME_MAX_LENGTH) {
             ISOException.throwIt(Sw.WRONG_DATA);
         }
         if ((short) (nameLengthOffset + 1 + displayNameLength) != lc) {

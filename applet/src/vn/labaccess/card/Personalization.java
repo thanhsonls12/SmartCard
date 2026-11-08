@@ -104,4 +104,14 @@ final class Personalization {
     void readPublicKey(byte[] target, short offset) {
         ecKeys.publicKey().getW(target, offset);
     }
+
+    short readProfilePlaintext(byte[] plaintext) {
+        return crypto.decryptStoredRecord(state.profileCiphertext(),
+                state.profileCiphertextLength(), plaintext);
+    }
+
+    short readProfileMetadata(byte[] target) {
+        return crypto.writeMetadata(state.profileCiphertext(),
+                state.profileCiphertextLength(), state.profilePlaintext(), target);
+    }
 }

@@ -77,6 +77,14 @@ public final class LabAccessApplet extends Applet {
                 handlePersonalize(apdu, buffer);
                 return;
             }
+            if (ins == Protocol.INS_GET_PROFILE) {
+                handleGetProfile(apdu, buffer);
+                return;
+            }
+            if (ins == Protocol.INS_GET_PROFILE_CRYPTO_META) {
+                handleGetProfileCryptoMeta(apdu, buffer);
+                return;
+            }
             if (ins == Protocol.INS_GET_CARD_PUBLIC_KEY) {
                 handleGetCardPublicKey(apdu, buffer);
                 return;
@@ -162,7 +170,7 @@ public final class LabAccessApplet extends Applet {
         return lc;
     }
 
-    private void requirePinCommandP1P2(byte[] buffer) {
+    private void requireZeroP1P2(byte[] buffer) {
         if (buffer[ISO7816.OFFSET_P1] != Protocol.P1P2_ZERO
                 || buffer[ISO7816.OFFSET_P2] != Protocol.P1P2_ZERO) {
             ISOException.throwIt(Sw.WRONG_P1P2);
@@ -196,7 +204,7 @@ public final class LabAccessApplet extends Applet {
 
     private void handleVerifyStudentPin(APDU apdu, byte[] buffer) {
         try {
-            requirePinCommandP1P2(buffer);
+            requireZeroP1P2(buffer);
             state.ensureCommandBuffer();
             short lc = receiveCommandData(apdu, buffer, state.commandData(),
                     MAX_PIN_COMMAND_DATA);
@@ -219,7 +227,7 @@ public final class LabAccessApplet extends Applet {
     private void handleChangeStudentPin(APDU apdu, byte[] buffer) {
         boolean transactionStarted = false;
         try {
-            requirePinCommandP1P2(buffer);
+            requireZeroP1P2(buffer);
             state.ensureCommandBuffer();
             short lc = receiveCommandData(apdu, buffer, state.commandData(),
                     MAX_PIN_COMMAND_DATA);
@@ -257,7 +265,7 @@ public final class LabAccessApplet extends Applet {
     private void handleUnblockStudentPin(APDU apdu, byte[] buffer) {
         boolean transactionStarted = false;
         try {
-            requirePinCommandP1P2(buffer);
+            requireZeroP1P2(buffer);
             state.ensureCommandBuffer();
             short lc = receiveCommandData(apdu, buffer, state.commandData(),
                     MAX_PIN_COMMAND_DATA);
@@ -326,6 +334,55 @@ public final class LabAccessApplet extends Applet {
             Util.arrayFillNonAtomic(buffer, ISO7816.OFFSET_CDATA,
                     MAX_COMMAND_DATA, (byte) 0);
             state.clearCommandData();
+        }
+    }
+
+    private void handleGetProfile(APDU apdu, byte[] buffer) {
+        try {
+            requireZeroP1P2(buffer);
+            short expectedLength = (short) (state.profileCiphertextLength()
+                    - ProfileCrypto.RECORD_HEADER_LENGTH - ProfileCrypto.GCM_TAG_LENGTH);
+            short ne = apdu.setOutgoing();
+            if (ne == (short) 0 || ne < expectedLength) {
+                ISOException.throwIt(Sw.WRONG_LENGTH);
+            }
+            if (!state.isIssued()) {
+                ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            if (!pins.isStudentAuthorized()) {
+                ISOException.throwIt(Sw.SECURITY_STATUS_NOT_SATISFIED);
+            }
+            byte[] plaintext = state.profilePlaintext();
+            short plaintextLength = personalization.readProfilePlaintext(plaintext);
+            ProfileCodec.requireSchemaV1(plaintext, plaintextLength);
+            Util.arrayCopyNonAtomic(plaintext, (short) 0, buffer, (short) 0, plaintextLength);
+            apdu.setOutgoingLength(plaintextLength);
+            apdu.sendBytes((short) 0, plaintextLength);
+        } finally {
+            state.clearWorkingBuffers();
+            pins.clearStudentAuthorization();
+        }
+    }
+
+    private void handleGetProfileCryptoMeta(APDU apdu, byte[] buffer) {
+        try {
+            requireZeroP1P2(buffer);
+            short ne = apdu.setOutgoing();
+            if (ne == (short) 0 || ne < Protocol.PROFILE_META_RESPONSE_LENGTH) {
+                ISOException.throwIt(Sw.WRONG_LENGTH);
+            }
+            if (!state.isIssued()) {
+                ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            if (!pins.isStudentAuthorized()) {
+                ISOException.throwIt(Sw.SECURITY_STATUS_NOT_SATISFIED);
+            }
+            short metadataLength = personalization.readProfileMetadata(buffer);
+            apdu.setOutgoingLength(metadataLength);
+            apdu.sendBytes((short) 0, metadataLength);
+        } finally {
+            state.clearWorkingBuffers();
+            pins.clearStudentAuthorization();
         }
     }
 
