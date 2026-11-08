@@ -4,6 +4,8 @@ final class Protocol {
 
     static final byte CLA_APPLICATION = (byte) 0x80;
     static final byte INS_GET_STATUS = (byte) 0x10;
+    static final byte INS_PERSONALIZE = (byte) 0x30;
+    static final byte INS_GET_CARD_PUBLIC_KEY = (byte) 0x61;
 
     static final byte PROTOCOL_VERSION = (byte) 0x01;
 
@@ -25,8 +27,10 @@ final class Protocol {
 
     static final byte P1_GET_STATUS = (byte) 0x00;
     static final byte P2_GET_STATUS = (byte) 0x00;
+    static final byte P1P2_ZERO = (byte) 0x00;
 
     static final byte LIFECYCLE_UNPERSONALIZED = (byte) 0x00;
+    static final byte LIFECYCLE_ISSUED = (byte) 0x01;
     static final short CARD_ID_LENGTH = (short) 8;
     static final byte CARD_ID_UNASSIGNED = (byte) 0x00;
 
