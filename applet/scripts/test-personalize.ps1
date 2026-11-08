@@ -75,6 +75,17 @@ if ($testCapFiles.Count -ne 1) {
     Stop-Test 'Expected exactly one isolated test CAP; run build.ps1 first'
 }
 $testCapPath = $testCapFiles[0].FullName
+$variantRoot = Join-Path $buildDir 'variants'
+$variantNames = @('ciphertext', 'tag', 'nonce', 'counter-near-max',
+    'quota-fault-before-commit', 'quota-fault-after-commit',
+    'visit-counter-near-max', 'visit-fault-before-commit', 'visit-fault-after-commit',
+    'receipt-fault-before-commit', 'receipt-signature-too-long')
+foreach ($variantName in $variantNames) {
+    $candidate = Join-Path $variantRoot "$variantName-deliverables/vn/labaccess/card/javacard/card.cap"
+    if (-not (Test-Path $candidate)) {
+        Stop-Test "Missing variant CAP for $variantName; run build.ps1 first"
+    }
+}
 $testPins = @()
 while ($testPins.Count -lt 4) {
     $length = if ($testPins.Count -eq 0) { 8 } else { 6 }
@@ -87,12 +98,22 @@ $adminPin = $testPins[0]
 $stamp = Get-Date -Format 'yyyyMMdd-HHmm'
 $logFile = Join-Path $logDir "gate1-pin-runtime-$stamp.log"
 Write-Host '[2/3] Run test AID EE01 scenarios'
+$artifactsPath = Join-Path $buildDir 'receipt-artifacts.jsonl'
 $result = Invoke-Native {
     ($testPins -join "`n") | & $java --module-path "$amserviceJar;$socketJar" --add-modules ALL-MODULE-PATH `
-        -cp $toolsOut PersonalizeSelfTest $propsFile $testCapPath
+        -cp $toolsOut PersonalizeSelfTest $propsFile $testCapPath $variantRoot $artifactsPath
 }
 $result.Output | ForEach-Object { Write-Host $_ }
-[System.IO.File]::WriteAllLines($logFile, [string[]]$result.Output,
+$harnessLines = @($result.Output)
+[System.IO.File]::WriteAllLines($logFile, [string[]]$harnessLines,
+    (New-Object System.Text.UTF8Encoding($false)))
+
+Write-Host '[2b/3] Verify receipt signatures with Node.js'
+$nodeScript = Join-Path $PSScriptRoot 'verify-receipts.js'
+$nodeResult = Invoke-Native { & node $nodeScript $artifactsPath }
+$nodeResult.Output | ForEach-Object { Write-Host $_ }
+$nodeLines = @('', '--- Node.js verify-receipts.js ---') + @($nodeResult.Output)
+[System.IO.File]::AppendAllLines($logFile, [string[]]$nodeLines,
     (New-Object System.Text.UTF8Encoding($false)))
 
 $needles = @()
@@ -101,6 +122,14 @@ foreach ($pin in $testPins) {
     $hex = @($bytes | ForEach-Object { $_.ToString('x2') })
     $needles += $pin, ($hex -join ''), ($hex -join ' '), ($hex -join ':')
 }
+$profileStudentId = 'SV2024-001'
+$profileDisplayName = 'Nguyen Van A'
+$profilePlaintext = @(1, $profileStudentId.Length) +
+    [System.Text.Encoding]::ASCII.GetBytes($profileStudentId) +
+    @($profileDisplayName.Length) +
+    [System.Text.Encoding]::UTF8.GetBytes($profileDisplayName)
+$profileHex = @($profilePlaintext | ForEach-Object { ([byte]$_).ToString('x2') })
+$needles += $profileStudentId, $profileDisplayName, ($profileHex -join '')
 $testPins = $null
 $adminPin = $null
 $bytes = $null
@@ -150,4 +179,8 @@ if ($leaks.Count -gt 0) {
 }
 Write-Host "      Scanned $scanCount log files; no PIN leak found"
 Write-Host "Log: $logFile"
+if ($nodeResult.ExitCode -ne 0) {
+    Write-Host "      Node receipt verification FAILED (exit $($nodeResult.ExitCode))"
+    exit 1
+}
 exit $result.ExitCode

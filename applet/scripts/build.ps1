@@ -147,6 +147,201 @@ $testConvert.Output | ForEach-Object { Write-Host "      $_" }
 if (($testConvert.ExitCode -ne 0) -or (-not ($testConvert.Output -match 'conversion completed with 0 errors and 0 warnings'))) {
     Stop-Build 'converter test' "converter test that bai (xem $testConvertLog)"
 }
+$variantsDir = Join-Path $buildDir 'variants'
+if (Test-Path $variantsDir) {
+    Remove-Item -Recurse -Force $variantsDir
+}
+New-Item -ItemType Directory -Force -Path $variantsDir | Out-Null
+$recordHeaderAnchor = '        target[(short) 0] = PROFILE_RECORD_VERSION;'
+$variants = @(
+    [pscustomobject]@{
+        Name = 'ciphertext'
+        Target = 'vn/labaccess/card/ProfileCrypto.java'
+        Anchor = $recordHeaderAnchor
+        Lines = @('        target[RECORD_HEADER_LENGTH] = (byte) (target[RECORD_HEADER_LENGTH] ^ 0x01);')
+    },
+    [pscustomobject]@{
+        Name = 'tag'
+        Target = 'vn/labaccess/card/ProfileCrypto.java'
+        Anchor = $recordHeaderAnchor
+        Lines = @('        target[(short) (RECORD_HEADER_LENGTH + ciphertextLength)] = (byte) (target[(short) (RECORD_HEADER_LENGTH + ciphertextLength)] ^ 0x01);')
+    },
+    [pscustomobject]@{
+        Name = 'nonce'
+        Target = 'vn/labaccess/card/ProfileCrypto.java'
+        Anchor = $recordHeaderAnchor
+        Lines = @('        target[RECORD_HEADER_OFFSET_NONCE] = (byte) (target[RECORD_HEADER_OFFSET_NONCE] ^ 0x01);')
+    },
+    [pscustomobject]@{
+        Name = 'counter-near-max'
+        Target = 'vn/labaccess/card/QuotaLedger.java'
+        Anchor = '        counter3 = (byte) 0;'
+        Occurrence = 1
+        After = $true
+        Lines = @(
+            '        counter0 = COUNTER_MAX_BYTE;',
+            '        counter1 = COUNTER_MAX_BYTE;',
+            '        counter2 = COUNTER_MAX_BYTE;',
+            '        counter3 = (byte) 0xFE;'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'quota-fault-before-commit'
+        Target = 'vn/labaccess/card/LabAccessApplet.java'
+        Anchor = '            ledger.setBalance(balanceAfter);'
+        Lines = @(
+            '            if (delta == (short) 7777) {',
+            '                ISOException.throwIt(Sw.INTERNAL_ERROR);',
+            '            }'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'quota-fault-after-commit'
+        Target = 'vn/labaccess/card/LabAccessApplet.java'
+        Anchor = '            started = false;'
+        After = $true
+        Lines = @(
+            '            if (delta == (short) 8888) {',
+            '                ISOException.throwIt(Sw.INTERNAL_ERROR);',
+            '            }'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'visit-counter-near-max'
+        Target = 'vn/labaccess/card/QuotaLedger.java'
+        Anchor = '        counter3 = (byte) 0;'
+        Occurrence = 1
+        After = $true
+        Lines = @(
+            '        counter0 = COUNTER_MAX_BYTE;',
+            '        counter1 = COUNTER_MAX_BYTE;',
+            '        counter2 = COUNTER_MAX_BYTE;',
+            '        counter3 = (byte) 0xFD;'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'visit-fault-before-commit'
+        Target = 'vn/labaccess/card/LabAccessApplet.java'
+        Anchor = '                visits.open(visitId, visitIdOffset);'
+        After = $true
+        Lines = @(
+            '            if (visitId[(short) 0] == (byte) 0xAA) {',
+            '                ISOException.throwIt(Sw.INTERNAL_ERROR);',
+            '            }'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'visit-fault-after-commit'
+        Target = 'vn/labaccess/card/LabAccessApplet.java'
+        Anchor = '            writeStateResponse(ledger, buffer);'
+        Occurrence = 2
+        Lines = @(
+            '            if (visitId[(short) 0] == (byte) 0xAA) {',
+            '                ISOException.throwIt(Sw.INTERNAL_ERROR);',
+            '            }'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'receipt-fault-before-commit'
+        Target = 'vn/labaccess/card/LabAccessApplet.java'
+        Anchor = '            receipt.store();'
+        After = $true
+        Lines = @(
+            '            if (delta == (short) 7777) {',
+            '                ISOException.throwIt(Sw.INTERNAL_ERROR);',
+            '            }'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'receipt-signature-too-long'
+        Target = 'vn/labaccess/card/Receipt.java'
+        Anchor = '        if (stagedSignatureLength <= (short) 0'
+        Lines = @(
+            '        stagedSignatureLength = (short) 73;'
+        )
+    }
+)
+foreach ($variant in $variants) {
+    $name = $variant.Name
+    $targetRelative = $variant.Target -replace '/', '\'
+    $nameClasses = Join-Path $variantsDir "$name-classes"
+    $generatedSource = Join-Path $variantsDir "$name-src/$targetRelative"
+    New-Item -ItemType Directory -Force -Path (Split-Path $generatedSource -Parent), $nameClasses | Out-Null
+
+    $targetSources = @($sources | Where-Object { $_ -like "*$targetRelative" })
+    if ($targetSources.Count -ne 1) {
+        Stop-Build 'variant' "Khong xac dinh duy nhat duoc $targetRelative trong $srcDir"
+    }
+    $original = [System.IO.File]::ReadAllLines($targetSources[0])
+    $anchorIndexes = @(for ($index = 0; $index -lt $original.Length; $index++) {
+            if ($original[$index] -ceq $variant.Anchor) { $index }
+        })
+    $wanted = if ($variant.PSObject.Properties['Occurrence']) { $variant.Occurrence } else { 1 }
+    if ($anchorIndexes.Count -lt $wanted) {
+        Stop-Build 'variant' "Diem chen cua $name xuat hien $($anchorIndexes.Count) lan trong $targetRelative, can lan thu $wanted"
+    }
+    $anchorIndex = $anchorIndexes[$wanted - 1]
+    $patched = New-Object System.Collections.Generic.List[string]
+    for ($index = 0; $index -lt $original.Length; $index++) {
+        if ($index -eq $anchorIndex) {
+            if (-not $variant.After) {
+                foreach ($line in $variant.Lines) {
+                    $patched.Add($line)
+                }
+            }
+            $patched.Add($original[$index])
+            if ($variant.After) {
+                foreach ($line in $variant.Lines) {
+                    $patched.Add($line)
+                }
+            }
+            continue
+        }
+        $patched.Add($original[$index])
+    }
+    [System.IO.File]::WriteAllLines($generatedSource, [string[]]$patched,
+        (New-Object System.Text.UTF8Encoding($false)))
+
+    $variantSources = @($sources | Where-Object { $_ -notlike "*$targetRelative" })
+    $variantSources += $generatedSource
+    $variantLog = Join-Path $logDir "javac-variant-$name.log"
+    $r = Invoke-Native { & $javac -g -d $nameClasses -source 10 -target 10 -Xlint:-options -cp $apiJar @variantSources }
+    $r.Output | Set-Content -Path $variantLog -Encoding UTF8
+    if ($r.ExitCode -ne 0) {
+        Stop-Build 'variant compile' "javac variant $name tra exit code $($r.ExitCode) (xem $variantLog)"
+    }
+
+    $confLines = @(
+        '-i',
+        "-classdir $name-classes",
+        '-applet 0xF0:0x4C:0x41:0x42:0x02:0x01:0x01 vn.labaccess.card.LabAccessApplet',
+        '-out CAP JCA EXP',
+        "-d $name-deliverables",
+        '-debug',
+        '-target 3.2.0',
+        'vn.labaccess.card',
+        '0xF0:0x4C:0x41:0x42:0x02 1.0'
+    )
+    $nameConf = Join-Path $variantsDir "$name.conf"
+    [System.IO.File]::WriteAllLines($nameConf, [string[]]$confLines,
+        (New-Object System.Text.UTF8Encoding($false)))
+    Push-Location $variantsDir
+    try {
+        $convert = Invoke-Native { & $converter -config "$name.conf" }
+    } finally {
+        Pop-Location
+    }
+    $variantConvertLog = Join-Path $logDir "converter-variant-$name.log"
+    $convert.Output | Set-Content -Path $variantConvertLog -Encoding UTF8
+    if (($convert.ExitCode -ne 0) -or (-not ($convert.Output -match 'conversion completed with 0 errors and 0 warnings'))) {
+        Stop-Build 'variant converter' "converter variant $name that bai (xem $variantConvertLog)"
+    }
+}
+$variantCaps = @(Get-ChildItem -Path $variantsDir -Recurse -Filter *.cap -File)
+if ($variantCaps.Count -ne $variants.Count) {
+    Stop-Build 'variant converter' "Can $($variants.Count) CAP variant, thuc te $($variantCaps.Count)"
+}
+
 $capFiles = @(Get-ChildItem -Path $deliverablesDir -Recurse -Filter *.cap -File)
 $testCapDir = Join-Path $buildDir 'test-deliverables'
 $testCapFiles = @(Get-ChildItem -Path $testCapDir -Recurse -Filter *.cap -File)
@@ -178,7 +373,16 @@ $testVerify.Output | ForEach-Object { Write-Host "      $_" }
 if (($testVerify.ExitCode -ne 0) -or (-not ($testVerify.Output -match 'Verification completed with 0 warnings and 0 errors'))) {
     Stop-Build 'verifycap test' "verifycap test that bai (xem $testVerifyLog)"
 }
-Write-Host "      OK production + test"
+foreach ($variantCap in $variantCaps) {
+    $variantName = $variantCap.FullName.Substring($variantsDir.Length).TrimStart('\').Split('\')[0] -replace '-deliverables$', ''
+    $variantVerifyLog = Join-Path $logDir "verifycap-variant-$variantName.log"
+    $variantVerify = Invoke-Native { & $verifier $variantCap.FullName }
+    $variantVerify.Output | Set-Content -Path $variantVerifyLog -Encoding UTF8
+    if (($variantVerify.ExitCode -ne 0) -or (-not ($variantVerify.Output -match 'Verification completed with 0 warnings and 0 errors'))) {
+        Stop-Build 'verifycap variant' "verifycap variant that bai cho $($variantCap.FullName) (xem $variantVerifyLog)"
+    }
+}
+Write-Host "      OK production + test + variants"
 Write-Host ""
 
 $sha = (Get-FileHash $capFile -Algorithm SHA256).Hash
@@ -190,5 +394,9 @@ Write-Host "SHA256: $sha"
 Write-Host "TEST CAP   : $testCapFile"
 Write-Host "TEST SIZE  : $($testCapFiles[0].Length) byte"
 Write-Host "TEST SHA256: $testSha"
+foreach ($variantCap in $variantCaps) {
+    $variantName = $variantCap.FullName.Substring($variantsDir.Length).TrimStart('\').Split('\')[0] -replace '-deliverables$', ''
+    Write-Host "VARIANT $($variantName.ToUpper()) CAP : $($variantCap.FullName) ($($variantCap.Length) byte)"
+}
 Write-Host "Log   : $logDir"
 exit 0
