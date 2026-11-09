@@ -9,8 +9,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
-import javafx.animation.KeyFrame;
-import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -28,7 +26,6 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
-import javafx.util.Duration;
 
 public class App extends Application {
 
@@ -69,11 +66,13 @@ public class App extends Application {
     private PasswordField fieldStudentPin;
     private PasswordField fieldAdminPin;
 
+    private PinPanel pinPanel;
+    private PersonalizePanel personalizePanel;
+    private DemoScenario demo;
+
     private final PendingJournal journal = new PendingJournal(
             Path.of(System.getProperty("labaccess.journal",
                     System.getProperty("user.home") + "/.labaccess/pending-journal.txt")));
-
-    private Timeline demoTimeline;
 
     private final java.util.concurrent.atomic.AtomicBoolean cleanupDone =
             new java.util.concurrent.atomic.AtomicBoolean(false);
@@ -124,52 +123,61 @@ public class App extends Application {
         btnEnd.setOnAction(e -> doEnd());
         btnReconcile.setOnAction(e -> doReconcilePending());
 
+        pinPanel = new PinPanel(gateway, this::runOp, this::log);
+        personalizePanel = new PersonalizePanel(gateway, this::runOp, this::log, ok -> {
+            uiReady = ok && gateway.isReady();
+            stateSnapshotKnown = false;
+            showStatus();
+        });
+        demo = new DemoScenario(this, pinPanel, personalizePanel, this::log);
+
         HBox buttons = new HBox(10, btnConnect, btnIdentify, btnDisconnect, btnReconcile);
         buttons.setAlignment(Pos.CENTER_LEFT);
         buttons.setPadding(new Insets(10));
 
         HBox receiptControls = new HBox(8,
-                infoCaption("Visit ID đang mở"), fieldVisitId,
+                UiLabels.caption("Visit ID đang mở"), fieldVisitId,
                 btnReadReceipt);
         receiptControls.setAlignment(Pos.CENTER_LEFT);
         receiptControls.setPadding(new Insets(0, 10, 10, 10));
 
         HBox txnControls = new HBox(8,
-                infoCaption("Student PIN"), fieldStudentPin,
-                infoCaption("Admin PIN"), fieldAdminPin,
-                infoCaption("Delta"), fieldDelta,
+                UiLabels.caption("Student PIN"), fieldStudentPin,
+                UiLabels.caption("Admin PIN"), fieldAdminPin,
+                UiLabels.caption("Delta"), fieldDelta,
                 btnGrant, btnStart, btnEnd);
         txnControls.setAlignment(Pos.CENTER_LEFT);
         txnControls.setPadding(new Insets(0, 10, 10, 10));
 
-        valueAid = infoValue();
-        valueProtocol = infoValue();
-        valueLifecycle = infoValue();
-        valueCardId = infoValue();
-        valueResult = infoValue();
-        valueReceipt = infoValue();
-        valueReconcile = infoValue();
+        valueAid = UiLabels.value();
+        valueProtocol = UiLabels.value();
+        valueLifecycle = UiLabels.value();
+        valueCardId = UiLabels.value();
+        valueResult = UiLabels.value();
+        valueReceipt = UiLabels.value();
+        valueReconcile = UiLabels.value();
 
         GridPane info = new GridPane();
         info.setHgap(12);
         info.setVgap(6);
         info.setPadding(new Insets(4, 10, 10, 10));
-        info.add(infoCaption("Instance AID"), 0, 0);
+        info.add(UiLabels.caption("Instance AID"), 0, 0);
         info.add(valueAid, 1, 0);
-        info.add(infoCaption("Protocol"), 0, 1);
+        info.add(UiLabels.caption("Protocol"), 0, 1);
         info.add(valueProtocol, 1, 1);
-        info.add(infoCaption("Lifecycle"), 0, 2);
+        info.add(UiLabels.caption("Lifecycle"), 0, 2);
         info.add(valueLifecycle, 1, 2);
-        info.add(infoCaption("Card ID"), 0, 3);
+        info.add(UiLabels.caption("Card ID"), 0, 3);
         info.add(valueCardId, 1, 3);
-        info.add(infoCaption("Nhận diện"), 0, 4);
+        info.add(UiLabels.caption("Nhận diện"), 0, 4);
         info.add(valueResult, 1, 4);
-        info.add(infoCaption("Receipt cuối"), 0, 5);
+        info.add(UiLabels.caption("Receipt cuối"), 0, 5);
         info.add(valueReceipt, 1, 5);
-        info.add(infoCaption("Đối soát"), 0, 6);
+        info.add(UiLabels.caption("Đối soát"), 0, 6);
         info.add(valueReconcile, 1, 6);
 
-        VBox top = new VBox(buttons, receiptControls, txnControls, new Separator(), info);
+        VBox top = new VBox(buttons, personalizePanel.node(), pinPanel.node(), receiptControls,
+                txnControls, new Separator(), info);
 
         statusLabel = new Label("Chưa kết nối");
         statusLabel.setId("status");
@@ -188,7 +196,7 @@ public class App extends Application {
         root.setCenter(logArea);
         root.setBottom(statusBar);
 
-        Scene scene = new Scene(root, 980, 620);
+        Scene scene = new Scene(root, 1180, 680);
         stage.setTitle("LabAccess — nhận diện applet (PID " + pid + ")");
         stage.setScene(scene);
         stage.setOnCloseRequest(e -> {
@@ -206,22 +214,8 @@ public class App extends Application {
 
         if (Boolean.getBoolean("labaccess.demo")) {
             stage.setAlwaysOnTop(true);
-            startDemo();
+            demo.start();
         }
-    }
-
-    private static Label infoCaption(String text) {
-        Label label = new Label(text);
-        label.setStyle("-fx-font-family: 'Consolas', monospace; -fx-font-size: 12px;"
-                + " -fx-text-fill: #555555;");
-        return label;
-    }
-
-    private static Label infoValue() {
-        Label label = new Label("-");
-        label.setId("value");
-        label.setStyle("-fx-font-family: 'Consolas', monospace; -fx-font-size: 12px;");
-        return label;
     }
 
     private void doConnect() {
@@ -230,6 +224,9 @@ public class App extends Application {
             uiReady = false;
             stateSnapshotKnown = false;
             clearInfo();
+            if (ok) {
+                pinPanel.resetState("vừa kết nối, chưa đọc trạng thái PIN từ thẻ");
+            }
         });
     }
 
@@ -237,6 +234,9 @@ public class App extends Application {
         runOp("SELECT + GET_STATUS", gateway::identify, ok -> {
             uiReady = ok;
             stateSnapshotKnown = false;
+            if (ok) {
+                pinPanel.resetState("vừa SELECT lại, chưa thử PIN");
+            }
             showStatus();
             if (ok) {
                 Platform.runLater(this::offerPendingReconciliation);
@@ -250,6 +250,9 @@ public class App extends Application {
             uiReady = false;
             stateSnapshotKnown = false;
             clearInfo();
+            if (ok) {
+                pinPanel.resetState("đã ngắt kết nối, không giữ trạng thái cũ");
+            }
         });
     }
 
@@ -591,6 +594,7 @@ public class App extends Application {
         valueLifecycle.setText(CardGateway.lifecycleText(status.lifecycle()));
         valueCardId.setText(status.cardId());
         valueResult.setText("SẴN SÀNG");
+        personalizePanel.showPublicKey();
     }
 
     private void clearInfo() {
@@ -601,6 +605,8 @@ public class App extends Application {
         valueResult.setText("CHƯA SẴN SÀNG");
         valueReceipt.setText("-");
         valueReconcile.setText(gateway.reconciliation().state().toString());
+        personalizePanel.resetView();
+        pinPanel.clearState();
     }
 
     private void runOp(String label, Callable<CardGateway.Result> op, Consumer<Boolean> onResult) {
@@ -640,6 +646,12 @@ public class App extends Application {
     }
 
     private void updateButtons() {
+        PendingJournal.Loaded loaded = journal.load();
+        boolean journalPresent = loaded.present();
+        boolean validPending = loaded.present() && loaded.valid()
+                && loaded.status() == PendingJournal.Status.PENDING;
+        boolean issued = gateway.status() != null && gateway.status().lifecycle() == 0x01;
+
         if (closing) {
             btnConnect.setDisable(true);
             btnIdentify.setDisable(true);
@@ -649,14 +661,12 @@ public class App extends Application {
             btnStart.setDisable(true);
             btnEnd.setDisable(true);
             btnReconcile.setDisable(true);
+            pinPanel.setEnabled(false);
+            personalizePanel.updateAvailability(false, false);
             statusLabel.setText("Trạng thái: đang đóng cửa sổ");
             return;
         }
 
-        PendingJournal.Loaded loaded = journal.load();
-        boolean journalPresent = loaded.present();
-        boolean validPending = loaded.present() && loaded.valid()
-                && loaded.status() == PendingJournal.Status.PENDING;
         if (journalPresent && !loaded.valid()) {
             gateway.markTransactionUnknown("pending journal không hợp lệ — cần xử lý thủ công");
         } else if (journalPresent && loaded.status() == PendingJournal.Status.RESOLVED) {
@@ -674,6 +684,10 @@ public class App extends Application {
         btnStart.setDisable(!txnAllowed);
         btnEnd.setDisable(!txnAllowed);
         btnReconcile.setDisable(busy || !uiReady || !validPending);
+        pinPanel.setEnabled(!busy && uiConnected);
+        personalizePanel.updateAvailability(
+                !busy && uiConnected && !journalPresent && !issued,
+                !busy && uiConnected);
 
         String state = busy ? "đang xử lý"
                 : !uiConnected ? "chưa kết nối"
@@ -685,6 +699,38 @@ public class App extends Application {
         statusLabel.setText("Trạng thái: " + state
                 + " | đối soát=" + gateway.reconciliation().state()
                 + " | " + journalText);
+    }
+
+    boolean pressConnect() {
+        return press(btnConnect);
+    }
+
+    boolean pressIdentify() {
+        return press(btnIdentify);
+    }
+
+    boolean pressDisconnect() {
+        return press(btnDisconnect);
+    }
+
+    boolean pressReadReceipt() {
+        return press(btnReadReceipt);
+    }
+
+    boolean pressGrant() {
+        return press(btnGrant);
+    }
+
+    void refreshButtons() {
+        updateButtons();
+    }
+
+    private static boolean press(Button button) {
+        if (button.isDisabled()) {
+            return false;
+        }
+        button.fire();
+        return true;
     }
 
     private void log(String message) {
@@ -699,11 +745,7 @@ public class App extends Application {
     private void shutdown() {
         log("Đóng cửa sổ — dừng demo và ngắt kết nối trên luồng nền");
 
-        if (demoTimeline != null) {
-            demoTimeline.stop();
-            demoTimeline = null;
-            log("DEMO: đã dừng Timeline");
-        }
+        demo.stop();
 
         updateButtons();
 
@@ -748,39 +790,6 @@ public class App extends Application {
         }, "close-watchdog");
         watchdog.setDaemon(true);
         watchdog.start();
-    }
-
-    private void startDemo() {
-        log("DEMO: tự động bấm nút theo thứ tự (cùng handler với người dùng)");
-        Runnable[] steps = {
-                () -> fire(btnConnect, "Connect"),
-                () -> fire(btnIdentify, "SELECT + GET_STATUS"),
-                () -> fire(btnReadReceipt, "GET_LAST_RECEIPT"),
-                () -> fire(btnGrant, "GRANT_QUOTA (kỳ vọng bị chặn vì thiếu VERIFY)"),
-                () -> fire(btnDisconnect, "Disconnect"),
-        };
-
-        demoTimeline = new Timeline();
-        for (int i = 0; i < steps.length; i++) {
-            final Runnable step = steps[i];
-            demoTimeline.getKeyFrames()
-                    .add(new KeyFrame(Duration.millis(800 + i * 5000L), e -> step.run()));
-        }
-        demoTimeline.getKeyFrames().add(new KeyFrame(
-                Duration.millis(800 + steps.length * 5000L),
-                e -> {
-                    log("DEMO: xong");
-                    updateButtons();
-                }));
-        demoTimeline.play();
-    }
-
-    private void fire(Button button, String name) {
-        if (button.isDisabled()) {
-            log("DEMO: bỏ qua bước " + name + " (nút đang bị khoá)");
-            return;
-        }
-        button.fire();
     }
 
     public static void main(String[] args) {
