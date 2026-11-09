@@ -33,7 +33,10 @@ final class CardGateway {
 
     private static final byte CLA_APPLICATION = (byte) 0x80;
     private static final byte INS_GET_STATUS = (byte) 0x10;
+    private static final byte INS_PERSONALIZE = (byte) 0x30;
     private static final byte INS_VERIFY_STUDENT_PIN = (byte) 0x20;
+    private static final byte INS_CHANGE_STUDENT_PIN = (byte) 0x21;
+    private static final byte INS_UNBLOCK_STUDENT_PIN = (byte) 0x23;
     private static final byte INS_GRANT_QUOTA = (byte) 0x50;
     private static final byte INS_START_VISIT = (byte) 0x51;
     private static final byte INS_END_VISIT = (byte) 0x52;
@@ -43,6 +46,7 @@ final class CardGateway {
     private static final int RECEIPT_LE = 256;
     private static final int STATE_RESPONSE_LENGTH = 6;
     private static final int PIN_LENGTH = 6;
+    private static final int ADMIN_PIN_LENGTH = 8;
     private static final int GRANT_DATA_LENGTH = 10;
     private static final int VISIT_ID_LENGTH = 16;
     private static final int PROTOCOL_VERSION = 0x01;
@@ -76,6 +80,7 @@ final class CardGateway {
     private Receipt lastReceipt;
     private java.security.PublicKey cardPublicKey;
     private int lastResponseSw = -1;
+    private volatile int lastPinSw = -1;
 
     CardGateway(String host, int port) {
         this.host = host;
@@ -117,6 +122,7 @@ final class CardGateway {
         ready = false;
         status = null;
         lastReceipt = null;
+        lastPinSw = -1;
         connectedFlag = true;
 
         ATR atr = card.getATR();
@@ -131,6 +137,7 @@ final class CardGateway {
         requireConnected();
         ready = false;
         status = null;
+        lastPinSw = -1;
 
         ResponseAPDU selectResponse = channel.transmit(
                 new CommandAPDU(0x00, 0xA4, 0x04, 0x00, instanceAid, 256));
@@ -139,15 +146,18 @@ final class CardGateway {
                     "SELECT AID=%s SW=%04X | kết luận: CHƯA SẴN SÀNG",
                     hex(instanceAid), selectResponse.getSW()));
         }
+        String selectPrefix = String.format("SELECT AID=%s SW=9000", hex(instanceAid));
 
         ResponseAPDU response = channel.transmit(
                 new CommandAPDU(CLA_APPLICATION, INS_GET_STATUS, 0x00, 0x00, 256));
         Result checked = checkStatus(response, instanceAid);
         if (!checked.ok()) {
-            return checked;
+            return Result.fail(selectPrefix + " | " + checked.text());
         }
         ready = true;
-        return checked;
+        return Result.ok(String.format(
+                "%s | GET_STATUS SW=9000 | %s",
+                selectPrefix, checked.text()));
     }
 
     Result checkStatus(ResponseAPDU response, byte[] requestedAid) {
@@ -261,22 +271,114 @@ final class CardGateway {
         if (sw != Sw.OK) {
             cardPublicKey = null;
             return Result.fail(String.format(
-                    "GET_CARD_PUBLIC_KEY INS=61 SW=%04X | %s", sw, receiptStatusText(sw)));
+                    "GET_CARD_PUBLIC_KEY INS=61 P1P2=0000 Le=%d SW=%04X | %s | kết luận: CHƯA SẴN SÀNG",
+                    PUBLIC_KEY_LE, sw, publicKeyStatusText(sw)));
         }
         ReceiptVerifier.ParsedKey parsed = ReceiptVerifier.parsePublicKey(data);
         if (!parsed.ok()) {
             cardPublicKey = null;
             return Result.fail(String.format(
-                    "GET_CARD_PUBLIC_KEY INS=61 dataLen=%d | %s", data.length, parsed.problem()));
+                    "GET_CARD_PUBLIC_KEY INS=61 SW=9000 dataLen=%d | %s | kết luận: CHƯA SẴN SÀNG",
+                    data.length, parsed.problem()));
         }
         cardPublicKey = parsed.key();
+        String cardId = status == null ? "chưa nhận diện" : status.cardId();
         return Result.ok(String.format(
-                "GET_CARD_PUBLIC_KEY INS=61 SW=9000 dataLen=%d | P-256 point=%s",
-                data.length, hex(data)));
+                "GET_CARD_PUBLIC_KEY INS=61 SW=9000 dataLen=%d | cardId=%s | P-256 point=%s",
+                data.length, cardId, hex(data)));
+    }
+
+    private static String publicKeyStatusText(int sw) {
+        if (sw == Sw.CONDITIONS_NOT_SATISFIED) {
+            return "thẻ chưa ISSUED — GET_CARD_PUBLIC_KEY chỉ đọc được sau PERSONALIZE";
+        }
+        if (sw == Sw.WRONG_LENGTH) {
+            return "Le nhỏ hơn 65 byte của public point";
+        }
+        if (sw == Sw.WRONG_P1P2) {
+            return "P1/P2 phải 0000";
+        }
+        return "không đọc được public key";
+    }
+
+    int lastPinSw() {
+        return lastPinSw;
     }
 
     java.security.PublicKey cardPublicKey() {
         return cardPublicKey;
+    }
+
+    Result personalize(char[] adminPin, String cardIdHex, String studentId,
+            char[] studentPin, String displayName) throws CardException {
+        requireConnected();
+
+        String problem = PersonalizeRequest.problem(
+                adminPin, cardIdHex, studentId, studentPin, displayName);
+        if (problem != null) {
+            return Result.fail("PERSONALIZE: " + problem + " | không gửi APDU");
+        }
+
+        String expectedCardId = cardIdHex.strip().toUpperCase();
+        byte[] data = PersonalizeRequest.payload(
+                adminPin, cardIdHex, studentId, studentPin, displayName);
+        int lc = data.length;
+        ResponseAPDU response;
+        try {
+            response = channel.transmit(new CommandAPDU(
+                    CLA_APPLICATION, INS_PERSONALIZE, 0x00, 0x00, data, 256));
+        } finally {
+            Arrays.fill(data, (byte) 0);
+        }
+
+        int sw = response.getSW();
+        lastResponseSw = sw;
+        String apdu = String.format(
+                "PERSONALIZE INS=30 P1P2=0000 case=4S Le=00 Lc=%d SW=%04X", lc, sw);
+        if (sw != Sw.OK) {
+            return Result.fail(apdu + " | " + personalizeStatusText(sw)
+                    + " | kết luận: CHƯA SẴN SÀNG");
+        }
+
+        Result reidentified = identify();
+        if (!reidentified.ok()) {
+            return Result.fail(apdu + " | " + reidentified.text());
+        }
+        Status current = status;
+        if (current == null || current.lifecycle() != LIFECYCLE_ISSUED) {
+            return Result.fail(apdu + " | sau PERSONALIZE lifecycle không phải ISSUED"
+                    + " | kết luận: CHƯA SẴN SÀNG");
+        }
+        if (!current.cardId().equalsIgnoreCase(expectedCardId)) {
+            return Result.fail(String.format("%s | cardId trên thẻ=%s khác yêu cầu=%s"
+                    + " | kết luận: CHƯA SẴN SÀNG", apdu, current.cardId(), expectedCardId));
+        }
+        return Result.ok(apdu + " | " + reidentified.text());
+    }
+
+    private static String personalizeStatusText(int sw) {
+        if (sw == Sw.CONDITIONS_NOT_SATISFIED) {
+            return "thẻ đã ISSUED — PERSONALIZE chỉ chạy một lần";
+        }
+        if (sw == Sw.AUTH_BLOCKED) {
+            return "admin PIN đã bị khóa do hết lượt thử";
+        }
+        if ((sw & 0xFF00) == 0x6300) {
+            return String.format("admin PIN sai, còn %d lượt thử", sw & 0x0F);
+        }
+        if (sw == Sw.WRONG_DATA) {
+            return "payload bị từ chối: cấu trúc/định dạng/giới hạn sai";
+        }
+        if (sw == Sw.WRONG_LENGTH) {
+            return "Lc không khớp schema hoặc Le khác 00";
+        }
+        if (sw == Sw.WRONG_P1P2) {
+            return "P1/P2 phải 0000";
+        }
+        if (sw == Sw.INTERNAL_ERROR) {
+            return "lỗi nội bộ khi sinh khóa/mã hóa; thẻ vẫn UNPERSONALIZED";
+        }
+        return "không xác định được kết quả";
     }
 
     Result readLastReceipt(ReceiptExpectation expectation, int le) throws CardException {
@@ -371,50 +473,107 @@ final class CardGateway {
         reconciliation.markUnknown(cause);
     }
 
+    private record PinField(char[] value, int length, String name) {
+    }
+
     Result verifyStudentPin(char[] pin) throws CardException {
+        return pinCommand("VERIFY_STUDENT_PIN", INS_VERIFY_STUDENT_PIN,
+                "quyền student đã mở cho APDU kế tiếp",
+                new PinField(pin, PIN_LENGTH, "PIN"));
+    }
+
+    Result changeStudentPin(char[] oldPin, char[] newPin) throws CardException {
+        return pinCommand("CHANGE_STUDENT_PIN", INS_CHANGE_STUDENT_PIN,
+                "PIN đã đổi, retry reset về 3",
+                new PinField(oldPin, PIN_LENGTH, "PIN cũ"),
+                new PinField(newPin, PIN_LENGTH, "PIN mới"));
+    }
+
+    Result unblockStudentPin(char[] adminPin, char[] newPin) throws CardException {
+        return pinCommand("UNBLOCK_STUDENT_PIN", INS_UNBLOCK_STUDENT_PIN,
+                "PIN đã mở khóa, retry reset về 3",
+                new PinField(adminPin, ADMIN_PIN_LENGTH, "admin PIN"),
+                new PinField(newPin, PIN_LENGTH, "PIN mới"));
+    }
+
+    private Result pinCommand(String label, byte ins, String successText, PinField... fields)
+            throws CardException {
         requireConnected();
-        if (pin == null || pin.length != PIN_LENGTH) {
-            return Result.fail("VERIFY_STUDENT_PIN: PIN phải đúng " + PIN_LENGTH + " chữ số");
+        lastPinSw = -1;
+        if (!ready || status == null) {
+            return Result.fail(label + ": phải SELECT + GET_STATUS thẻ ISSUED trước | không gửi APDU");
         }
-        byte[] data = new byte[PIN_LENGTH];
+        if (status.lifecycle() != LIFECYCLE_ISSUED) {
+            return Result.fail(String.format("%s: lifecycle=%d %s | không gửi APDU",
+                    label, status.lifecycle(), lifecycleText(status.lifecycle())));
+        }
+        int total = 0;
+        for (PinField field : fields) {
+            total += field.length();
+        }
+        byte[] data = new byte[total];
         try {
-            for (int i = 0; i < PIN_LENGTH; i++) {
-                if (pin[i] < '0' || pin[i] > '9') {
-                    return Result.fail("VERIFY_STUDENT_PIN: PIN chỉ gồm chữ số 0-9");
+            int offset = 0;
+            for (PinField field : fields) {
+                String problem = copyDigits(field, data, offset);
+                if (problem != null) {
+                    return Result.fail(label + ": " + problem + " | không gửi APDU");
                 }
-                data[i] = (byte) pin[i];
+                offset += field.length();
             }
             ResponseAPDU response = channel.transmit(new CommandAPDU(
-                    CLA_APPLICATION, INS_VERIFY_STUDENT_PIN, 0x00, 0x00, data));
+                    CLA_APPLICATION, ins, 0x00, 0x00, data));
             int sw = response.getSW();
             lastResponseSw = sw;
+            lastPinSw = sw;
             if (sw == Sw.OK) {
-                return Result.ok("VERIFY_STUDENT_PIN Case 3S Lc=6 SW=9000 | quyền student đã mở");
+                return Result.ok(String.format(
+                        "%s Case 3S Lc=%d SW=9000 | %s", label, total, successText));
             }
-            if (sw == Sw.AUTH_BLOCKED) {
-                return Result.fail("VERIFY_STUDENT_PIN SW=6983 | PIN đã bị khóa, cần UNBLOCK");
-            }
-            if (sw == Sw.CONDITIONS_NOT_SATISFIED) {
-                return Result.fail("VERIFY_STUDENT_PIN SW=6985 | thẻ chưa personalize hoặc PIN chưa gán");
-            }
-            if ((sw & 0xFF00) == 0x6300) {
-                return Result.fail(String.format(
-                        "VERIFY_STUDENT_PIN SW=%04X | PIN sai, còn %d lần thử",
-                        sw, sw & 0x0F));
-            }
-            if (sw == Sw.WRONG_DATA) {
-                return Result.fail("VERIFY_STUDENT_PIN SW=6A80 | định dạng PIN sai");
-            }
-            if (sw == Sw.WRONG_P1P2) {
-                return Result.fail("VERIFY_STUDENT_PIN SW=6A86 | P1/P2 phải 0000");
-            }
-            if (sw == Sw.WRONG_LENGTH) {
-                return Result.fail("VERIFY_STUDENT_PIN SW=6700 | data phải đúng 6 byte, Case 3S không Le");
-            }
-            return Result.fail(String.format("VERIFY_STUDENT_PIN SW=%04X | không xác thực được", sw));
+            return Result.fail(String.format("%s Case 3S Lc=%d SW=%04X | %s",
+                    label, total, sw, pinStatusText(sw)));
         } finally {
             java.util.Arrays.fill(data, (byte) 0);
         }
+    }
+
+    private static String copyDigits(PinField field, byte[] target, int offset) {
+        if (field.value() == null) {
+            return field.name() + " không được để trống";
+        }
+        if (field.value().length != field.length()) {
+            return String.format("%s phải đúng %d chữ số", field.name(), field.length());
+        }
+        for (int index = 0; index < field.length(); index++) {
+            char digit = field.value()[index];
+            if (digit < '0' || digit > '9') {
+                return field.name() + " chỉ gồm chữ số 0-9";
+            }
+            target[offset + index] = (byte) digit;
+        }
+        return null;
+    }
+
+    private static String pinStatusText(int sw) {
+        if (sw == Sw.AUTH_BLOCKED) {
+            return "PIN đã bị khóa, cần UNBLOCK";
+        }
+        if (sw == Sw.CONDITIONS_NOT_SATISFIED) {
+            return "thẻ chưa personalize hoặc PIN chưa gán";
+        }
+        if ((sw & 0xFF00) == 0x6300) {
+            return String.format("PIN sai, còn %d lần thử", sw & 0x0F);
+        }
+        if (sw == Sw.WRONG_DATA) {
+            return "định dạng PIN sai";
+        }
+        if (sw == Sw.WRONG_P1P2) {
+            return "P1/P2 phải 0000";
+        }
+        if (sw == Sw.WRONG_LENGTH) {
+            return "Lc không khớp, Case 3S không Le";
+        }
+        return String.format("SW=%04X không xác thực được", sw);
     }
 
     record TransactionPlan(ReceiptExpectation expectation, int delta, int expectedBalance) {
@@ -701,6 +860,7 @@ final class CardGateway {
         ready = false;
         status = null;
         lastReceipt = null;
+        lastPinSw = -1;
         channel = null;
         terminal = null;
         factory = null;

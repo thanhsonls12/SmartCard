@@ -46,14 +46,23 @@ public final class CardGatewayVerify {
         checkPendingJournal();
         checkVerifyMapping();
         checkTransactionGate();
-        preparePersonalizedCard();
+        checkPersonalizeOffline();
+        checkPersonalizeMapping();
+        checkPublicKeyOffline();
+        checkPinOffline();
+        checkPinState();
 
         CardGateway gateway = new CardGateway(HOST, PORT);
         try {
             checkIdentifyWithRealCard(gateway);
+            checkPublicKeyBeforePersonalize(gateway);
+            checkPersonalizeOnCard(gateway);
+            checkPublicKeyAfterPersonalize(gateway);
             checkLastReceiptOnCard(gateway);
             checkVerifyAndTransactionOnCard(gateway);
             checkFaultAfterCommitOnCard(gateway);
+            checkPinStateOnCard(gateway);
+            checkPinOnCard(gateway);
         } finally {
             clearLiveSecrets();
             if (gateway.isConnected()) {
@@ -488,6 +497,10 @@ public final class CardGatewayVerify {
         System.out.println("    identify() -> " + positive.text());
         record("V01", "identify() thanh cong va dat ready",
                 positive.ok() && gateway.isReady() && gateway.status() != null, true);
+        record("V01a", "identify() SW=9000 cho ca SELECT va GET_STATUS",
+                positive.ok() && positive.text().contains("SELECT AID=")
+                        && positive.text().contains("SW=9000")
+                        && positive.text().contains("GET_STATUS SW=9000"), true);
         if (gateway.status() != null) {
             System.out.println(String.format("    status: protocol=%02X lifecycle=%02X cardId=%s",
                     gateway.status().protocolVersion(), gateway.status().lifecycle(),
@@ -503,6 +516,9 @@ public final class CardGatewayVerify {
         System.out.println("    identifyWith(AID sai) -> " + negative.text());
         record("V02", "AID sai: that bai, ready=false, status=null",
                 !negative.ok() && !gateway.isReady() && gateway.status() == null, true);
+        record("V02a", "AID sai: SW hien ro va ket luan CHUA SAN SANG",
+                !negative.ok() && negative.text().contains("SW=")
+                        && negative.text().contains("CHƯA SẴN SÀNG"), true);
 
         CardGateway.Result again;
         try {
@@ -510,6 +526,7 @@ public final class CardGatewayVerify {
         } catch (Exception ex) {
             again = CardGateway.Result.fail("identify() loi: " + ex);
         }
+        System.out.println("    identify() lai -> " + again.text());
         record("V09", "nhan dien lai sau ca sai phuc hoi duoc", again.ok() && gateway.isReady(), true);
     }
 
@@ -673,20 +690,20 @@ public final class CardGatewayVerify {
         System.out.println();
         System.out.println("--- Nhom P: anh xa SW VERIFY_STUDENT_PIN ---");
 
-        record("P01", "9000 -> ok", verifyText(Sw.OK).contains("9000"), true);
+        record("P01", "9000 -> ok", verifyText(Sw.OK).contains("SW=9000"), true);
         record("P02", "63C2 -> con 2 lan thu", verifyText(0x63C2).contains("còn 2 lần thử"), true);
         record("P03", "6983 -> PIN bi khoa", verifyText(Sw.AUTH_BLOCKED).contains("khóa"), true);
         record("P04", "6985 -> chua personalize",
                 verifyText(Sw.CONDITIONS_NOT_SATISFIED).contains("chưa personalize"), true);
         record("P05", "6A80 -> dinh dang sai",
-                verifyText(Sw.WRONG_DATA).contains("PIN sai"), true);
-        record("P06", "6700 -> do dai sai",
-                verifyText(Sw.WRONG_LENGTH).contains("6 byte"), true);
+                verifyText(Sw.WRONG_DATA).contains("định dạng PIN sai"), true);
+        record("P06", "6700 -> Lc khong khop",
+                verifyText(Sw.WRONG_LENGTH).contains("Lc không khớp"), true);
         record("P07", "6A86 -> P1P2 sai",
-                verifyText(Sw.WRONG_P1P2).contains("P1/P2"), true);
+                verifyText(Sw.WRONG_P1P2).contains("P1/P2 phải 0000"), true);
 
         java.util.concurrent.atomic.AtomicBoolean shape = new java.util.concurrent.atomic.AtomicBoolean();
-        CardGateway gateway = new CardGateway(scriptedChannel(command -> {
+        CardGateway gateway = readyGateway(issuedChannel(command -> {
             byte[] data = command.getData();
             shape.set(command.getCLA() == 0x80 && command.getINS() == 0x20
                     && command.getP1() == 0 && command.getP2() == 0
@@ -700,8 +717,8 @@ public final class CardGatewayVerify {
     }
 
     private static String verifyText(int sw) throws CardException {
-        return new CardGateway(scriptedChannel(command -> response(sw))).verifyStudentPin(
-                "654321".toCharArray()).text();
+        return readyGateway(issuedChannel(command -> response(sw)))
+                .verifyStudentPin("654321".toCharArray()).text();
     }
 
     private static ResponseAPDU responseWithData(byte[] data, int sw) {
@@ -929,115 +946,732 @@ public final class CardGatewayVerify {
         }
     }
 
-    private static void preparePersonalizedCard() {
+    private static void checkPersonalizeOffline() {
         System.out.println();
-        System.out.println("--- Nhom W: PERSONALIZE the that truoc khi giao dich ---");
+        System.out.println("--- Nhom K: PERSONALIZE payload, byte length, chan input sai ---");
 
-        int lifecycle;
-        String cardId;
-        Card card = null;
+        char[] adminPin = sampleDigits(8);
+        char[] studentPin = sampleDigits(6);
+        String cardId = CARD_ID;
+        String studentId = "SV2024-001";
+        String name = "Nguyễn Văn Ánh";
         try {
-            javax.smartcardio.TerminalFactory factory = javax.smartcardio.TerminalFactory
-                    .getInstance("SocketCardTerminalFactoryType",
-                            java.util.List.of(new java.net.InetSocketAddress(HOST, PORT)),
-                            "SocketCardTerminalProvider");
-            javax.smartcardio.CardTerminal terminal = factory.terminals().list().get(0);
-            card = terminal.connect("*");
-            CardChannel channel = card.getBasicChannel();
-            ResponseAPDU select = channel.transmit(
-                    new CommandAPDU(0x00, 0xA4, 0x04, 0x00, AID, 256));
-            if (select.getSW() != Sw.OK) {
-                skip("W01", "PERSONALIZE the that", "SELECT AID that bai");
-                return;
-            }
-            ResponseAPDU status = channel.transmit(
-                    new CommandAPDU(0x80, 0x10, 0x00, 0x00, 256));
-            byte[] data = status.getData();
-            int aidLength = data[10] & 0xFF;
-            lifecycle = data[11 + aidLength] & 0xFF;
-            byte[] id = Arrays.copyOfRange(data, 12 + aidLength, 20 + aidLength);
-            cardId = HexFormat.of().formatHex(id).toUpperCase();
+            record("K01", "input hop le -> khong co loi dinh dang",
+                    PersonalizeRequest.problem(adminPin, cardId, studentId, studentPin, name) == null, true);
 
-            if (lifecycle == 0x01) {
-                record("W01", "the da o lifecycle ISSUED, khong PERSONALIZE lai",
-                        cardId.equals(CARD_ID), true);
-                return;
-            }
-            if (!Boolean.getBoolean("labaccess.personalize")) {
-                skip("W01", "PERSONALIZE the that",
-                        "dat -Dlabaccess.personalize=true de tao the test moi");
-                return;
-            }
+            record("K02", "admin PIN 7 chu so bi chan",
+                    PersonalizeRequest.problem(
+                            sampleDigits(7), cardId, studentId, studentPin, name) != null, true);
+            char[] adminLetters = "abcdefgh".toCharArray();
+            record("K03", "admin PIN co chu cai bi chan",
+                    PersonalizeRequest.problem(
+                            adminLetters, cardId, studentId, studentPin, name) != null, true);
+            record("K04", "cardId toan 00 bi chan",
+                    PersonalizeRequest.problem(
+                            adminPin, "0000000000000000", studentId, studentPin, name) != null, true);
+            record("K05", "cardId sai do dai hex bi chan",
+                    PersonalizeRequest.problem(
+                            adminPin, "A1B2C3", studentId, studentPin, name) != null, true);
+            record("K06", "studentId rong bi chan",
+                    PersonalizeRequest.problem(
+                            adminPin, cardId, "", studentPin, name) != null, true);
+            record("K07", "studentId 33 byte bi chan",
+                    PersonalizeRequest.problem(
+                            adminPin, cardId, "A".repeat(33), studentPin, name) != null, true);
+            record("K08", "studentId chu thuong bi chan",
+                    PersonalizeRequest.problem(
+                            adminPin, cardId, "sv2024", studentPin, name) != null, true);
+            record("K09", "student PIN 5 chu so bi chan",
+                    PersonalizeRequest.problem(
+                            adminPin, cardId, studentId, sampleDigits(5), name) != null, true);
+            record("K10", "ten hien thi rong bi chan",
+                    PersonalizeRequest.problem(
+                            adminPin, cardId, studentId, studentPin, "") != null, true);
+            record("K11", "ten hien thi 97 byte bi chan",
+                    PersonalizeRequest.problem(
+                            adminPin, cardId, studentId, studentPin, "a".repeat(97)) != null, true);
 
-            char[] adminPinChars = liveSecret(true);
-            char[] studentPin = liveSecret(false);
-            if (adminPinChars == null || studentPin == null) {
-                skip("W01", "PERSONALIZE the that", "khong doc duoc PIN dung do dai");
-                return;
-            }
-            byte[] adminPin = new byte[8];
-            byte[] studentPinBytes = new byte[6];
-            try {
-                for (int i = 0; i < 8; i++) {
-                    adminPin[i] = (byte) adminPinChars[i];
-                }
-                for (int i = 0; i < 6; i++) {
-                    studentPinBytes[i] = (byte) studentPin[i];
-                }
-                ResponseAPDU personalized = channel.transmit(
-                        new CommandAPDU(0x80, 0x30, 0x00, 0x00,
-                                personalizePayload(adminPin, studentPinBytes), 256));
-                record("W01", "PERSONALIZE the moi -> 9000",
-                        personalized.getSW() == Sw.OK, true);
+            byte[] ascii = PersonalizeRequest.payload(
+                    adminPin, cardId, studentId, studentPin, "Nguyen Van A");
+            record("K12", "Lc = 25 + studentId + ten (ASCII)",
+                    ascii.length, 25 + studentId.length() + "Nguyen Van A".length());
 
-                ResponseAPDU recheck = channel.transmit(
-                        new CommandAPDU(0x80, 0x10, 0x00, 0x00, 256));
-                byte[] recheckData = recheck.getData();
-                int recheckAidLength = recheckData[10] & 0xFF;
-                int recheckLifecycle = recheckData[11 + recheckAidLength] & 0xFF;
-                String recheckCardId = HexFormat.of().formatHex(Arrays.copyOfRange(
-                        recheckData, 12 + recheckAidLength, 20 + recheckAidLength)).toUpperCase();
-                record("W02", "sau PERSONALIZE: lifecycle ISSUED + cardId dung",
-                        recheckLifecycle == 0x01 && recheckCardId.equals(CARD_ID), true);
-            } finally {
-                java.util.Arrays.fill(adminPin, (byte) 0);
-                java.util.Arrays.fill(studentPinBytes, (byte) 0);
-            }
-        } catch (Exception ex) {
-            record("W00", "PERSONALIZE loi khong mong doi: " + ex, false, true);
+            byte[] multibyte = PersonalizeRequest.payload(
+                    adminPin, cardId, studentId, studentPin, name);
+            int nameBytes = name.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+            record("K13", "Lc tinh theo byte UTF-8, khong theo ky tu",
+                    multibyte.length, 25 + studentId.length() + nameBytes);
+            record("K14", "byte UTF-8 nhieu hon so ky tu",
+                    nameBytes > name.length(), true);
+
+            record("K15", "adminPinLength tai offset 0 bang 08", ascii[0], 0x08);
+            record("K16", "cardId tai offset 9",
+                    HexFormat.of().formatHex(Arrays.copyOfRange(ascii, 9, 17))
+                            .equalsIgnoreCase(cardId), true);
+            record("K17", "studentIdLength tai offset 17", ascii[17] & 0xFF, studentId.length());
+            record("K18", "studentId tai offset 18",
+                    new String(Arrays.copyOfRange(ascii, 18, 18 + studentId.length()),
+                            java.nio.charset.StandardCharsets.US_ASCII).equals(studentId), true);
+            int pinOffset = 18 + studentId.length();
+            record("K19", "initialStudentPIN ngay sau studentId",
+                    matchesDigitsAt(ascii, pinOffset, studentPin), true);
+            record("K20", "displayNameLength tai offset sau student PIN",
+                    ascii[pinOffset + 6] & 0xFF, "Nguyen Van A".length());
+
+            byte[] maxSized = PersonalizeRequest.payload(
+                    adminPin, cardId, "A".repeat(32), studentPin, "a".repeat(96));
+            record("K21", "Lc toi da 153 voi studentId 32 + ten 96", maxSized.length,
+                    PersonalizeRequest.MAX_PAYLOAD_LENGTH);
+
+            Arrays.fill(ascii, (byte) 0);
+            Arrays.fill(multibyte, (byte) 0);
+            Arrays.fill(maxSized, (byte) 0);
         } finally {
-            if (card != null) {
-                try {
-                    card.disconnect(false);
-                } catch (CardException ignored) {
-                    card = null;
-                }
-            }
+            Arrays.fill(adminPin, '\0');
+            Arrays.fill(studentPin, '\0');
         }
     }
 
-    private static byte[] personalizePayload(byte[] adminPin, byte[] studentPin) {
-        byte[] cardId = HexFormat.of().parseHex(CARD_ID);
-        byte[] studentId = "SV2024-001".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
-        byte[] displayName = "Nguyen Van A".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        byte[] payload = new byte[1 + 8 + cardId.length + 1 + studentId.length
-                + studentPin.length + 1 + displayName.length];
-        int offset = 0;
-        payload[offset++] = 8;
-        System.arraycopy(adminPin, 0, payload, offset, 8);
-        offset += 8;
-        System.arraycopy(cardId, 0, payload, offset, cardId.length);
-        offset += cardId.length;
-        payload[offset++] = (byte) studentId.length;
-        System.arraycopy(studentId, 0, payload, offset, studentId.length);
-        offset += studentId.length;
-        System.arraycopy(studentPin, 0, payload, offset, studentPin.length);
-        offset += studentPin.length;
-        payload[offset++] = (byte) displayName.length;
-        System.arraycopy(displayName, 0, payload, offset, displayName.length);
-        return payload;
+    private static void checkPersonalizeMapping() throws CardException {
+        System.out.println();
+        System.out.println("--- Nhom Q: anh xa SW cua PERSONALIZE ---");
+
+        char[] adminPin = sampleDigits(8);
+        char[] studentPin = sampleDigits(6);
+        String[] ids = { "Q01", "Q02", "Q03", "Q04", "Q05", "Q06", "Q07", "Q08" };
+        int[] sws = { Sw.OK, Sw.CONDITIONS_NOT_SATISFIED, 0x63C2, Sw.AUTH_BLOCKED,
+                Sw.WRONG_DATA, Sw.WRONG_LENGTH, Sw.WRONG_P1P2, Sw.INTERNAL_ERROR };
+        String[] expects = { "SW=9000", "đã ISSUED", "còn 2 lượt thử", "khóa",
+                "payload bị từ chối", "Lc không khớp", "P1/P2", "UNPERSONALIZED" };
+        boolean[] wantOk = { true, false, false, false, false, false, false, false };
+        try {
+            for (int index = 0; index < sws.length; index++) {
+                final int scriptedSw = sws[index];
+                CommandAPDU[] captured = new CommandAPDU[1];
+                CardGateway gateway = readyGateway(issuedChannel(command -> {
+                    if ((command.getINS() & 0xFF) == 0x30) {
+                        captured[0] = command;
+                        return response(scriptedSw);
+                    }
+                    return response(Sw.INS_NOT_SUPPORTED);
+                }));
+                CardGateway.Result result = gateway.personalize(
+                        adminPin, CARD_ID, "SV2024-001", studentPin, "Nguyen Van A");
+                boolean okText = result.ok() == wantOk[index]
+                        && result.text().contains(expects[index])
+                        && !mentionsDigits(result.text(), adminPin)
+                        && !mentionsDigits(result.text(), studentPin);
+                record(ids[index], "SW " + String.format("%04X", sws[index]) + " -> " + expects[index],
+                        okText, true);
+                if (index == 0) {
+                    record("Q09", "gui Case 4S: Lc dung byte, Le=00",
+                            captured[0] != null
+                            && captured[0].getNc() == 25 + "SV2024-001".length()
+                                    + "Nguyen Van A".length()
+                            && captured[0].getNe() == 256, true);
+                    record("Q10", "P1/P2 = 0000",
+                            captured[0] != null && captured[0].getP1() == 0
+                            && captured[0].getP2() == 0, true);
+                }
+            }
+        } finally {
+            Arrays.fill(adminPin, '\0');
+            Arrays.fill(studentPin, '\0');
+        }
     }
 
+    private static char[] sampleDigits(int length) {
+        char[] value = new char[length];
+        for (int index = 0; index < length; index++) {
+            value[index] = (char) ('1' + index % 9);
+        }
+        return value;
+    }
+
+    private static boolean matchesDigitsAt(byte[] data, int offset, char[] digits) {
+        for (int index = 0; index < digits.length; index++) {
+            if (data[offset + index] != (byte) digits[index]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean mentionsDigits(String text, char[] digits) {
+        for (int start = 0; start + digits.length <= text.length(); start++) {
+            boolean match = true;
+            for (int index = 0; index < digits.length; index++) {
+                if (text.charAt(start + index) != digits[index]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void checkPublicKeyOffline() throws Exception {
+        System.out.println();
+        System.out.println("--- Nhom N: GET_CARD_PUBLIC_KEY (INS 61) offline ---");
+
+        byte[] validPoint = p256Point();
+
+        CardGateway unissued = readyGateway(issuedChannel(command -> {
+            if ((command.getINS() & 0xFF) == 0x61) {
+                return response(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            return response(Sw.INS_NOT_SUPPORTED);
+        }));
+        CardGateway.Result notIssued = unissued.readCardPublicKey();
+        record("N01", "the chua ISSUED -> 6985, khong giu key",
+                !notIssued.ok() && notIssued.text().contains("6985")
+                && notIssued.text().contains("chưa ISSUED")
+                && unissued.cardPublicKey() == null, true);
+
+        record("N02", "Le thieu -> 6700 duoc anh xa",
+                publicKeyFailure(Sw.WRONG_LENGTH).contains("Le nhỏ hơn 65 byte"), true);
+        record("N03", "P1/P2 sai -> 6A86 duoc anh xa",
+                publicKeyFailure(Sw.WRONG_P1P2).contains("P1/P2 phải 0000"), true);
+
+        byte[] shortPoint = Arrays.copyOf(validPoint, 64);
+        record("N04", "public key 64 byte bi tu choi",
+                publicKeyProblem(shortPoint).contains("phải đúng 65 byte"), true);
+
+        byte[] wrongPrefix = validPoint.clone();
+        wrongPrefix[0] = 0x05;
+        record("N05", "prefix khac 04 bi tu choi",
+                publicKeyProblem(wrongPrefix).contains("phải là 04"), true);
+
+        byte[] offCurve = new byte[65];
+        offCurve[0] = 0x04;
+        record("N06", "diem khong nam tren P-256 bi tu choi",
+                publicKeyProblem(offCurve).contains("không dựng được")
+                || publicKeyProblem(offCurve).contains("key=null"), true);
+
+        CardGateway issued = readyGateway(issuedChannel(command ->
+                (command.getINS() & 0xFF) == 0x61
+                        ? dataApdu(validPoint)
+                        : response(Sw.INS_NOT_SUPPORTED)));
+        CardGateway.Result first = issued.readCardPublicKey();
+        String firstHex = hexPoint(issued);
+        record("N07", "65 byte hop le -> 9000, giu PublicKey",
+                first.ok() && first.text().contains("SW=9000")
+                && first.text().contains("dataLen=65")
+                && first.text().contains("cardId=" + CARD_ID)
+                && issued.cardPublicKey() != null, true);
+        record("N08", "encode lai dung 65 byte", firstHex.length() / 2, 65);
+        record("N09", "byte dau la 04", firstHex.startsWith("04"), true);
+
+        CardGateway.Result second = issued.readCardPublicKey();
+        record("N10", "doc lai cung the -> cung public key",
+                second.ok() && hexPoint(issued).equals(firstHex), true);
+
+        Arrays.fill(shortPoint, (byte) 0);
+        Arrays.fill(wrongPrefix, (byte) 0);
+    }
+
+    private static String publicKeyFailure(int sw) {
+        CardGateway gateway = readyGateway(issuedChannel(command ->
+                (command.getINS() & 0xFF) == 0x61
+                        ? response(sw)
+                        : response(Sw.INS_NOT_SUPPORTED)));
+        try {
+            return gateway.readCardPublicKey().text();
+        } catch (CardException ex) {
+            return "loi " + ex.getClass().getSimpleName();
+        }
+    }
+
+    private static String publicKeyProblem(byte[] point) {
+        CardGateway gateway = readyGateway(issuedChannel(command ->
+                (command.getINS() & 0xFF) == 0x61
+                        ? dataApdu(point)
+                        : response(Sw.INS_NOT_SUPPORTED)));
+        try {
+            CardGateway.Result result = gateway.readCardPublicKey();
+            return result.text() + " | " + (gateway.cardPublicKey() == null ? "key=null" : "key=GIU");
+        } catch (CardException ex) {
+            return "loi " + ex.getClass().getSimpleName();
+        }
+    }
+
+    private static byte[] p256Point() throws Exception {
+        java.security.KeyPairGenerator generator =
+                java.security.KeyPairGenerator.getInstance("EC");
+        java.security.AlgorithmParameters parameters =
+                java.security.AlgorithmParameters.getInstance("EC");
+        parameters.init(new java.security.spec.ECGenParameterSpec("secp256r1"));
+        generator.initialize(parameters.getParameterSpec(
+                java.security.spec.ECParameterSpec.class));
+        return ReceiptVerifier.encodePoint(generator.generateKeyPair().getPublic());
+    }
+
+    private static String hexPoint(CardGateway gateway) {
+        java.security.PublicKey key = gateway.cardPublicKey();
+        return key == null ? "" : HexFormat.of().formatHex(ReceiptVerifier.encodePoint(key));
+    }
+
+    private static ResponseAPDU dataApdu(byte[] data) {
+        byte[] raw = new byte[data.length + 2];
+        System.arraycopy(data, 0, raw, 0, data.length);
+        raw[data.length] = (byte) (SW_OK >> 8);
+        raw[data.length + 1] = (byte) SW_OK;
+        return new ResponseAPDU(raw);
+    }
+
+    private static void checkPublicKeyBeforePersonalize(CardGateway gateway) throws CardException {
+        System.out.println();
+        System.out.println("--- Nhom N: GET_CARD_PUBLIC_KEY tren the chua phat hanh ---");
+
+        CardGateway.Status current = gateway.status();
+        if (current != null && current.lifecycle() == 0x01) {
+            skip("N11", "the chua ISSUED -> 6985 tren the that", "the da ISSUED truoc phien chay");
+            return;
+        }
+        CardGateway.Result result = gateway.readCardPublicKey();
+        record("N11", "the chua ISSUED -> 6985 tren the that",
+                !result.ok() && result.text().contains("6985")
+                && result.text().contains("chưa ISSUED")
+                && gateway.cardPublicKey() == null, true);
+    }
+
+    private static void checkPublicKeyAfterPersonalize(CardGateway gateway) throws CardException {
+        System.out.println();
+        System.out.println("--- Nhom N: GET_CARD_PUBLIC_KEY tren the da ISSUED ---");
+
+        if (gateway.status() == null || gateway.status().lifecycle() != 0x01) {
+            skip("N12", "the ISSUED doc public key 65 byte", "the chua ISSUED");
+            return;
+        }
+        CardGateway.Result first = gateway.readCardPublicKey();
+        String firstHex = hexPoint(gateway);
+        record("N12", "the ISSUED -> 9000 + 65 byte + PublicKey",
+                first.ok() && first.text().contains("SW=9000")
+                && first.text().contains("dataLen=65")
+                && gateway.cardPublicKey() != null, true);
+        record("N13", "public key hien cung cardId dang nhan dien",
+                first.text().contains("cardId=" + gateway.status().cardId()), true);
+        record("N14", "diem uncompressed 04||X||Y dung 65 byte", firstHex.length() / 2, 65);
+        record("N15", "header 04", firstHex.startsWith("04"), true);
+
+        CardGateway.Result second = gateway.readCardPublicKey();
+        record("N16", "doc lai cung the -> cung public key",
+                second.ok() && hexPoint(gateway).equals(firstHex), true);
+    }
+
+    private static void checkPinOffline() throws CardException {
+        System.out.println();
+        System.out.println("--- Nhom M: VERIFY / CHANGE / UNBLOCK offline ---");
+
+        char[] pin = "654321".toCharArray();
+        char[] admin = "12345678".toCharArray();
+        try {
+            record("M01", "VERIFY 9000 -> quyen student mo",
+                    pinText("verify", Sw.OK).contains("quyền student đã mở"), true);
+            record("M02", "VERIFY 63C2 -> con 2 lan thu",
+                    pinText("verify", 0x63C2).contains("còn 2 lần thử"), true);
+            record("M03", "VERIFY 6983 -> PIN bi khoa",
+                    pinText("verify", Sw.AUTH_BLOCKED).contains("khóa"), true);
+            record("M04", "VERIFY 6985 -> chua personalize",
+                    pinText("verify", Sw.CONDITIONS_NOT_SATISFIED).contains("chưa personalize"), true);
+            record("M05", "VERIFY 6A80 -> dinh dang sai",
+                    pinText("verify", Sw.WRONG_DATA).contains("định dạng PIN sai"), true);
+            record("M06", "VERIFY 6700 -> Lc khong khop",
+                    pinText("verify", Sw.WRONG_LENGTH).contains("Lc không khớp"), true);
+            record("M07", "VERIFY 6A86 -> P1P2 sai",
+                    pinText("verify", Sw.WRONG_P1P2).contains("P1/P2 phải 0000"), true);
+            record("M08", "CHANGE 9000 -> bao da doi PIN",
+                    pinText("change", Sw.OK).contains("PIN đã đổi"), true);
+            record("M09", "CHANGE 63C1 -> con 1 lan thu",
+                    pinText("change", 0x63C1).contains("còn 1 lần thử"), true);
+            record("M10", "UNBLOCK 9000 -> bao da mo khoa",
+                    pinText("unblock", Sw.OK).contains("đã mở khóa"), true);
+            record("M11", "UNBLOCK 6983 -> admin bi khoa",
+                    pinText("unblock", Sw.AUTH_BLOCKED).contains("khóa"), true);
+
+            java.util.concurrent.atomic.AtomicInteger sent = new java.util.concurrent.atomic.AtomicInteger();
+            java.util.concurrent.atomic.AtomicReference<byte[]> seen =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            java.util.concurrent.atomic.AtomicReference<int[]> shape =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            CardGateway counter = readyGateway(issuedChannel(command -> {
+                sent.incrementAndGet();
+                seen.set(command.getData());
+                shape.set(new int[] {command.getINS() & 0xFF, command.getP1(), command.getP2(),
+                    command.getNc(), command.getNe(), command.getBytes().length});
+                return response(Sw.OK);
+            }));
+
+            counter.verifyStudentPin(pin);
+            record("M12", "VERIFY chi gui dung 1 APDU", sent.get(), 1);
+
+            counter.changeStudentPin(pin, "112233".toCharArray());
+            record("M13", "CHANGE chi gui dung 1 APDU", sent.get(), 2);
+            record("M14", "CHANGE Case 3S: INS 21 Lc=12, khong Le",
+                    shape.get()[0] == 0x21 && shape.get()[3] == 12 && shape.get()[4] == 0
+                    && shape.get()[5] == 17, true);
+            record("M15", "CHANGE data = old 6 byte + new 6 byte",
+                    Arrays.equals(seen.get(), "654321112233".getBytes()), true);
+
+            counter.unblockStudentPin(admin, "445566".toCharArray());
+            record("M16", "UNBLOCK chi gui dung 1 APDU", sent.get(), 3);
+            record("M17", "UNBLOCK Case 3S: INS 23 Lc=14, khong Le",
+                    shape.get()[0] == 0x23 && shape.get()[3] == 14 && shape.get()[4] == 0
+                    && shape.get()[5] == 19, true);
+            record("M18", "UNBLOCK data = admin 8 byte + new 6 byte",
+                    Arrays.equals(seen.get(), "12345678445566".getBytes()), true);
+
+            record("M19", "PIN sai van chi 1 APDU, khong retry",
+                    retryCount(pin), 1);
+
+            java.util.concurrent.atomic.AtomicInteger guarded = new java.util.concurrent.atomic.AtomicInteger();
+            CardGateway unissued = readyGateway(issuedChannel(command -> {
+                guarded.incrementAndGet();
+                return response(Sw.OK);
+            }, 0x00));
+            record("M20", "the chua ISSUED bi chan truoc khi gui",
+                    !unissued.verifyStudentPin(pin).ok() && guarded.get() == 0, true);
+
+            CardGateway notIdentified = new CardGateway(scriptedChannel(command -> {
+                guarded.incrementAndGet();
+                return response(Sw.OK);
+            }));
+            record("M21", "chua SELECT + GET_STATUS bi chan truoc khi gui",
+                    !notIdentified.verifyStudentPin(pin).ok() && guarded.get() == 0, true);
+
+            record("M22", "PIN 5 chu so bi chan tai client",
+                    counter.verifyStudentPin("12345".toCharArray()).text().contains("6 chữ số"), true);
+            record("M23", "PIN co chu cai bi chan tai client",
+                    counter.verifyStudentPin("12345a".toCharArray()).text().contains("chữ số 0-9"), true);
+            record("M24", "admin PIN 7 chu so bi chan tai client",
+                    counter.unblockStudentPin("1234567".toCharArray(),
+                            "445566".toCharArray()).text().contains("8 chữ số"), true);
+            record("M25", "chan tai client thi khong gui APDU", sent.get(), 3);
+        } finally {
+            Arrays.fill(pin, '\0');
+            Arrays.fill(admin, '\0');
+        }
+    }
+
+    private static String pinText(String op, int sw) throws CardException {
+        CardGateway gateway = readyGateway(issuedChannel(command -> response(sw)));
+        char[] pin = "654321".toCharArray();
+        char[] admin = "12345678".toCharArray();
+        try {
+            if (op.equals("verify")) {
+                return gateway.verifyStudentPin(pin).text();
+            }
+            if (op.equals("change")) {
+                return gateway.changeStudentPin(pin, "112233".toCharArray()).text();
+            }
+            return gateway.unblockStudentPin(admin, "445566".toCharArray()).text();
+        } finally {
+            Arrays.fill(pin, '\0');
+            Arrays.fill(admin, '\0');
+        }
+    }
+
+    private static int retryCount(char[] pin) throws CardException {
+        java.util.concurrent.atomic.AtomicInteger sent = new java.util.concurrent.atomic.AtomicInteger();
+        CardGateway gateway = readyGateway(issuedChannel(command -> {
+            sent.incrementAndGet();
+            return response(0x63C2);
+        }));
+        gateway.verifyStudentPin(pin);
+        return sent.get();
+    }
+
+    private static void checkPinState() throws CardException {
+        System.out.println();
+        System.out.println("--- Nhom H: trang thai PIN hien thi theo SW ---");
+
+        record("H01", "VERIFY 9000 -> da xac thuc, quyen cho lenh ke tiep",
+                PinState.of(PinState.Operation.VERIFY, true, Sw.OK).text()
+                        .contains("Đã xác thực")
+                && PinState.of(PinState.Operation.VERIFY, true, Sw.OK).text()
+                        .contains("lệnh nhạy cảm kế tiếp"), true);
+        record("H02", "VERIFY 63C2 -> con 2 luot",
+                PinState.of(PinState.Operation.VERIFY, false, 0x63C2).text()
+                        .contains("còn 2 lượt thử"), true);
+        record("H03", "VERIFY 63C1 -> con 1 luot",
+                PinState.of(PinState.Operation.VERIFY, false, 0x63C1).text()
+                        .contains("còn 1 lượt thử"), true);
+        record("H04", "VERIFY 6983 -> PIN dang khoa",
+                PinState.of(PinState.Operation.VERIFY, false, Sw.AUTH_BLOCKED).text()
+                        .contains("PIN đang khóa"), true);
+        record("H05", "CHANGE 9000 -> da doi, retry reset",
+                PinState.of(PinState.Operation.CHANGE, true, Sw.OK).text()
+                        .contains("PIN đã đổi")
+                && PinState.of(PinState.Operation.CHANGE, true, Sw.OK).text()
+                        .contains("retry reset về 3"), true);
+        record("H06", "CHANGE 63C2 -> sai PIN cu",
+                PinState.of(PinState.Operation.CHANGE, false, 0x63C2).text()
+                        .contains("Sai PIN cũ"), true);
+        record("H07", "UNBLOCK 9000 -> da mo khoa, retry reset",
+                PinState.of(PinState.Operation.UNBLOCK, true, Sw.OK).text()
+                        .contains("PIN đã mở khóa")
+                && PinState.of(PinState.Operation.UNBLOCK, true, Sw.OK).text()
+                        .contains("retry reset về 3"), true);
+        record("H08", "UNBLOCK 63C4 -> sai admin PIN, con 4 luot",
+                PinState.of(PinState.Operation.UNBLOCK, false, 0x63C4).text()
+                        .contains("Sai admin PIN")
+                && PinState.of(PinState.Operation.UNBLOCK, false, 0x63C4).text()
+                        .contains("còn 4 lượt thử"), true);
+        record("H09", "UNBLOCK 6983 -> admin PIN khoa, khong co duong mo",
+                PinState.of(PinState.Operation.UNBLOCK, false, Sw.AUTH_BLOCKED).text()
+                        .contains("admin PIN đang khóa"), true);
+        record("H10", "6985 -> PIN chua dung duoc",
+                PinState.of(PinState.Operation.VERIFY, false, Sw.CONDITIONS_NOT_SATISFIED)
+                        .text().contains("chưa ISSUED"), true);
+        record("H11", "khong gui APDU -> chua gui lenh PIN",
+                PinState.of(PinState.Operation.VERIFY, false, -1).text()
+                        .contains("Chưa gửi lệnh PIN"), true);
+        record("H12", "trang thai chua biet -> huong dan doc lai",
+                PinState.unknown().text().contains("Chưa biết trạng thái PIN")
+                && PinState.unknown().text().contains("VERIFY"), true);
+        record("H13", "SW la khong suy ra duoc trang thai",
+                PinState.of(PinState.Operation.VERIFY, false, 0x6F00).text()
+                        .contains("6F00"), true);
+
+        java.util.concurrent.atomic.AtomicInteger sent = new java.util.concurrent.atomic.AtomicInteger();
+        CardGateway gateway = readyGateway(issuedChannel(command -> {
+            sent.incrementAndGet();
+            return response(0x63C2);
+        }));
+        record("H14", "gateway moi chua co ket qua PIN", gateway.lastPinSw() == -1, true);
+        gateway.verifyStudentPin("12345".toCharArray());
+        record("H15", "chan tai client -> lastPinSw van -1, khong gui APDU",
+                gateway.lastPinSw() == -1 && sent.get() == 0, true);
+        gateway.verifyStudentPin("654321".toCharArray());
+        record("H16", "sau khi gui -> lastPinSw la SW that", gateway.lastPinSw(), 0x63C2);
+        gateway.identify();
+        record("H17", "identify lai -> lastPinSw ve -1", gateway.lastPinSw() == -1, true);
+    }
+
+    private static void checkPinStateOnCard(CardGateway gateway) throws CardException {
+        System.out.println();
+        System.out.println("--- Nhom H: trang thai PIN tren the that ---");
+
+        if (gateway.status() == null || gateway.status().lifecycle() != 0x01) {
+            skip("H20", "trang thai PIN bam theo SW that", "the chua ISSUED");
+            return;
+        }
+        char[] pin = liveSecret(false).clone();
+        char[] wrongPin = shiftDigits(pin, 5);
+        try {
+            gateway.verifyStudentPin(wrongPin);
+            record("H20", "VERIFY sai -> hien so luot con lai",
+                    PinState.of(PinState.Operation.VERIFY, false, gateway.lastPinSw()).text()
+                            .contains("lượt thử"), true);
+            gateway.verifyStudentPin(pin);
+            record("H21", "VERIFY dung -> hien da xac thuc",
+                    PinState.of(PinState.Operation.VERIFY, true, gateway.lastPinSw()).text()
+                            .contains("Đã xác thực"), true);
+        } finally {
+            Arrays.fill(pin, '\0');
+            Arrays.fill(wrongPin, '\0');
+        }
+    }
+
+    private static void checkPinOnCard(CardGateway gateway) throws CardException {
+        System.out.println();
+        System.out.println("--- Nhom M: PIN runtime tren the that ---");
+
+        if (gateway.status() == null || gateway.status().lifecycle() != 0x01) {
+            skip("M30", "PIN runtime tren the ISSUED", "the chua ISSUED");
+            return;
+        }
+        char[] source = liveSecret(false);
+        char[] adminSource = liveSecret(true);
+        if (source == null || adminSource == null) {
+            skip("M30", "PIN runtime tren the ISSUED", "khong doc duoc PIN dung do dai");
+            return;
+        }
+        char[] pin = source.clone();
+        char[] admin = adminSource.clone();
+        char[] changed = shiftDigits(pin, 1);
+        char[] unblocked = shiftDigits(pin, 2);
+        char[] wrongPin = shiftDigits(pin, 5);
+        char[] wrongAdmin = shiftDigits(admin, 1);
+        try {
+            CardGateway.Result verify = gateway.verifyStudentPin(pin);
+            record("M30", "VERIFY PIN dung tren the that -> 9000", verify.ok(), true);
+
+            CardGateway.Result wrong = gateway.verifyStudentPin(wrongPin);
+            record("M31", "VERIFY PIN sai -> 63Cx", gateway.lastResponseSw() == 0x63C2, true);
+            gateway.verifyStudentPin(pin);
+
+            String statusBefore = statusFingerprint(gateway);
+            String receiptBefore = receiptFingerprint(gateway, pin);
+            boolean receiptReal = receiptBefore.startsWith("GRANT")
+                    || receiptBefore.contains("counter=");
+            System.out.println("    fingerprint truoc CHANGE: status=" + statusBefore
+                    + " | receipt=" + receiptBefore);
+
+            CardGateway.Result change = gateway.changeStudentPin(pin, changed);
+            record("M32", "CHANGE PIN dung -> 9000", change.ok(), true);
+
+            gateway.verifyStudentPin(pin);
+            record("M33", "PIN cu bi vo hieu sau CHANGE -> 63Cx",
+                    gateway.lastResponseSw() == 0x63C2, true);
+
+            gateway.verifyStudentPin(changed);
+            record("M34", "PIN moi dung duoc sau CHANGE", gateway.lastResponseSw() == Sw.OK, true);
+            record("M35", "CHANGE khong doi lifecycle/cardId",
+                    statusFingerprint(gateway).equals(statusBefore), true);
+            if (receiptReal) {
+                record("M36", "CHANGE khong doi balance/counter/receipt",
+                        receiptFingerprint(gateway, changed).equals(receiptBefore), true);
+            } else {
+                skip("M36", "CHANGE khong doi balance/counter/receipt",
+                        "the chua co receipt doc duoc: " + receiptBefore);
+            }
+
+            gateway.verifyStudentPin(wrongPin);
+            record("M37", "sai lan 1 -> 63C2", gateway.lastResponseSw() == 0x63C2, true);
+            gateway.verifyStudentPin(wrongPin);
+            record("M38", "sai lan 2 -> 63C1", gateway.lastResponseSw() == 0x63C1, true);
+            gateway.verifyStudentPin(wrongPin);
+            record("M39", "sai lan 3 -> 6983 khoa PIN",
+                    gateway.lastResponseSw() == Sw.AUTH_BLOCKED, true);
+            gateway.verifyStudentPin(changed);
+            record("M40", "PIN dang khoa thi VERIFY dung cung 6983",
+                    gateway.lastResponseSw() == Sw.AUTH_BLOCKED, true);
+
+            String lockedStatus = statusFingerprint(gateway);
+            CardGateway.Result wrongUnblock = gateway.unblockStudentPin(wrongAdmin, unblocked);
+            record("M41", "UNBLOCK admin PIN sai bi tu choi",
+                    !wrongUnblock.ok()
+                    && ((gateway.lastResponseSw() & 0xFF00) == 0x6300
+                        || gateway.lastResponseSw() == Sw.AUTH_BLOCKED), true);
+            gateway.verifyStudentPin(unblocked);
+            record("M42", "admin PIN sai khong mo khoa student PIN",
+                    gateway.lastResponseSw() == Sw.AUTH_BLOCKED, true);
+            record("M43", "admin PIN sai khong doi lifecycle/cardId",
+                    statusFingerprint(gateway).equals(lockedStatus), true);
+
+            CardGateway.Result unblock = gateway.unblockStudentPin(admin, unblocked);
+            record("M44", "UNBLOCK admin PIN dung -> 9000", unblock.ok(), true);
+            record("M45", "PIN moi dung duoc sau UNBLOCK",
+                    gateway.verifyStudentPin(unblocked).ok(), true);
+            String receiptAfter = receiptFingerprint(gateway, unblocked);
+            System.out.println("    fingerprint sau UNBLOCK: receipt=" + receiptAfter);
+            if (receiptReal) {
+                record("M46", "sau UNBLOCK balance/counter/receipt khong doi",
+                        receiptAfter.equals(receiptBefore), true);
+            } else {
+                skip("M46", "sau UNBLOCK balance/counter/receipt khong doi",
+                        "the chua co receipt doc duoc: " + receiptBefore);
+            }
+        } finally {
+            Arrays.fill(pin, '\0');
+            Arrays.fill(admin, '\0');
+            Arrays.fill(changed, '\0');
+            Arrays.fill(unblocked, '\0');
+            Arrays.fill(wrongPin, '\0');
+            Arrays.fill(wrongAdmin, '\0');
+        }
+    }
+
+    private static String statusFingerprint(CardGateway gateway) {
+        CardGateway.Status current = gateway.status();
+        return current == null ? "no-status"
+                : current.lifecycle() + "/" + current.cardId();
+    }
+
+    private static String receiptFingerprint(CardGateway gateway, char[] pin)
+            throws CardException {
+        CardGateway.Result verify = gateway.verifyStudentPin(pin);
+        if (!verify.ok()) {
+            return "verify-loi:" + gateway.lastResponseSw();
+        }
+        CardGateway.Result receipt = gateway.readLastReceipt(null);
+        return receipt.ok() ? receipt.text() : "khong-receipt:" + gateway.lastResponseSw();
+    }
+
+    private static char[] shiftDigits(char[] pin, int delta) {
+        char[] shifted = new char[pin.length];
+        for (int index = 0; index < pin.length; index++) {
+            shifted[index] = (char) ('0' + (pin[index] - '0' + delta) % 10);
+        }
+        return shifted;
+    }
+
+    private static void checkPersonalizeOnCard(CardGateway gateway) throws CardException {
+        System.out.println();
+        System.out.println("--- Nhom W: PERSONALIZE tren the that qua CardGateway ---");
+
+        char[] adminSource = liveSecret(true);
+        char[] studentSource = liveSecret(false);
+        if (adminSource == null || studentSource == null) {
+            skip("W01", "PERSONALIZE the moi", "khong doc duoc PIN dung do dai");
+            return;
+        }
+        char[] adminPin = adminSource.clone();
+        char[] studentPin = studentSource.clone();
+        String studentId = "SV2024-001";
+        String displayName = "Nguyễn Văn Ánh";
+        char[] wrongAdmin = shiftedDigits(adminPin);
+        try {
+            CardGateway.Status before = gateway.status();
+            boolean alreadyIssued = before != null && before.lifecycle() == 0x01;
+            if (alreadyIssued) {
+                skip("W01", "PERSONALIZE the moi -> 9000 + ISSUED + cardId",
+                        "the da ISSUED truoc phien chay");
+                skip("W03", "admin PIN sai -> 63Cx khong lo PIN", "the da ISSUED truoc phien chay");
+                skip("W04", "admin PIN sai khong doi lifecycle", "the da ISSUED truoc phien chay");
+            } else if (!Boolean.getBoolean("labaccess.personalize")) {
+                skip("W01", "PERSONALIZE the moi -> 9000 + ISSUED + cardId",
+                        "dat -Dlabaccess.personalize=true de tao the test moi");
+                skip("W03", "admin PIN sai -> 63Cx khong lo PIN", "chua bat -Dlabaccess.personalize");
+                skip("W04", "admin PIN sai khong doi lifecycle", "chua bat -Dlabaccess.personalize");
+            } else {
+                CardGateway.Result wrong = gateway.personalize(
+                        wrongAdmin, CARD_ID, studentId, studentPin, displayName);
+                record("W03", "admin PIN sai -> 63Cx, khong lo PIN",
+                        !wrong.ok() && wrong.text().contains("admin PIN sai")
+                        && wrong.text().contains("63C")
+                        && !mentionsDigits(wrong.text(), adminPin)
+                        && !mentionsDigits(wrong.text(), wrongAdmin), true);
+
+                CardGateway.Result afterWrong = gateway.identify();
+                record("W04", "admin PIN sai khong doi lifecycle va cardId",
+                        afterWrong.ok() && gateway.status() != null
+                        && gateway.status().lifecycle() == 0x00
+                        && gateway.status().cardId().equals("0000000000000000"), true);
+
+                CardGateway.Result first = gateway.personalize(
+                        adminPin, CARD_ID, studentId, studentPin, displayName);
+                System.out.println("    " + first.text());
+                record("W01", "PERSONALIZE the moi -> 9000 + ISSUED + cardId",
+                        first.ok() && first.text().contains("SW=9000"), true);
+                record("W02", "sau PERSONALIZE lifecycle ISSUED + cardId dung",
+                        gateway.status() != null && gateway.status().lifecycle() == 0x01
+                        && CARD_ID.equalsIgnoreCase(gateway.status().cardId()), true);
+            }
+
+            CardGateway.Result second = gateway.personalize(
+                    adminPin, CARD_ID, studentId, studentPin, displayName);
+            record("W05", "PERSONALIZE lan hai bi tu choi 6985",
+                    !second.ok() && second.text().contains("6985")
+                    && !mentionsDigits(second.text(), adminPin), true);
+        } finally {
+            Arrays.fill(adminPin, '\0');
+            Arrays.fill(studentPin, '\0');
+            Arrays.fill(wrongAdmin, '\0');
+        }
+    }
+
+    private static char[] shiftedDigits(char[] source) {
+        char[] shifted = new char[source.length];
+        for (int index = 0; index < source.length; index++) {
+            shifted[index] = (char) ('0' + (source[index] - '0' + 1) % 10);
+        }
+        return shifted;
+    }
     private static void checkVerifyAndTransactionOnCard(CardGateway gateway) {
         System.out.println();
         System.out.println("--- Nhom X: VERIFY + GRANT + journal tren the that ---");
@@ -1287,13 +1921,19 @@ public final class CardGatewayVerify {
 
     private static CardChannel issuedChannel(
             java.util.function.Function<CommandAPDU, ResponseAPDU> afterStatus) {
+        return issuedChannel(afterStatus, 0x01);
+    }
+
+    private static CardChannel issuedChannel(
+            java.util.function.Function<CommandAPDU, ResponseAPDU> afterStatus, int lifecycle) {
+        String cardId = lifecycle == 0x01 ? CARD_ID : "0000000000000000";
         return scriptedChannel(command -> {
             int ins = command.getINS() & 0xFF;
             if (ins == 0xA4) {
                 return response(Sw.OK);
             }
             if (ins == 0x10) {
-                return statusApdu(0x01, CARD_ID);
+                return statusApdu(lifecycle, cardId);
             }
             return afterStatus.apply(command);
         });
