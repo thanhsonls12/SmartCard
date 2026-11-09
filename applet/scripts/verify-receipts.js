@@ -1,20 +1,3 @@
-/*
- * LabAccess - xac minh doc lap receipt cua the (SIGN-05) bang Node.js.
- *
- * Doc artifact NDJSON do PersonalizeSelfTest xuat ra: moi dong la mot receipt
- * gom payload 34 byte, chu ky DER, do dai chu ky, public key cua the va gia tri
- * mong doi cua tung truong.
- *
- * Kiem 4 nhom:
- *   1. Chu ky dung: domain "LABACCESS-RECEIPT-v1" || payload, ECDSA P-256/SHA-256 -> TRUE
- *   2. Cau truc payload: version, cardId, counterAfter, operation, delta,
- *      balanceAfter, visitId dung byte-by-byte so voi gia tri mong doi
- *   3. Sua payload o tung truong, hoac dung key khac -> FALSE
- *   4. Receipt lap lai sau loi/reconnect phai giong het receipt goc
- *
- * Chay: node applet/scripts/verify-receipts.js <artifact-ndjson>
- */
-
 import { readFileSync } from 'node:fs';
 import { createPublicKey, generateKeyPairSync, verify } from 'node:crypto';
 
