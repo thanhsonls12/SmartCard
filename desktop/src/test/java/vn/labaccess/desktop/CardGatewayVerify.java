@@ -20,6 +20,7 @@ public final class CardGatewayVerify {
 
     private static final byte[] AID = HexFormat.of().parseHex("F04C4142010101");
     private static final byte[] WRONG_AID = HexFormat.of().parseHex("F04C4142010199");
+    private static final byte[] HELLOWORLD_AID = HexFormat.of().parseHex("A00000006203010C0101");
 
     private static final int SW_OK = 0x9000;
 
@@ -39,6 +40,10 @@ public final class CardGatewayVerify {
     private static String expectedDisplayName;
 
     public static void main(String[] args) throws Exception {
+        if (System.getProperty("labaccess.twoClient.mode") != null) {
+            runTwoClientChild();
+            return;
+        }
         checkLifecycleRules();
         checkReceiptCodec();
         checkReceiptExpectation();
@@ -58,6 +63,15 @@ public final class CardGatewayVerify {
         checkPhotoDraftOffline();
         checkPhotoOffline();
 
+        if (Boolean.getBoolean("labaccess.offlineOnly")) {
+            System.out.println();
+            System.out.println("KET LUAN OFFLINE: " + (failed == 0 ? "PASS" : "FAIL (" + failed + ")"));
+            if (failed != 0) {
+                System.exit(1);
+            }
+            return;
+        }
+
         CardGateway gateway = new CardGateway(HOST, PORT);
         try {
             checkIdentifyWithRealCard(gateway);
@@ -69,6 +83,7 @@ public final class CardGatewayVerify {
             checkFaultAfterCommitOnCard(gateway);
             checkPinStateOnCard(gateway);
             checkProfileOnCard(gateway);
+            checkPhotoSessionLossOnCard(gateway);
             checkPhotoOnCard(gateway);
             checkPinOnCard(gateway);
         } finally {
@@ -104,6 +119,62 @@ public final class CardGatewayVerify {
                 offline.checkStatus(statusApdu(0x01, "0123456789ABCDEF"), AID).ok(), true);
         record("V08", "AID tra ve khac AID yeu cau bi tu choi",
                 offline.checkStatus(statusApdu(0x00, "0000000000000000"), WRONG_AID).ok(), false);
+
+        CardGateway stateGateway = new CardGateway(HOST, PORT);
+        record("V10", "GET_STATUS public chi chap nhan schema 27 byte",
+                stateGateway.checkStatus(statusApdu(0x01, CARD_ID), AID).ok()
+                        && stateGateway.status() != null
+                        && !stateGateway.status().studentStateAvailable(), true);
+        record("V11", "GET_STATUS authenticated parse balance/counter/active visit ID",
+                stateGateway.checkStatus(authenticatedStatusApdu(5, 2, true, VISIT_ID), AID).ok()
+                        && stateGateway.status().studentStateAvailable()
+                        && stateGateway.status().balance() == 5
+                        && stateGateway.status().counter() == 2
+                        && stateGateway.status().hasActiveVisit()
+                        && stateGateway.status().activeVisitId().equalsIgnoreCase(VISIT_ID), true);
+        record("V12", "GET_STATUS closed visit phai co ID zero",
+                stateGateway.checkStatus(authenticatedStatusApdu(5, 2, false, VISIT_ID), AID).ok(), false);
+        record("V13", "GET_STATUS open visit phai co ID khac zero",
+                stateGateway.checkStatus(authenticatedStatusApdu(5, 2, true, NO_VISIT_ID), AID).ok(), false);
+        checkCardPublicKeyCacheReset();
+    }
+
+    private static void checkCardPublicKeyCacheReset() {
+        TestKey firstKey = newTestKey();
+        TestKey secondKey = newTestKey();
+        byte[][] selectedAid = { AID.clone() };
+        int[] keyReads = { 0 };
+        CardGateway gateway = new CardGateway(scriptedChannel(command -> {
+            int ins = command.getINS() & 0xFF;
+            if (ins == 0xA4) {
+                selectedAid[0] = command.getData();
+                return response(Sw.OK);
+            }
+            if (ins == 0x10) {
+                return statusApdu(0x01, CARD_ID, selectedAid[0]);
+            }
+            if (ins == 0x61) {
+                keyReads[0]++;
+                TestKey key = Arrays.equals(selectedAid[0], AID) ? firstKey : secondKey;
+                return responseWithData(key.encoded(), Sw.OK);
+            }
+            return response(Sw.INS_NOT_SUPPORTED);
+        }));
+        try {
+            gateway.identifyWith(AID);
+            CardGateway.Result first = gateway.prepareReceiptVerification();
+            boolean firstKeyLoaded = first.ok() && Arrays.equals(
+                    ReceiptVerifier.encodePoint(firstKey.publicKey()),
+                    ReceiptVerifier.encodePoint(gateway.cardPublicKey()));
+            gateway.identifyWith(WRONG_AID);
+            CardGateway.Result second = gateway.prepareReceiptVerification();
+            record("V14", "public key cache duoc nap lai sau khi doi instance AID",
+                    firstKeyLoaded && second.ok() && keyReads[0] == 2
+                            && Arrays.equals(ReceiptVerifier.encodePoint(secondKey.publicKey()),
+                                    ReceiptVerifier.encodePoint(gateway.cardPublicKey())), true);
+        } catch (CardException exception) {
+            record("V14", "public key cache duoc nap lai sau khi doi instance AID", false, true);
+        }
     }
 
     private static void checkReceiptCodec() {
@@ -168,12 +239,12 @@ public final class CardGatewayVerify {
         record("C14", "GRANT co visitId khac 00 bi tu choi",
                 ReceiptCodec.parse(receiptResponse(1, 5, 1, 5, CARD_ID, VISIT_ID, 70)).ok(),
                 false);
-        record("C15", "signatureLength 69 bi tu choi",
-                ReceiptCodec.parse(receiptResponse(1, 5, 1, 5, CARD_ID, NO_VISIT_ID, 69)).ok(),
-                false);
+        record("C15", "signatureLength 69 duoc parse o wire envelope",
+                ReceiptCodec.parse(receiptResponse(1, 5, 1, 5, CARD_ID,
+                        NO_VISIT_ID, 69)).ok(), true);
         record("C16", "signatureLength 73 bi tu choi",
-                ReceiptCodec.parse(receiptResponse(1, 5, 1, 5, CARD_ID, NO_VISIT_ID, 73)).ok(),
-                false);
+                ReceiptCodec.parse(receiptResponse(1, 5, 1, 5, CARD_ID,
+                        NO_VISIT_ID, 73)).ok(), false);
         record("C17", "response bi cat ngan bi tu choi",
                 ReceiptCodec.parse(Arrays.copyOf(
                         receiptResponse(1, 5, 1, 5, CARD_ID, NO_VISIT_ID, 70), 100)).ok(),
@@ -381,12 +452,19 @@ public final class CardGatewayVerify {
                 !ReceiptVerifier.verify(card.publicKey(), otherDomain, payload, signature).ok(),
                 true);
 
-        byte[] der69 = Arrays.copyOf(signature, 69);
+        byte[] signature69 = null;
+        for (int attempt = 0; attempt < 8192 && signature69 == null; attempt++) {
+            byte[] candidate = sign(card, payload);
+            if (candidate.length == 69
+                    && ReceiptVerifier.verify(card.publicKey(), payload, candidate).ok()) {
+                signature69 = candidate;
+            }
+        }
         byte[] der73 = Arrays.copyOf(signature, 73);
-        record("S06", "DER 69/73 byte -> FAIL truoc khi verify",
-                !ReceiptVerifier.verify(card.publicKey(), payload, der69).ok()
-                        && !ReceiptVerifier.verify(card.publicKey(), payload, der73).ok(),
-                true);
+        record("S06", "chu ky ECDSA DER hop le 69 byte duoc chap nhan, 73 byte bi tu choi",
+                signature69 != null
+                        && ReceiptVerifier.verify(card.publicKey(), payload, signature69).ok()
+                        && !ReceiptVerifier.verify(card.publicKey(), payload, der73).ok(), true);
 
         ReceiptVerifier.ParsedKey parsed = ReceiptVerifier.parsePublicKey(card.encoded());
         boolean roundTrip = parsed.ok()
@@ -2749,6 +2827,220 @@ public final class CardGatewayVerify {
                         == Sw.SECURITY_NOT_SATISFIED, true);
     }
 
+    private static void checkPhotoSessionLossOnCard(CardGateway gateway) throws Exception {
+        System.out.println("--- Nhom PH56+: mat phien upload khi deselect / reset / hai tien trinh ---");
+        byte[] image = syntheticPhoto();
+        char[] admin = liveSecret(true);
+        char[] student = liveSecret(false);
+
+        byte[] beginData = new byte[PHOTO_BEGIN_LENGTH];
+        for (int index = 0; index < 8; index++) {
+            beginData[index] = (byte) admin[index];
+        }
+        beginData[8] = 0x01;
+        beginData[9] = 64;
+        beginData[10] = 64;
+        beginData[11] = (byte) (PHOTO_LENGTH >> 8);
+        beginData[12] = (byte) PHOTO_LENGTH;
+
+        byte[] firstChunk = new byte[PHOTO_CHUNK];
+        System.arraycopy(image, 0, firstChunk, 0, PHOTO_CHUNK);
+
+        record("PH56", "deselect: BEGIN tra 9000",
+                gateway.transmitPhotoBegin(beginData).getSW() == Sw.OK, true);
+        record("PH57", "deselect: WRITE offset 0 tra 9000",
+                gateway.transmitPhotoWriteChunk(0, firstChunk).getSW() == Sw.OK, true);
+        record("PH58", "deselect: SELECT applet khac (helloworld) tra 9000",
+                gateway.selectInstance(HELLOWORLD_AID), Sw.OK);
+        record("PH59", "deselect: SELECT LabAccess lai tra 9000",
+                gateway.selectInstance(AID), Sw.OK);
+        record("PH60", "deselect: WRITE offset 128 sau deselect tra 6985",
+                gateway.transmitPhotoWriteChunk(PHOTO_CHUNK, firstChunk).getSW()
+                        == Sw.CONDITIONS_NOT_SATISFIED, true);
+        record("PH61", "deselect: BEGIN moi sau deselect tra 9000",
+                gateway.transmitPhotoBegin(beginData).getSW() == Sw.OK, true);
+        record("PH62", "deselect: khong FINISH nao xay ra (FINISH khi chua du byte tra 6985)",
+                gateway.transmitPhotoFinish().getSW() == Sw.CONDITIONS_NOT_SATISFIED, true);
+        CardGateway.Result deselectedRead = gateway.readPhoto(student);
+        record("PH63", "deselect: anh dở dang van khong doc duoc (6985)",
+                !deselectedRead.ok() && deselectedRead.text().contains("6985"), true);
+
+        record("PH64", "reset: BEGIN lai sau buoc doc tra 9000",
+                gateway.transmitPhotoBegin(beginData).getSW() == Sw.OK, true);
+        record("PH65", "reset: WRITE chunk 0 tra 9000",
+                gateway.transmitPhotoWriteChunk(0, firstChunk).getSW() == Sw.OK, true);
+        gateway.disconnect();
+        gateway.connect();
+        gateway.identify();
+        record("PH66", "reset: SELECT + GET_STATUS sau disconnect(reset)+connect tra 9000",
+                gateway.isReady() && gateway.status() != null, true);
+        record("PH67", "reset: WRITE offset 128 sau reset tra 6985",
+                gateway.transmitPhotoWriteChunk(PHOTO_CHUNK, firstChunk).getSW()
+                        == Sw.CONDITIONS_NOT_SATISFIED, true);
+        record("PH68", "reset: BEGIN moi sau reset tra 9000",
+                gateway.transmitPhotoBegin(beginData).getSW() == Sw.OK, true);
+        record("PH69", "reset: khong FINISH nao xay ra (FINISH khi chua du byte tra 6985)",
+                gateway.transmitPhotoFinish().getSW() == Sw.CONDITIONS_NOT_SATISFIED, true);
+        CardGateway.Result resetRead = gateway.readPhoto(student);
+        record("PH70", "reset: anh dở dang van khong doc duoc (6985)",
+                !resetRead.ok() && resetRead.text().contains("6985"), true);
+
+        java.util.Arrays.fill(beginData, (byte) 0);
+        runTwoClientCase(gateway, image);
+        System.out.println("--- Ket noi lai de nhom tiep theo chay binh thuong ---");
+        if (!gateway.isConnected()) {
+            gateway.connect();
+            gateway.identify();
+        }
+    }
+
+    private static void runTwoClientCase(CardGateway gateway, byte[] image) throws Exception {
+        Path logDir = Path.of("logs");
+        Files.createDirectories(logDir);
+        Path clientLog = logDir.resolve("photo-two-client-B.log");
+        Path handshake = logDir.resolve("photo-two-client-handshake.flag");
+        Files.deleteIfExists(clientLog);
+        Files.deleteIfExists(handshake);
+        String separator = System.getProperty("file.separator");
+        String parentModulePath = System.getProperty("jdk.module.path", "");
+        List<String> command = List.of(
+                System.getProperty("java.home") + separator + "bin" + separator + "java",
+                "--module-path", parentModulePath,
+                "-Dlabaccess.port=" + PORT,
+                "-Dlabaccess.twoClient.mode=interleave",
+                "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8", "-Dfile.encoding=UTF-8",
+                "-m", "vn.labaccess.desktop/vn.labaccess.desktop.CardGatewayVerify");
+        ProcessBuilder builder = new ProcessBuilder(command);
+        builder.redirectOutput(clientLog.toFile()).redirectErrorStream(true);
+        Process clientB = builder.start();
+        try {
+            long pidB = clientB.pid();
+            long pidA = ProcessHandle.current().pid();
+            byte[] beginData = new byte[PHOTO_BEGIN_LENGTH];
+            byte[] adminPin = ADMIN_PIN_TEXT.getBytes();
+            for (int index = 0; index < 8; index++) {
+                beginData[index] = (byte) adminPin[index];
+            }
+            beginData[8] = 0x01;
+            beginData[9] = 64;
+            beginData[10] = 64;
+            beginData[11] = (byte) (PHOTO_LENGTH >> 8);
+            beginData[12] = (byte) PHOTO_LENGTH;
+            byte[] firstChunk = new byte[PHOTO_CHUNK];
+            System.arraycopy(image, 0, firstChunk, 0, PHOTO_CHUNK);
+
+            int beginSw = gateway.transmitPhotoBegin(beginData).getSW();
+            System.out.println("    A(PID=" + pidA + ") PHOTO_BEGIN SW=" + String.format("%04X", beginSw));
+            int write0Sw = gateway.transmitPhotoWriteChunk(0, firstChunk).getSW();
+            System.out.println("    A(PID=" + pidA + ") WRITE offset=0 SW=" + String.format("%04X", write0Sw));
+
+            boolean handshakeSeen = false;
+            boolean exited = false;
+            for (int second = 0; second < 60 && !handshakeSeen; second++) {
+                if (!clientB.isAlive() && !Files.exists(handshake)) {
+                    break;
+                }
+                handshakeSeen = Files.exists(handshake);
+                if (!handshakeSeen) {
+                    Thread.sleep(1000);
+                }
+            }
+            boolean serializedBridge = false;
+            if (!handshakeSeen && clientB.isAlive()) {
+                serializedBridge = true;
+                System.out.println("    B(PID=" + pidB + ") bi chan o connect() trong khi A con giu ket noi — bridge jcsw tuan tu hoa client");
+                gateway.disconnect();
+                exited = clientB.waitFor(60, java.util.concurrent.TimeUnit.SECONDS);
+            }
+            record("PH71", "hai client: tien trinh B (PID=" + pidB + ") da khoi dong", clientB.isAlive() || exited, true);
+            String bLog = Files.exists(clientLog) ? Files.readString(clientLog) : "(khong co log B)";
+            System.out.println("    Log tien trinh B: " + bLog.replace(System.lineSeparator(), " | "));
+
+            int write128Sw = serializedBridge ? -1 : gateway.transmitPhotoWriteChunk(PHOTO_CHUNK, firstChunk).getSW();
+            if (!serializedBridge) {
+                System.out.println("    A(PID=" + pidA + ") WRITE offset=128 sau lenh xen ngang cua B SW="
+                        + String.format("%04X", write128Sw));
+            }
+
+            boolean exitedFinal = exited || clientB.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+            int exitCode = exitedFinal ? clientB.exitValue() : -1;
+
+            record("PH72", "hai client: A BEGIN + WRITE offset 0 truoc khi B xen tra 9000",
+                    beginSw == Sw.OK && write0Sw == Sw.OK, true);
+            if (serializedBridge) {
+                skip("PH73", "hai client: B xen lenh trong khi A dang giu phien",
+                        "bridge jcsw chi cho mot client: connect() cua B bi chan toi khi A ngat — khong thuc hien duoc tranh phien that tren runtime nay");
+                skip("PH74", "hai client: WRITE cua A bi chan 6985 sau lenh xen cua B",
+                        "phu thuoc PH73");
+            } else {
+                record("PH73", "hai client: B da gui lenh xen ngang (GET_STATUS) truoc khi A ghi tiep",
+                        handshakeSeen && bLog.contains("GET_STATUS"), true);
+                record("PH74", "hai client: WRITE offset 128 cua A bi chan 6985 sau lenh xen cua B",
+                        write128Sw == Sw.CONDITIONS_NOT_SATISFIED, true);
+            }
+            if (serializedBridge) {
+                gateway.connect();
+                gateway.identify();
+            }
+            int finishSw = gateway.transmitPhotoFinish().getSW();
+            record("PH75", "hai client: khong FINISH nao xay ra (FINISH tra 6985)",
+                    finishSw == Sw.CONDITIONS_NOT_SATISFIED, true);
+            CardGateway.Result contendedRead = gateway.readPhoto(liveSecret(false));
+            record("PH76", "hai client: anh dở dang van khong doc duoc (6985)",
+                    !contendedRead.ok() && contendedRead.text().contains("6985"), true);
+            record("PH77", "hai client: B ket thuc trong han (exited=" + exitedFinal + " exit=" + exitCode + ")",
+                    exitedFinal && exitCode == 0, true);
+        } finally {
+            try {
+                if (clientB.isAlive()) {
+                    clientB.destroy();
+                    if (!clientB.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) {
+                        clientB.destroyForcibly();
+                        if (!clientB.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("Khong the dung tien trinh B PID=" + clientB.pid());
+                        }
+                    }
+                }
+            } finally {
+                try {
+                    Files.deleteIfExists(handshake);
+                } finally {
+                    Files.deleteIfExists(clientLog);
+                }
+            }
+        }
+    }
+
+    private static void runTwoClientChild() {
+        String mode = System.getProperty("labaccess.twoClient.mode", "interleave");
+        try {
+            CardGateway gateway = new CardGateway(HOST, PORT);
+            gateway.connect();
+            gateway.identify();
+            long pid = ProcessHandle.current().pid();
+            System.out.println("B(PID=" + pid + ") SELECT SW=9000");
+            System.out.flush();
+            if (mode.equals("hold")) {
+                Thread.sleep(15_000);
+                gateway.disconnect();
+                System.out.println("B(PID=" + pid + ") hold xong");
+                System.out.flush();
+                System.exit(0);
+            }
+            int statusSw = gateway.transmitStatus().getSW();
+            System.out.println("B(PID=" + pid + ") GET_STATUS SW=" + String.format("%04X", statusSw)
+                    + " (lenh xen ngang)");
+            System.out.flush();
+            Files.writeString(Path.of("logs", "photo-two-client-handshake.flag"),
+                    "B interleaved GET_STATUS SW=" + String.format("%04X", statusSw));
+            System.exit(0);
+        } catch (Exception ex) {
+            System.out.println("B(PID=" + ProcessHandle.current().pid() + ") LOI: " + ex);
+            System.out.flush();
+            System.exit(1);
+        }
+    }
+
     private static CardGateway readyGateway(CardChannel channel) {
         CardGateway gateway = new CardGateway(channel);
         try {
@@ -2782,16 +3074,39 @@ public final class CardGatewayVerify {
         });
     }
 
+    private static ResponseAPDU authenticatedStatusApdu(int balance, long counter,
+            boolean activeVisit, String visitIdHex) {
+        byte[] publicData = statusApdu(0x01, CARD_ID).getData();
+        byte[] visitId = HexFormat.of().parseHex(visitIdHex);
+        byte[] data = Arrays.copyOf(publicData, publicData.length + 23);
+        int offset = publicData.length;
+        data[offset] = (byte) (balance >> 8);
+        data[offset + 1] = (byte) balance;
+        for (int index = 0; index < 4; index++) {
+            data[offset + 5 - index] = (byte) (counter >> (index * 8));
+        }
+        data[offset + 6] = (byte) (activeVisit ? 1 : 0);
+        System.arraycopy(visitId, 0, data, offset + 7, visitId.length);
+        byte[] raw = Arrays.copyOf(data, data.length + 2);
+        raw[data.length] = (byte) (SW_OK >> 8);
+        raw[data.length + 1] = (byte) SW_OK;
+        return new ResponseAPDU(raw);
+    }
+
     private static ResponseAPDU statusApdu(int lifecycle, String cardIdHex) {
+        return statusApdu(lifecycle, cardIdHex, AID);
+    }
+
+    private static ResponseAPDU statusApdu(int lifecycle, String cardIdHex, byte[] aid) {
         byte[] cardId = HexFormat.of().parseHex(cardIdHex);
-        byte[] data = new byte[11 + AID.length + 1 + cardId.length];
+        byte[] data = new byte[11 + aid.length + 1 + cardId.length];
         byte[] magic = { 'L', 'A', 'B', 'A', 'C', 'C', 'E', 'S', 'S' };
         System.arraycopy(magic, 0, data, 0, magic.length);
         data[9] = 0x01;
-        data[10] = (byte) AID.length;
-        System.arraycopy(AID, 0, data, 11, AID.length);
-        data[11 + AID.length] = (byte) lifecycle;
-        System.arraycopy(cardId, 0, data, 12 + AID.length, cardId.length);
+        data[10] = (byte) aid.length;
+        System.arraycopy(aid, 0, data, 11, aid.length);
+        data[11 + aid.length] = (byte) lifecycle;
+        System.arraycopy(cardId, 0, data, 12 + aid.length, cardId.length);
         byte[] raw = new byte[data.length + 2];
         System.arraycopy(data, 0, raw, 0, data.length);
         raw[data.length] = (byte) (SW_OK >> 8);

@@ -14,7 +14,7 @@ final class ReceiptCodec {
 
     static final int PAYLOAD_LENGTH = 34;
     static final int LENGTH_FIELD_LENGTH = 1;
-    static final int SIGNATURE_MIN_LENGTH = 70;
+    static final int SIGNATURE_MIN_LENGTH = 8;
     static final int SIGNATURE_MAX_LENGTH = 72;
     static final int RESPONSE_MIN_LENGTH = PAYLOAD_LENGTH + LENGTH_FIELD_LENGTH
             + SIGNATURE_MIN_LENGTH;

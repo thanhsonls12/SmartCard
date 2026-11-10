@@ -39,7 +39,7 @@ final class ReceiptVerifier {
     static final byte[] DOMAIN = "LABACCESS-RECEIPT-v1".getBytes(StandardCharsets.US_ASCII);
     static final int PUBLIC_KEY_LENGTH = 65;
     static final byte PUBLIC_POINT_PREFIX = 0x04;
-    static final int SIGNATURE_MIN_LENGTH = 70;
+    static final int SIGNATURE_MIN_LENGTH = 8;
     static final int SIGNATURE_MAX_LENGTH = 72;
     static final int COORDINATE_LENGTH = 32;
     static final String ALGORITHM = "SHA256withECDSA";

@@ -26,7 +26,13 @@ final class CardGateway {
         }
     }
 
-    record Status(int protocolVersion, int lifecycle, String instanceAid, String cardId) {
+    record Status(int protocolVersion, int lifecycle, String instanceAid, String cardId,
+            boolean studentStateAvailable, int balance, long counter, boolean hasActiveVisit,
+            String activeVisitId) {
+        Status publicView() {
+            return new Status(protocolVersion, lifecycle, instanceAid, cardId,
+                    false, -1, -1, false, "");
+        }
     }
 
     private static final byte[] INSTANCE_AID = HexFormat.of().parseHex("F04C4142010101");
@@ -60,16 +66,6 @@ final class CardGateway {
 
     private static final int LIFECYCLE_UNPERSONALIZED = 0x00;
     private static final int LIFECYCLE_ISSUED = 0x01;
-
-    private static final byte[] MAGIC = {
-            'L', 'A', 'B', 'A', 'C', 'C', 'E', 'S', 'S'
-    };
-
-    private static final int OFFSET_PROTOCOL_VERSION = 9;
-    private static final int OFFSET_AID_LENGTH = 10;
-    private static final int OFFSET_INSTANCE_AID = 11;
-    private static final int CARD_ID_LENGTH = 8;
-
 
     private final String host;
     private final int port;
@@ -132,6 +128,7 @@ final class CardGateway {
         ready = false;
         status = null;
         lastReceipt = null;
+        cardPublicKey = null;
         lastProfile = null;
         lastProfileMeta = null;
         lastPhoto = null;
@@ -150,6 +147,7 @@ final class CardGateway {
         requireConnected();
         ready = false;
         status = null;
+        cardPublicKey = null;
         lastProfile = null;
         lastProfileMeta = null;
         lastPhoto = null;
@@ -177,82 +175,19 @@ final class CardGateway {
     }
 
     Result checkStatus(ResponseAPDU response, byte[] requestedAid) {
-        byte[] data = response.getData();
-        int sw = response.getSW();
-
-        if (sw != Sw.OK) {
-            return Result.fail(String.format(
-                    "GET_STATUS SW=%04X | kết luận: CHƯA SẴN SÀNG", sw));
+        CardStatusCodec.Parsed parsed = CardStatusCodec.parse(response, requestedAid);
+        if (!parsed.ok()) {
+            return Result.fail(parsed.problem());
         }
-        if (data.length < OFFSET_INSTANCE_AID) {
-            return Result.fail(String.format(
-                    "GET_STATUS SW=%04X nhưng chỉ có %d byte | kết luận: CHƯA SẴN SÀNG",
-                    sw, data.length));
-        }
-        for (int i = 0; i < MAGIC.length; i++) {
-            if (data[i] != MAGIC[i]) {
-                return Result.fail("GET_STATUS sai magic: " + hex(Arrays.copyOf(data, MAGIC.length))
-                        + " | kết luận: CHƯA SẴN SÀNG");
-            }
-        }
-
-        int version = data[OFFSET_PROTOCOL_VERSION] & 0xFF;
-        if (version != PROTOCOL_VERSION) {
-            return Result.fail(String.format(
-                    "GET_STATUS protocol=%02X không hỗ trợ | kết luận: CHƯA SẴN SÀNG", version));
-        }
-
-        int aidLength = data[OFFSET_AID_LENGTH] & 0xFF;
-        int expectedLength = OFFSET_INSTANCE_AID + aidLength + 1 + CARD_ID_LENGTH;
-        if (data.length != expectedLength) {
-            return Result.fail(String.format(
-                    "GET_STATUS %d byte, theo aidLen=%d phải là %d | kết luận: CHƯA SẴN SÀNG",
-                    data.length, aidLength, expectedLength));
-        }
-
-        byte[] returnedAid = Arrays.copyOfRange(data, OFFSET_INSTANCE_AID,
-                OFFSET_INSTANCE_AID + aidLength);
-        if (!Arrays.equals(returnedAid, requestedAid)) {
-            return Result.fail(String.format(
-                    "GET_STATUS trả AID=%s khác AID đã yêu cầu=%s | kết luận: CHƯA SẴN SÀNG",
-                    hex(returnedAid), hex(requestedAid)));
-        }
-
-        int lifecycle = data[OFFSET_INSTANCE_AID + aidLength] & 0xFF;
-        byte[] cardId = Arrays.copyOfRange(data, OFFSET_INSTANCE_AID + aidLength + 1,
-                expectedLength);
-
-        Result lifecycleProblem = checkLifecycle(lifecycle, cardId);
-        if (lifecycleProblem != null) {
-            return lifecycleProblem;
-        }
-
-        Status current = new Status(version, lifecycle, hex(returnedAid), hex(cardId));
-        status = current;
-
+        status = parsed.status();
+        Status current = status;
         return Result.ok(String.format(
-                "AID=%s protocol=%02X lifecycle=%s cardId=%s | kết luận: SẴN SÀNG",
-                current.instanceAid(), current.protocolVersion(),
-                lifecycleText(current.lifecycle()), current.cardId()));
-    }
-
-    private Result checkLifecycle(int lifecycle, byte[] cardId) {
-        if (lifecycle != LIFECYCLE_UNPERSONALIZED && lifecycle != LIFECYCLE_ISSUED) {
-            return Result.fail(String.format(
-                    "GET_STATUS lifecycle=%02X chưa được giao thức định nghĩa | kết luận: CHƯA SẴN SÀNG",
-                    lifecycle));
-        }
-        boolean cardIdAssigned = !isAllZero(cardId);
-        if (lifecycle == LIFECYCLE_UNPERSONALIZED && cardIdAssigned) {
-            return Result.fail(String.format(
-                    "lifecycle=00 UNPERSONALIZED nhưng cardId=%s đã gán | kết luận: CHƯA SẴN SÀNG",
-                    hex(cardId)));
-        }
-        if (lifecycle == LIFECYCLE_ISSUED && !cardIdAssigned) {
-            return Result.fail(String.format(
-                    "lifecycle=01 ISSUED nhưng cardId toàn 00 | kết luận: CHƯA SẴN SÀNG"));
-        }
-        return null;
+                "AID=%s protocol=%02X lifecycle=%s cardId=%s%s | kết luận: SẴN SÀNG",
+                current.instanceAid(), current.protocolVersion(), lifecycleText(current.lifecycle()),
+                current.cardId(), current.studentStateAvailable()
+                        ? String.format(" balance=%d counter=%d activeVisit=%s",
+                                current.balance(), current.counter(), current.hasActiveVisit())
+                        : ""));
     }
 
     private static boolean isAllZero(byte[] value) {
@@ -480,6 +415,54 @@ final class CardGateway {
                 INS_PHOTO_READ_CHUNK, (offset >> 8) & 0xFF, offset & 0xFF, le));
         lastResponseSw = chunk.getSW();
         return chunk;
+    }
+
+    int selectInstance(byte[] instanceAid) throws CardException {
+        requireConnected();
+        ResponseAPDU response = channel.transmit(
+                new CommandAPDU(0x00, 0xA4, 0x04, 0x00, instanceAid, 256));
+        lastResponseSw = response.getSW();
+        return response.getSW();
+    }
+
+    ResponseAPDU transmitStatus() throws CardException {
+        requireConnected();
+        ResponseAPDU response = channel.transmit(
+                new CommandAPDU(CLA_APPLICATION, INS_GET_STATUS, 0x00, 0x00, 256));
+        lastResponseSw = response.getSW();
+        return response;
+    }
+
+    void clearAuthenticatedStatus() {
+        Status current = status;
+        if (current != null) {
+            status = current.publicView();
+        }
+    }
+
+    Result readAuthenticatedStatus(char[] studentPin) throws CardException {
+        requireConnected();
+        Status current = status;
+        if (current == null || !ready) {
+            return Result.fail("GET_STATUS state cần SELECT applet trước");
+        }
+        status = current.publicView();
+        Result verified = verifyStudentPin(studentPin);
+        if (!verified.ok()) {
+            return Result.fail("GET_STATUS state không chạy — VERIFY: " + verified.text());
+        }
+        ResponseAPDU response = transmitStatus();
+        Result parsed = checkStatus(response, HexFormat.of().parseHex(current.instanceAid()));
+        if (!parsed.ok()) {
+            return parsed;
+        }
+        Status refreshed = status;
+        if (refreshed == null || !refreshed.studentStateAvailable()) {
+            return Result.fail("GET_STATUS không trả state sau VERIFY");
+        }
+        return Result.ok(String.format(
+                "VERIFY SW=9000 | GET_STATUS state SW=9000 balance=%d counter=%d activeVisit=%s",
+                refreshed.balance(), refreshed.counter(), refreshed.hasActiveVisit()));
     }
 
     Result readPhoto(char[] pin) throws CardException {
@@ -1130,6 +1113,7 @@ final class CardGateway {
         ready = false;
         status = null;
         lastReceipt = null;
+        cardPublicKey = null;
         lastProfile = null;
         lastProfileMeta = null;
         lastPhoto = null;

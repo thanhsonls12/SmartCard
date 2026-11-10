@@ -18,6 +18,11 @@ final class DemoScenario {
 
     private Timeline timeline;
     private java.nio.file.Path photoSampleFile;
+    private volatile boolean stopped;
+    private Thread pinReader;
+    private Runnable[] queuedSteps;
+    private int nextStep;
+    private long stepInterval;
     private char[] demoAdminPin;
     private char[] demoStudentPin;
     private char[] demoChangedPin;
@@ -36,6 +41,10 @@ final class DemoScenario {
 
     void start() {
         log.accept("DEMO: tự động bấm nút theo thứ tự (cùng handler với người dùng)");
+        if (Boolean.getBoolean("labaccess.demo.transactions")) {
+            startTransactionDemo();
+            return;
+        }
         if (Boolean.getBoolean("labaccess.demo.personalize")) {
             startPersonalizeDemo();
             return;
@@ -56,6 +65,12 @@ final class DemoScenario {
     }
 
     void stop() {
+        stopped = true;
+        if (pinReader != null) {
+            pinReader.interrupt();
+            pinReader = null;
+        }
+        queuedSteps = null;
         if (timeline != null) {
             timeline.stop();
             timeline = null;
@@ -73,14 +88,75 @@ final class DemoScenario {
         wipe();
     }
 
+    private void startTransactionDemo() {
+        log.accept("DEMO UI-06: PERSONALIZE và chạy hai chuỗi giao dịch qua JavaFX buttons");
+        readDemoPins(this::buildTransactionDemo);
+    }
+
+    private void buildTransactionDemo(char[] adminPin, char[] studentPin) {
+        String cardId = System.getProperty("labaccess.demo.cardId", "A1B2C3D41122EF06");
+        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024-006");
+        String displayName = System.getProperty("labaccess.demo.displayName", "Nguyen Van UI06");
+        java.util.List<Runnable> steps = new java.util.ArrayList<>();
+        steps.add(() -> fire(app.pressConnect(), "Connect"));
+        steps.add(() -> fire(app.pressIdentify(), "SELECT + GET_STATUS"));
+        steps.add(() -> {
+            personalizePanel.fillInputs(cardId, studentId, displayName, adminPin, studentPin);
+            log.accept("DEMO UI-06: PERSONALIZE fresh card");
+            fire(personalizePanel.pressPersonalize(), "PERSONALIZE");
+        });
+        steps.add(() -> {
+            app.fillTransactionInputs(studentPin, null, 5);
+            fire(app.pressReadReceipt(), "VERIFY + GET_LAST_RECEIPT + GET_STATUS state baseline");
+        });
+        steps.add(() -> {
+            app.fillTransactionInputs(studentPin, adminPin, 5);
+            log.accept("DEMO UI-06 A1: GRANT +5 — expected balance=5 counter=1");
+            fire(app.pressGrant(), "GRANT_QUOTA +5");
+        });
+        steps.add(() -> app.logTransactionState("A1 after GRANT +5"));
+        steps.add(() -> {
+            app.fillTransactionInputs(studentPin, null, 5);
+            log.accept("DEMO UI-06 A2: START — expected balance=4 counter=2, active visit");
+            fire(app.pressStart(), "START_VISIT");
+        });
+        steps.add(() -> app.logTransactionState("A2 after START"));
+        steps.add(() -> {
+            app.fillTransactionInputs(studentPin, null, 5);
+            log.accept("DEMO UI-06 A3: END — expected balance=4 counter=3, visit cleared");
+            fire(app.pressEnd(), "END_VISIT");
+        });
+        steps.add(() -> app.logTransactionState("A3 after END"));
+        steps.add(() -> {
+            app.fillTransactionInputs(studentPin, null, 5);
+            log.accept("DEMO UI-06 B1: START — expected balance=3 counter=4, active visit");
+            fire(app.pressStart(), "START_VISIT second sequence");
+        });
+        steps.add(() -> app.logTransactionState("B1 after START"));
+        steps.add(() -> {
+            app.fillTransactionInputs(studentPin, adminPin, 5);
+            log.accept("DEMO UI-06 B2: GRANT +5 during open visit — expected balance=8 counter=5");
+            fire(app.pressGrant(), "GRANT_QUOTA +5 while visit open");
+        });
+        steps.add(() -> app.logTransactionState("B2 after GRANT while visit open"));
+        steps.add(() -> {
+            app.fillTransactionInputs(studentPin, null, 5);
+            log.accept("DEMO UI-06 B3: END after GRANT — expected balance=8 counter=6, visit cleared");
+            fire(app.pressEnd(), "END_VISIT after GRANT");
+        });
+        steps.add(() -> app.logTransactionState("B3 after END"));
+        steps.add(() -> fire(app.pressDisconnect(), "Disconnect"));
+        demoAdminPin = adminPin;
+        demoStudentPin = studentPin;
+        run(steps.toArray(new Runnable[0]), 1000, 250);
+    }
+
     private void startPersonalizeDemo() {
         log.accept("DEMO: PERSONALIZE qua handler GUI — PIN đọc từ stdin, không qua -D và không vào log");
-        char[] adminPin = readDemoPin("Admin PIN (8 digits): ", 8);
-        char[] studentPin = readDemoPin("Student PIN (6 digits): ", 6);
-        if (adminPin == null || studentPin == null) {
-            log.accept("DEMO: không đọc được PIN đúng độ dài — dừng demo");
-            return;
-        }
+        readDemoPins(this::buildPersonalizeDemo);
+    }
+
+    private void buildPersonalizeDemo(char[] adminPin, char[] studentPin) {
         demoAdminPin = adminPin;
         demoStudentPin = studentPin;
         char[] wrongStudentPin = shiftDigits(studentPin, 5);
@@ -147,19 +223,79 @@ final class DemoScenario {
     }
 
     private void run(Runnable[] steps, long firstDelay, long interval) {
-        timeline = new Timeline();
-        for (int index = 0; index < steps.length; index++) {
-            final Runnable step = steps[index];
-            timeline.getKeyFrames().add(new KeyFrame(
-                    Duration.millis(firstDelay + index * interval), event -> step.run()));
+        queuedSteps = steps;
+        nextStep = 0;
+        stepInterval = interval;
+        scheduleStep(firstDelay);
+    }
+
+    private void scheduleStep(long delay) {
+        if (stopped || queuedSteps == null) {
+            return;
         }
-        timeline.getKeyFrames().add(new KeyFrame(
-                Duration.millis(firstDelay + steps.length * interval),
-                event -> {
-                    log.accept("DEMO: xong");
-                    app.refreshButtons();
-                }));
+        timeline = new Timeline(new KeyFrame(Duration.millis(delay), event -> {
+            if (stopped || queuedSteps == null) {
+                return;
+            }
+            if (nextStep == queuedSteps.length) {
+                queuedSteps = null;
+                timeline = null;
+                log.accept("DEMO: xong");
+                app.refreshButtons();
+                return;
+            }
+            queuedSteps[nextStep++].run();
+            waitForOperation();
+        }));
         timeline.play();
+    }
+
+    private void waitForOperation() {
+        if (stopped || queuedSteps == null) {
+            return;
+        }
+        timeline = new Timeline(new KeyFrame(Duration.millis(100), event -> {
+            if (app.isBusy()) {
+                waitForOperation();
+            } else {
+                scheduleStep(stepInterval);
+            }
+        }));
+        timeline.play();
+    }
+
+    private void readDemoPins(java.util.function.BiConsumer<char[], char[]> ready) {
+        Thread reader = new Thread(() -> {
+            char[] adminPin = readDemoPin("Admin PIN (8 digits): ", 8);
+            char[] studentPin = readDemoPin("Student PIN (6 digits): ", 6);
+            try {
+                javafx.application.Platform.runLater(() -> {
+                    pinReader = null;
+                    if (stopped) {
+                        wipePins(adminPin, studentPin);
+                    } else if (adminPin == null || studentPin == null) {
+                        wipePins(adminPin, studentPin);
+                        log.accept("DEMO: không đọc được PIN đúng độ dài — dừng demo");
+                    } else {
+                        ready.accept(adminPin, studentPin);
+                    }
+                });
+            } catch (IllegalStateException exception) {
+                wipePins(adminPin, studentPin);
+            }
+        }, "demo-pin-input");
+        reader.setDaemon(true);
+        pinReader = reader;
+        reader.start();
+    }
+
+    private static void wipePins(char[] adminPin, char[] studentPin) {
+        if (adminPin != null) {
+            Arrays.fill(adminPin, '\0');
+        }
+        if (studentPin != null) {
+            Arrays.fill(studentPin, '\0');
+        }
     }
 
     private void fire(boolean pressed, String name) {

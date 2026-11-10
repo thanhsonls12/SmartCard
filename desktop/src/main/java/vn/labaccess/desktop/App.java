@@ -284,10 +284,9 @@ public class App extends Application {
         }
         char[] studentPin = fieldStudentPin.getText().toCharArray();
         fieldStudentPin.clear();
-        java.util.concurrent.atomic.AtomicBoolean receiptReadStarted =
-                new java.util.concurrent.atomic.AtomicBoolean(false);
-        runOp("VERIFY + GET_LAST_RECEIPT", () -> {
+        runOp("VERIFY + GET_LAST_RECEIPT + GET_STATUS state", () -> {
             try {
+                gateway.clearAuthenticatedStatus();
                 CardGateway.Result keyReady = gateway.prepareReceiptVerification();
                 if (!keyReady.ok()) {
                     return CardGateway.Result.fail("public key: " + keyReady.text());
@@ -296,21 +295,27 @@ public class App extends Application {
                 if (!verify.ok()) {
                     return CardGateway.Result.fail("VERIFY: " + verify.text());
                 }
-                receiptReadStarted.set(true);
                 CardGateway.Result read = gateway.readLastReceipt(null);
+                String receiptEvidence;
                 if (!read.ok() && gateway.lastResponseSw() == Sw.CONDITIONS_NOT_SATISFIED) {
-                    return CardGateway.Result.ok(
-                            "thẻ ISSUED chưa có receipt; counter=0 balance=0");
+                    receiptEvidence = "thẻ ISSUED chưa có receipt";
+                } else if (!read.ok()) {
+                    return read;
+                } else {
+                    receiptEvidence = read.text();
                 }
-                return read;
+                CardGateway.Result state = gateway.readAuthenticatedStatus(studentPin);
+                if (!state.ok()) {
+                    return CardGateway.Result.fail(receiptEvidence
+                            + " | không nạp được state ca: " + state.text());
+                }
+                return CardGateway.Result.ok(receiptEvidence + " | " + state.text());
             } finally {
                 java.util.Arrays.fill(studentPin, '\0');
             }
         }, ok -> {
-            stateSnapshotKnown = ok;
-            if (!ok && receiptReadStarted.get()) {
-                gateway.markTransactionUnknown("không khôi phục được snapshot card state");
-            }
+            CardGateway.Status current = gateway.status();
+            stateSnapshotKnown = ok && current != null && current.studentStateAvailable();
             showReceipt();
         });
     }
@@ -366,13 +371,23 @@ public class App extends Application {
         }
         runOp("RECONCILE_PENDING", () -> {
             try {
-                return gateway.reconcilePending(journal, studentPin);
+                CardGateway.Result reconciled = gateway.reconcilePending(journal, studentPin);
+                if (!reconciled.ok()) {
+                    return reconciled;
+                }
+                CardGateway.Result refreshed = gateway.readAuthenticatedStatus(studentPin);
+                return refreshed.ok()
+                        ? CardGateway.Result.ok(reconciled.text() + " | " + refreshed.text())
+                        : CardGateway.Result.fail(reconciled.text()
+                                + " | state ca chưa được làm mới: " + refreshed.text());
             } finally {
                 java.util.Arrays.fill(studentPin, '\0');
             }
         }, ok -> {
+            CardGateway.Status refreshed = gateway.status();
             stateSnapshotKnown = ok && !journal.load().present()
-                    && gateway.reconciliation().transactionAllowed();
+                    && gateway.reconciliation().transactionAllowed()
+                    && refreshed != null && refreshed.studentStateAvailable();
             showReceipt();
         });
     }
@@ -394,17 +409,16 @@ public class App extends Application {
             return;
         }
         CardGateway.Status status = gateway.status();
-        if (status == null) {
-            log("[FAIL] GRANT_QUOTA: chưa nhận diện thẻ");
+        if (status == null || !status.studentStateAvailable()) {
+            log("[FAIL] GRANT_QUOTA: chưa có snapshot state student đã xác thực");
             return;
         }
-        Receipt current = gateway.lastReceipt();
-        long counter = current == null ? 0 : current.counterAfter();
+        long counter = status.counter();
         if (counter >= Receipt.COUNTER_MASK) {
             log("[FAIL] GRANT_QUOTA: counter đã đạt giới hạn");
             return;
         }
-        int expectedBalance = currentBalance() + delta;
+        int expectedBalance = status.balance() + delta;
         if (expectedBalance > Receipt.MAX_BALANCE) {
             log("[FAIL] GRANT_QUOTA: balance dự kiến vượt 9999");
             return;
@@ -426,24 +440,23 @@ public class App extends Application {
 
     private void doStart() {
         CardGateway.Status status = gateway.status();
-        Receipt current = gateway.lastReceipt();
         if (!stateSnapshotKnown) {
-            log("[FAIL] START_VISIT: đọc state hiện tại bằng VERIFY + GET_LAST_RECEIPT trước");
+            log("[FAIL] START_VISIT: đọc state hiện tại bằng VERIFY + GET_STATUS trước");
             return;
         }
-        if (status == null) {
-            log("[FAIL] START_VISIT: chưa nhận diện thẻ");
+        if (status == null || !status.studentStateAvailable()) {
+            log("[FAIL] START_VISIT: chưa có snapshot state student đã xác thực");
             return;
         }
-        if (current == null) {
-            log("[FAIL] START_VISIT: cần receipt hiện tại để biết balance/counter");
+        if (status.hasActiveVisit()) {
+            log("[FAIL] START_VISIT: đã có ca đang mở");
             return;
         }
-        if (current.balanceAfter() <= 0) {
+        if (status.balance() <= 0) {
             log("[FAIL] START_VISIT: balance hiện tại không còn lượt");
             return;
         }
-        if (current.counterAfter() >= Receipt.COUNTER_MASK) {
+        if (status.counter() >= Receipt.COUNTER_MASK) {
             log("[FAIL] START_VISIT: counter đã đạt giới hạn");
             return;
         }
@@ -451,40 +464,38 @@ public class App extends Application {
         char[] studentPin = fieldStudentPin.getText().toCharArray();
         fieldStudentPin.clear();
         ReceiptExpectation expectation = new ReceiptExpectation(
-                HexFormat.of().parseHex(status.cardId()), current.counterAfter() + 1,
+                HexFormat.of().parseHex(status.cardId()), status.counter() + 1,
                 Receipt.OPERATION_START, visitId);
         runTransaction("START_VISIT", studentPin, null, expectation, -1,
-                current.balanceAfter() - 1, gateway.visitCommand((byte) 0x51, visitId));
+                status.balance() - 1, gateway.visitCommand((byte) 0x51, visitId));
     }
 
     private void doEnd() {
         CardGateway.Status status = gateway.status();
-        Receipt current = gateway.lastReceipt();
         if (!stateSnapshotKnown) {
-            log("[FAIL] END_VISIT: đọc state hiện tại bằng VERIFY + GET_LAST_RECEIPT trước");
+            log("[FAIL] END_VISIT: đọc state hiện tại bằng VERIFY + GET_STATUS trước");
             return;
         }
-        if (status == null) {
-            log("[FAIL] END_VISIT: chưa nhận diện thẻ");
+        if (status == null || !status.studentStateAvailable()) {
+            log("[FAIL] END_VISIT: chưa có snapshot state student đã xác thực");
             return;
         }
-        if (current == null || current.operation() != Receipt.OPERATION_START) {
-            log("[FAIL] END_VISIT: receipt hiện tại không chứng minh ca đang mở");
+        if (!status.hasActiveVisit()) {
+            log("[FAIL] END_VISIT: thẻ không có ca đang mở");
             return;
         }
-        byte[] visitId = current.visitId();
-        if (current.counterAfter() >= Receipt.COUNTER_MASK) {
+        if (status.counter() >= Receipt.COUNTER_MASK) {
             log("[FAIL] END_VISIT: counter đã đạt giới hạn");
             return;
         }
-        long counter = current.counterAfter();
+        byte[] visitId = HexFormat.of().parseHex(status.activeVisitId());
+        ReceiptExpectation expectation = new ReceiptExpectation(
+                HexFormat.of().parseHex(status.cardId()), status.counter() + 1,
+                Receipt.OPERATION_END, visitId);
         char[] studentPin = fieldStudentPin.getText().toCharArray();
         fieldStudentPin.clear();
-        ReceiptExpectation expectation = new ReceiptExpectation(
-                HexFormat.of().parseHex(status.cardId()), counter + 1,
-                Receipt.OPERATION_END, visitId);
         runTransaction("END_VISIT", studentPin, null, expectation, 0,
-                current.balanceAfter(), gateway.visitCommand((byte) 0x52, visitId));
+                status.balance(), gateway.visitCommand((byte) 0x52, visitId));
     }
 
     private void runTransaction(String label, char[] studentPin, byte[] adminPin,
@@ -502,22 +513,35 @@ public class App extends Application {
         }
         runOp(label, () -> {
             try {
+                gateway.clearAuthenticatedStatus();
                 CardGateway.Result verify = gateway.verifyStudentPin(studentPin);
                 if (!verify.ok()) {
                     return CardGateway.Result.fail(label + " không chạy — VERIFY: " + verify.text());
                 }
-                return gateway.runStateTransaction(journal,
+                CardGateway.Result transaction = gateway.runStateTransaction(journal,
                         new CardGateway.TransactionPlan(expectation, delta, expectedBalance),
                         supplier, studentPin);
+                if (!transaction.ok()) {
+                    return transaction;
+                }
+                CardGateway.Result refreshed = gateway.readAuthenticatedStatus(studentPin);
+                if (!refreshed.ok()) {
+                    gateway.clearAuthenticatedStatus();
+                    return CardGateway.Result.fail(transaction.text()
+                            + " | state ca chưa được làm mới: " + refreshed.text());
+                }
+                return CardGateway.Result.ok(transaction.text() + " | " + refreshed.text());
             } finally {
                 clearBuffers(studentPin, adminPin);
             }
-        }, ok -> showReceipt());
-    }
-
-    private int currentBalance() {
-        Receipt receipt = gateway.lastReceipt();
-        return receipt == null ? 0 : receipt.balanceAfter();
+        }, ok -> {
+            CardGateway.Status refreshed = gateway.status();
+            stateSnapshotKnown = ok && refreshed != null && refreshed.studentStateAvailable();
+            if (!stateSnapshotKnown) {
+                gateway.clearAuthenticatedStatus();
+            }
+            showReceipt();
+        });
     }
 
     private byte[] newVisitId() {
@@ -579,14 +603,19 @@ public class App extends Application {
 
     private void showReceipt() {
         Receipt receipt = gateway.lastReceipt();
+        CardGateway.Status status = gateway.status();
+        boolean authenticated = status != null && status.studentStateAvailable();
         if (receipt == null) {
-            valueReceipt.setText("-");
-            fieldVisitId.clear();
+            valueReceipt.setText(authenticated
+                    ? String.format("balance=%d | counter=%d",
+                            status.balance(), status.counter()) : "-");
         } else {
-            valueReceipt.setText(receipt + " | sigLen=" + receipt.signature().length);
-            fieldVisitId.setText(receipt.operation() == Receipt.OPERATION_START
-                    ? receipt.visitIdHex() : "");
+            valueReceipt.setText(receipt + " | sigLen=" + receipt.signature().length
+                    + (authenticated ? String.format(" | state balance=%d counter=%d",
+                            status.balance(), status.counter()) : ""));
         }
+        fieldVisitId.setText(authenticated && status.hasActiveVisit()
+                ? status.activeVisitId() : "");
         Reconciliation reconciliation = gateway.reconciliation();
         valueReconcile.setText(reconciliation.state() + (reconciliation.detail().isEmpty()
                 ? ""
@@ -618,6 +647,7 @@ public class App extends Application {
         valueCardId.setText("-");
         valueResult.setText("CHƯA SẴN SÀNG");
         valueReceipt.setText("-");
+        fieldVisitId.clear();
         valueReconcile.setText(gateway.reconciliation().state().toString());
         personalizePanel.resetView();
         pinPanel.clearState();
@@ -697,9 +727,12 @@ public class App extends Application {
                 || !gateway.reconciliation().transactionAllowed());
         boolean txnAllowed = !busy && uiReady && stateSnapshotKnown
                 && gateway.reconciliation().transactionAllowed() && !journalPresent;
-        btnGrant.setDisable(!txnAllowed);
-        btnStart.setDisable(!txnAllowed);
-        btnEnd.setDisable(!txnAllowed);
+        CardGateway.Status currentStatus = gateway.status();
+        boolean authenticatedState = currentStatus != null && currentStatus.studentStateAvailable();
+        btnGrant.setDisable(!txnAllowed || !authenticatedState);
+        btnStart.setDisable(!txnAllowed || !authenticatedState || currentStatus.hasActiveVisit()
+                || currentStatus.balance() <= 0);
+        btnEnd.setDisable(!txnAllowed || !authenticatedState || !currentStatus.hasActiveVisit());
         btnReconcile.setDisable(busy || !uiReady || !validPending);
         pinPanel.setEnabled(!busy && uiConnected);
         personalizePanel.updateAvailability(
@@ -720,6 +753,27 @@ public class App extends Application {
                 + " | " + journalText);
     }
 
+    void fillTransactionInputs(char[] studentPin, char[] adminPin, int delta) {
+        fieldStudentPin.setText(new String(studentPin));
+        fieldAdminPin.setText(adminPin == null ? "" : new String(adminPin));
+        fieldDelta.setText(Integer.toString(delta));
+    }
+
+    void logTransactionState(String label) {
+        CardGateway.Status current = gateway.status();
+        if (current == null || !current.studentStateAvailable()) {
+            log("UI-06 " + label + " | state unavailable | displayedVisitId="
+                    + fieldVisitId.getText());
+            return;
+        }
+        log(String.format("UI-06 %s | balance=%d counter=%d active=%s activeVisitId=%s"
+                        + " displayedVisitId=%s receipt=%s",
+                label, current.balance(), current.counter(), current.hasActiveVisit(),
+                current.activeVisitId(), fieldVisitId.getText(),
+                gateway.lastReceipt() == null ? "none"
+                        : Receipt.operationText(gateway.lastReceipt().operation())));
+    }
+
     boolean pressConnect() {
         return press(btnConnect);
     }
@@ -738,6 +792,18 @@ public class App extends Application {
 
     boolean pressGrant() {
         return press(btnGrant);
+    }
+
+    boolean pressStart() {
+        return press(btnStart);
+    }
+
+    boolean pressEnd() {
+        return press(btnEnd);
+    }
+
+    boolean isBusy() {
+        return busy;
     }
 
     void refreshButtons() {
