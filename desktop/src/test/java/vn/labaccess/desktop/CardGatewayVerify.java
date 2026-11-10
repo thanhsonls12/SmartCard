@@ -31,9 +31,12 @@ public final class CardGatewayVerify {
     private static final String VISIT_ID = "7172737475767778797A7B7C7D7E7F80";
     private static final String OTHER_VISIT_ID = "808182838485868788898A8B8C8D8E8F";
     private static final String NO_VISIT_ID = "00000000000000000000000000000000";
+    private static final String PROFILE_NAME = "Nguy\u1EC5n V\u0103n \u00C1nh";
 
     private static int failed;
     private static int skipped;
+    private static String expectedStudentId;
+    private static String expectedDisplayName;
 
     public static void main(String[] args) throws Exception {
         checkLifecycleRules();
@@ -51,6 +54,9 @@ public final class CardGatewayVerify {
         checkPublicKeyOffline();
         checkPinOffline();
         checkPinState();
+        checkProfileOffline();
+        checkPhotoDraftOffline();
+        checkPhotoOffline();
 
         CardGateway gateway = new CardGateway(HOST, PORT);
         try {
@@ -62,6 +68,8 @@ public final class CardGatewayVerify {
             checkVerifyAndTransactionOnCard(gateway);
             checkFaultAfterCommitOnCard(gateway);
             checkPinStateOnCard(gateway);
+            checkProfileOnCard(gateway);
+            checkPhotoOnCard(gateway);
             checkPinOnCard(gateway);
         } finally {
             clearLiveSecrets();
@@ -1451,6 +1459,147 @@ public final class CardGatewayVerify {
         record("H17", "identify lai -> lastPinSw ve -1", gateway.lastPinSw() == -1, true);
     }
 
+    private static void checkProfileOffline() throws CardException {
+        System.out.println();
+        System.out.println("--- Nhom L: parser ho so + metadata + SW (offline) ---");
+
+        ProfileCodec.Parse valid = ProfileCodec.parse(profileResponse("SV2024-001", PROFILE_NAME));
+        record("L01", "ho so schema v1 hop le -> parse PASS",
+                valid.ok() && "SV2024-001".equals(valid.profile().studentId()), true);
+        record("L02", "displayName tieng Viet giu nguyen so byte UTF-8",
+                valid.ok() && valid.profile().displayNameBytes() == 18
+                && valid.profile().displayNameCodePoints() == 14, true);
+        record("L03", "wireLength tinh dung tu schema",
+                valid.ok() && valid.profile().wireLength() == 3 + 10 + 18, true);
+
+        record("L04", "schemaVersion 02 bi tu choi",
+                !ProfileCodec.parse(withByte(profileResponse("SV2024-001", "A"), 0, 0x02)).ok(), true);
+        record("L05", "studentIdLength 0 bi tu choi",
+                !ProfileCodec.parse(withByte(profileResponse("SV2024-001", "A"), 1, 0x00)).ok(), true);
+        record("L06", "studentId chu thuong bi tu choi",
+                !ProfileCodec.parse(profileResponse("sv2024", "A")).ok(), true);
+        record("L07", "displayNameLength 0 bi tu choi",
+                !ProfileCodec.parse(withByte(profileResponse("SV2024-001", "A"), 12, 0x00)).ok(), true);
+        record("L08", "response thieu byte bi tu choi",
+                !ProfileCodec.parse(Arrays.copyOf(profileResponse("SV2024-001", "Ánh"), 15)).ok(), true);
+        byte[] extra = Arrays.copyOf(profileResponse("SV2024-001", "Ánh"),
+                profileResponse("SV2024-001", "Ánh").length + 1);
+        record("L09", "response thua byte bi tu choi", !ProfileCodec.parse(extra).ok(), true);
+
+        byte[] loneContinuation = profileResponse("SV2024-001", "A");
+        loneContinuation[loneContinuation.length - 1] = (byte) 0x80;
+        record("L10", "UTF-8 khong hop le (byte noi don le) bi tu choi",
+                !ProfileCodec.parse(loneContinuation).ok(), true);
+        record("L11", "UTF-8 byte đơn 0xC0 bị từ chối",
+                !ProfileCodec.parse(profileResponse("SV2024-001", "\u00C0".getBytes(
+                        java.nio.charset.StandardCharsets.ISO_8859_1))).ok(), true);
+
+        byte[] emoji = profileResponse("SV2024-001", "Anh 🎓");
+        ProfileCodec.Parse emojiParse = ProfileCodec.parse(emoji);
+        record("L12", "UTF-8 4 byte hop le -> 1 code point",
+                emojiParse.ok() && emojiParse.profile().displayNameCodePoints() == 5, true);
+
+        ProfileMetaCodec.Parse meta = ProfileMetaCodec.parse(metaResponse(1, 1, 1, 20));
+        record("L13", "metadata 65 byte hop le -> parse PASS",
+                meta.ok() && meta.meta().ciphertextLength() == 20
+                && meta.meta().nonceHex().length() == 24
+                && meta.meta().tagHex().length() == 32
+                && meta.meta().ciphertextHashHex().length() == 64, true);
+        record("L14", "metadata 64 byte bi tu choi",
+                !ProfileMetaCodec.parse(Arrays.copyOf(metaResponse(1, 1, 1, 20), 64)).ok(), true);
+        record("L15", "recordVersion 02 bi tu choi",
+                !ProfileMetaCodec.parse(metaResponse(2, 1, 1, 20)).ok(), true);
+        record("L16", "algorithmId 02 bi tu choi",
+                !ProfileMetaCodec.parse(metaResponse(1, 2, 1, 20)).ok(), true);
+        record("L17", "profileSchemaVersion 02 bi tu choi",
+                !ProfileMetaCodec.parse(metaResponse(1, 1, 2, 20)).ok(), true);
+        record("L18", "ciphertextLength 0 bi tu choi",
+                !ProfileMetaCodec.parse(metaResponse(1, 1, 1, 0)).ok(), true);
+
+        record("L19", "GET_PROFILE 6982 -> bao thieu quyen student",
+                profileText(response(Sw.SECURITY_NOT_SATISFIED)).contains("thiếu quyền student"), true);
+        record("L20", "GET_PROFILE 6A86 -> bao P1/P2 phai 0000",
+                profileText(response(Sw.WRONG_P1P2)).contains("P1/P2 phải 0000"), true);
+        record("L21", "GET_PROFILE 6F00 -> bao record hong",
+                profileText(response(Sw.INTERNAL_ERROR)).contains("record hồ sơ hỏng"), true);
+        record("L22", "metadata 6982 -> bao thieu quyen student",
+                metaText(response(Sw.SECURITY_NOT_SATISFIED)).contains("thiếu quyền student"), true);
+
+        CardGateway ok = readyGateway(issuedChannel(command -> responseWithData(
+                profileResponse("SV2024-001", "Nguyễn Văn Ánh"), Sw.OK)));
+        CardGateway.Result read = ok.readProfile(0x00, 0x00);
+        record("L23", "GET_PROFILE 9000 -> parser PASS + lastProfile co du lieu",
+                read.ok() && read.text().contains("parser=PASS")
+                && ok.lastProfile() != null, true);
+        record("L24", "log ho so khong chua displayName",
+                !read.text().contains("Nguyễn"), true);
+        record("L25", "GET_PROFILE dung Case 2S Le=00",
+                read.text().contains("P1P2=0000 Le=00"), true);
+
+        java.util.concurrent.atomic.AtomicInteger round = new java.util.concurrent.atomic.AtomicInteger();
+        CardGateway flaky = readyGateway(issuedChannel(command -> round.incrementAndGet() == 1
+                ? responseWithData(profileResponse("SV2024-001", "Nguyễn Văn Ánh"), Sw.OK)
+                : responseWithData(profileResponse("SV2024-001", "Nguyễn Văn Ánh"), Sw.INTERNAL_ERROR)));
+        flaky.readProfile(0x00, 0x00);
+        CardGateway.Result afterFailure = flaky.readProfile(0x00, 0x00);
+        record("L26", "doc loi xoa ket qua cu khoi gateway",
+                !afterFailure.ok() && flaky.lastProfile() == null, true);
+        record("L27", "doc thanh cong nap metadata rong khi chua doc meta",
+                flaky.lastProfileMeta() == null, true);
+
+        CardGateway noApdu = readyGateway(issuedChannel(command -> {
+            throw new AssertionError("khong duoc gui APDU khi VERIFY sai dinh dang");
+        }));
+        CardGateway.Result shortPin = noApdu.readProfileWithPin("12".toCharArray());
+        record("L28", "PIN sai dinh dang -> khong gui APDU doc ho so",
+                !shortPin.ok() && shortPin.text().contains("6 chữ số"), true);
+    }
+
+    private static String profileText(ResponseAPDU apdu) throws CardException {
+        return readyGateway(issuedChannel(command -> apdu)).readProfile(0x00, 0x00).text();
+    }
+
+    private static String metaText(ResponseAPDU apdu) throws CardException {
+        return readyGateway(issuedChannel(command -> apdu))
+                .readProfileCryptoMeta(0x00, 0x00).text();
+    }
+
+    private static byte[] profileResponse(String studentId, String displayName) {
+        return profileResponse(studentId,
+                displayName.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private static byte[] profileResponse(String studentId, byte[] displayName) {
+        byte[] data = new byte[3 + studentId.length() + displayName.length];
+        data[0] = 0x01;
+        data[1] = (byte) studentId.length();
+        System.arraycopy(studentId.getBytes(java.nio.charset.StandardCharsets.US_ASCII), 0,
+                data, 2, studentId.length());
+        data[2 + studentId.length()] = (byte) displayName.length;
+        System.arraycopy(displayName, 0, data, 3 + studentId.length(), displayName.length);
+        return data;
+    }
+
+    private static byte[] metaResponse(int recordVersion, int algorithmId, int schemaVersion,
+            int ciphertextLength) {
+        byte[] data = new byte[65];
+        data[0] = (byte) recordVersion;
+        data[1] = (byte) algorithmId;
+        data[2] = (byte) schemaVersion;
+        data[3] = (byte) (ciphertextLength >> 8);
+        data[4] = (byte) ciphertextLength;
+        for (int index = 5; index < data.length; index++) {
+            data[index] = (byte) (index + 1);
+        }
+        return data;
+    }
+
+    private static byte[] withByte(byte[] data, int offset, int value) {
+        byte[] copy = data.clone();
+        copy[offset] = (byte) value;
+        return copy;
+    }
+
     private static void checkPinStateOnCard(CardGateway gateway) throws CardException {
         System.out.println();
         System.out.println("--- Nhom H: trang thai PIN tren the that ---");
@@ -1473,6 +1622,99 @@ public final class CardGatewayVerify {
         } finally {
             Arrays.fill(pin, '\0');
             Arrays.fill(wrongPin, '\0');
+        }
+    }
+
+    private static void checkProfileOnCard(CardGateway gateway) throws CardException {
+        System.out.println();
+        System.out.println("--- Nhom L: doc ho so tren the that ---");
+
+        if (gateway.status() == null || gateway.status().lifecycle() != 0x01) {
+            skip("L30", "doc ho so tren the ISSUED", "the chua ISSUED");
+            return;
+        }
+        char[] source = liveSecret(false);
+        if (source == null) {
+            skip("L30", "doc ho so tren the ISSUED", "khong doc duoc PIN dung do dai");
+            return;
+        }
+        char[] pin = source.clone();
+        try {
+            String statusBefore = statusFingerprint(gateway);
+
+            CardGateway.Result read = gateway.readProfileWithPin(pin);
+            Profile profile = gateway.lastProfile();
+            record("L30", "VERIFY + GET_PROFILE -> 9000, parser PASS",
+                    read.ok() && read.text().contains("parser=PASS") && profile != null, true);
+            record("L31", "ho so dung schema v1",
+                    profile != null && profile.schemaVersion() == 0x01, true);
+            if (expectedDisplayName == null) {
+                skip("L32", "displayName khop du lieu luc PERSONALIZE",
+                        "the da ISSUED truoc phien chay");
+                skip("L33", "studentId khop du lieu luc PERSONALIZE",
+                        "the da ISSUED truoc phien chay");
+            } else {
+                record("L32", "displayName khop du lieu luc PERSONALIZE",
+                        profile != null && expectedDisplayName.equals(profile.displayName()), true);
+                record("L33", "studentId khop du lieu luc PERSONALIZE",
+                        profile != null && expectedStudentId.equals(profile.studentId()), true);
+            }
+            record("L34", "displayName giu nguyen so byte UTF-8 da gui",
+                    profile != null && profile.displayNameBytes() == profile.displayName()
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8).length, true);
+            boolean nameHidden = profile == null || !read.text().contains(profile.displayName());
+            boolean idHidden = profile == null || !read.text().contains(profile.studentId());
+            record("L35", "log ho so khong chua noi dung ho so", nameHidden && idHidden, true);
+            System.out.println("    " + read.text());
+            String firstEvidence = profile == null ? "" : profile.evidence();
+
+            CardGateway.Result second = gateway.readProfile(0x00, 0x00);
+            record("L36", "doc lai khong VERIFY -> 6982 (quyen da tieu thu)",
+                    !second.ok() && gateway.lastResponseSw() == Sw.SECURITY_NOT_SATISFIED, true);
+
+            gateway.verifyStudentPin(pin);
+            CardGateway.Result wrongP1 = gateway.readProfile(0x01, 0x00);
+            record("L37", "GET_PROFILE sai P1 -> 6A86",
+                    !wrongP1.ok() && gateway.lastResponseSw() == Sw.WRONG_P1P2, true);
+            CardGateway.Result afterError = gateway.readProfile(0x00, 0x00);
+            record("L38", "loi 6A86 xoa quyen -> doc dung tra 6982",
+                    !afterError.ok() && gateway.lastResponseSw() == Sw.SECURITY_NOT_SATISFIED, true);
+
+            gateway.verifyStudentPin(pin);
+            CardGateway.Result metaRead = gateway.readProfileCryptoMetaWithPin(pin);
+            ProfileCryptoMeta meta = gateway.lastProfileMeta();
+            record("L39", "VERIFY + GET_PROFILE_CRYPTO_META -> 9000, 65 byte",
+                    metaRead.ok() && metaRead.text().contains("dataLen=65") && meta != null, true);
+            record("L40", "metadata: nonce 12B, tag 16B, hash 32B",
+                    meta != null && meta.nonceHex().length() == 24 && meta.tagHex().length() == 32
+                    && meta.ciphertextHashHex().length() == 64, true);
+            record("L41", "ciphertextLength khop do dai ho so",
+                    meta != null && profile != null
+                    && meta.ciphertextLength() == profile.wireLength(), true);
+            record("L42", "hash ciphertext khac 0",
+                    meta != null && !meta.ciphertextHashHex().matches("0+"), true);
+            System.out.println("    " + metaRead.text());
+
+            CardGateway.Result metaAgain = gateway.readProfileCryptoMeta(0x00, 0x00);
+            record("L43", "doc lai metadata khong VERIFY -> 6982",
+                    !metaAgain.ok() && gateway.lastResponseSw() == Sw.SECURITY_NOT_SATISFIED, true);
+
+            gateway.verifyStudentPin(pin);
+            CardGateway.Result metaWrongP2 = gateway.readProfileCryptoMeta(0x00, 0x01);
+            record("L44", "metadata sai P2 -> 6A86",
+                    !metaWrongP2.ok() && gateway.lastResponseSw() == Sw.WRONG_P1P2, true);
+            CardGateway.Result metaAfterError = gateway.readProfileCryptoMeta(0x00, 0x00);
+            record("L45", "loi 6A86 xoa quyen -> doc metadata tra 6982",
+                    !metaAfterError.ok() && gateway.lastResponseSw() == Sw.SECURITY_NOT_SATISFIED, true);
+
+            CardGateway.Result profileAgain = gateway.readProfileWithPin(pin);
+            record("L46", "doc lai ho so cho cung fingerprint",
+                    profileAgain.ok() && gateway.lastProfile() != null
+                    && gateway.lastProfile().evidence().equals(firstEvidence), true);
+            record("L47", "doc ho so khong doi lifecycle/cardId",
+                    statusBefore.equals(statusFingerprint(gateway)), true);
+        } finally {
+            Arrays.fill(pin, '\0');
         }
     }
 
@@ -1648,6 +1890,10 @@ public final class CardGatewayVerify {
                 System.out.println("    " + first.text());
                 record("W01", "PERSONALIZE the moi -> 9000 + ISSUED + cardId",
                         first.ok() && first.text().contains("SW=9000"), true);
+                if (first.ok()) {
+                    expectedStudentId = studentId;
+                    expectedDisplayName = displayName;
+                }
                 record("W02", "sau PERSONALIZE lifecycle ISSUED + cardId dung",
                         gateway.status() != null && gateway.status().lifecycle() == 0x01
                         && CARD_ID.equalsIgnoreCase(gateway.status().cardId()), true);
@@ -1904,6 +2150,603 @@ public final class CardGatewayVerify {
         byte[] copy = response.clone();
         copy[payloadOffset] = (byte) value;
         return copy;
+    }
+
+    private static final int PHOTO_LENGTH = 4096;
+    private static final int PHOTO_WIDTH = 64;
+    private static final int PHOTO_CHUNK = 128;
+    private static final int PHOTO_BEGIN_LENGTH = 13;
+    private static final String ADMIN_PIN_TEXT = "12345678";
+
+    private interface Pixel {
+        int rgb(int x, int y);
+    }
+
+    private static java.awt.image.BufferedImage sampleImage(int width, int height, Pixel pixel) {
+        java.awt.image.BufferedImage image = new java.awt.image.BufferedImage(
+                width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                image.setRGB(x, y, pixel.rgb(x, y));
+            }
+        }
+        return image;
+    }
+
+    private static int gray(byte[] photo, int column, int row) {
+        return photo[row * PHOTO_WIDTH + column] & 0xFF;
+    }
+
+    private static int grey(int value) {
+        return 0xFF000000 | (value << 16) | (value << 8) | value;
+    }
+
+    private static void checkPhotoDraftOffline() {
+        byte[] quadrants = PhotoDraft.fromImage(sampleImage(256, 128, (x, y) -> {
+            if (x < 128) {
+                return grey(y < 64 ? 0 : 200);
+            }
+            return grey(y < 64 ? 128 : 255);
+        }));
+        record("PH49", "ảnh bốn góc: cột trái tối hơn cột phải ở hàng trên",
+                gray(quadrants, 8, 8) < gray(quadrants, 55, 8), true);
+        record("PH50", "ảnh bốn góc: hàng dưới sáng hơn hàng trên ở cột trái",
+                gray(quadrants, 8, 55) > gray(quadrants, 8, 8), true);
+        record("PH51", "ảnh bốn góc: thứ tự góc trên-trái < trên-phải < dưới-trái < dưới-phải",
+                gray(quadrants, 8, 8) < gray(quadrants, 55, 8)
+                        && gray(quadrants, 55, 8) < gray(quadrants, 8, 55)
+                        && gray(quadrants, 8, 55) < gray(quadrants, 55, 55), true);
+
+        byte[] transparent = PhotoDraft.fromImage(sampleImage(64, 64, (x, y) -> 0x00000000));
+        record("PH52", "alpha trong suốt ghép lên nền trắng nên ra 255",
+                transparent[0] == (byte) 0xFF && transparent[PHOTO_LENGTH - 1] == (byte) 0xFF, true);
+
+        byte[] uniform = PhotoDraft.fromImage(sampleImage(64, 64, (x, y) -> grey(77)));
+        boolean allSame = true;
+        for (byte value : uniform) {
+            if ((value & 0xFF) != 77) {
+                allSame = false;
+                break;
+            }
+        }
+        record("PH53", "ảnh xám đều 64×64 giữ nguyên 77 ở mọi byte (không lệch grayscale)",
+                allSame && uniform.length == PHOTO_LENGTH, true);
+
+        byte[] croppedSides = PhotoDraft.fromImage(sampleImage(128, 32, (x, y) -> {
+            if (x < 8 || x >= 120) {
+                return grey(0);
+            }
+            return grey(255);
+        }));
+        record("PH54", "ảnh dẹt 128×32: cắt hai bên nên dải đen ở mép biến mất",
+                gray(croppedSides, 0, 32) == 255 && gray(croppedSides, 63, 32) == 255, true);
+
+        byte[] croppedTopBottom = PhotoDraft.fromImage(sampleImage(32, 128, (x, y) -> {
+            if (y < 8 || y >= 120) {
+                return grey(0);
+            }
+            return grey(255);
+        }));
+        record("PH55", "ảnh dọc 32×128: cắt trên/dưới nên dải đen ở mép biến mất",
+                gray(croppedTopBottom, 32, 0) == 255
+                        && gray(croppedTopBottom, 32, 63) == 255, true);
+    }
+
+    private static byte[] syntheticPhoto() {
+        byte[] image = new byte[PHOTO_LENGTH];
+        for (int row = 0; row < 64; row++) {
+            for (int column = 0; column < 64; column++) {
+                int index = row * 64 + column;
+                int value = ((row / 8) % 2 == 0) ? (column * 4) : (255 - row * 4);
+                image[index] = (byte) ((row % 8 == 0) ? 0xFF : value & 0xFF);
+            }
+        }
+        return image;
+    }
+
+    private static String firstMismatch(byte[] expected, byte[] actual) {
+        if (actual == null) {
+            return "không có dữ liệu đọc lại";
+        }
+        if (expected.length != actual.length) {
+            return String.format("độ dài lệch: nguồn=%d đọc lại=%d", expected.length, actual.length);
+        }
+        for (int index = 0; index < expected.length; index++) {
+            if (expected[index] != actual[index]) {
+                return String.format("lệch tại byte %d: nguồn=%02X đọc lại=%02X",
+                        index, expected[index] & 0xFF, actual[index] & 0xFF);
+            }
+        }
+        return null;
+    }
+
+    private static final class PhotoCard implements java.util.function.Function<CommandAPDU, ResponseAPDU> {
+
+        private final byte[] photo = new byte[PHOTO_LENGTH];
+        private boolean ready;
+        private boolean sessionOpen;
+        private int sessionOffset;
+        private boolean authorized;
+        private int readOffset;
+        private int adminTries = 5;
+        private int chunksAccepted;
+        private int finishCount;
+        private int receivedBytes;
+        private int readAttempts;
+
+        byte[] photo() {
+            return photo.clone();
+        }
+
+        int chunksAccepted() {
+            return chunksAccepted;
+        }
+
+        int finishCount() {
+            return finishCount;
+        }
+
+        boolean ready() {
+            return ready;
+        }
+
+        int adminTries() {
+            return adminTries;
+        }
+
+        int receivedBytes() {
+            return receivedBytes;
+        }
+
+        int readAttempts() {
+            return readAttempts;
+        }
+
+        @Override
+        public ResponseAPDU apply(CommandAPDU command) {
+            int ins = command.getINS() & 0xFF;
+            if (ins != 0x32 && ins != 0x33 && ins != 0x35) {
+                sessionOpen = false;
+            }
+            if (ins == 0x32) {
+                return begin(command);
+            }
+            if (ins == 0x33) {
+                return write(command);
+            }
+            if (ins == 0x35) {
+                return finish(command);
+            }
+            if (ins == 0x34) {
+                return read(command);
+            }
+            return response(Sw.INS_NOT_SUPPORTED);
+        }
+
+        private ResponseAPDU begin(CommandAPDU command) {
+            byte[] data = command.getData();
+            if (data == null || data.length != PHOTO_BEGIN_LENGTH) {
+                return response(Sw.WRONG_LENGTH);
+            }
+            if (ready || sessionOpen) {
+                return response(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            if (data[8] != 0x01 || data[9] != 64 || data[10] != 64
+                    || ((data[11] & 0xFF) << 8 | (data[12] & 0xFF)) != PHOTO_LENGTH) {
+                return response(Sw.WRONG_DATA);
+            }
+            for (int index = 0; index < 8; index++) {
+                if (data[index] < '0' || data[index] > '9') {
+                    return response(Sw.WRONG_DATA);
+                }
+            }
+            boolean matches = true;
+            for (int index = 0; index < 8; index++) {
+                if (data[index] != (byte) ADMIN_PIN_TEXT.charAt(index)) {
+                    matches = false;
+                }
+            }
+            if (!matches) {
+                adminTries--;
+                return response(adminTries == 0 ? Sw.AUTH_BLOCKED : 0x63C0 | adminTries);
+            }
+            sessionOpen = true;
+            sessionOffset = 0;
+            return response(Sw.OK);
+        }
+
+        private ResponseAPDU write(CommandAPDU command) {
+            ResponseAPDU result = writeChunk(command);
+            if (result.getSW() != Sw.OK) {
+                sessionOpen = false;
+            }
+            return result;
+        }
+
+        private ResponseAPDU writeChunk(CommandAPDU command) {
+            byte[] data = command.getData();
+            int offset = (command.getP1() << 8) | command.getP2();
+            if (!sessionOpen) {
+                return response(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            if (data == null || data.length == 0 || data.length > PHOTO_CHUNK) {
+                return response(Sw.WRONG_LENGTH);
+            }
+            if (offset != sessionOffset) {
+                return response(Sw.WRONG_P1P2);
+            }
+            if (offset + data.length > PHOTO_LENGTH) {
+                return response(Sw.WRONG_P1P2);
+            }
+            System.arraycopy(data, 0, photo, offset, data.length);
+            sessionOffset += data.length;
+            receivedBytes += data.length;
+            chunksAccepted++;
+            return response(Sw.OK);
+        }
+
+        private ResponseAPDU finish(CommandAPDU command) {
+            ResponseAPDU result = finishPhoto(command);
+            sessionOpen = false;
+            return result;
+        }
+
+        private ResponseAPDU finishPhoto(CommandAPDU command) {
+            if (command.getData() != null && command.getData().length > 0) {
+                return response(Sw.WRONG_LENGTH);
+            }
+            finishCount++;
+            if (!sessionOpen) {
+                return response(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            if (ready) {
+                return response(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            if (sessionOffset < PHOTO_LENGTH) {
+                return response(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            ready = true;
+            return response(Sw.OK);
+        }
+
+        private ResponseAPDU read(CommandAPDU command) {
+            readAttempts++;
+            int offset = (command.getP1() << 8) | command.getP2();
+            int ne = command.getNe();
+            if (ne <= 0 || ne > PHOTO_CHUNK) {
+                return response(Sw.WRONG_LENGTH);
+            }
+            if (!ready) {
+                return response(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            if (!authorized) {
+                return response(Sw.SECURITY_NOT_SATISFIED);
+            }
+            if (offset > PHOTO_LENGTH) {
+                return response(Sw.WRONG_P1P2);
+            }
+            if (offset == PHOTO_LENGTH) {
+                return response(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            if (offset != readOffset) {
+                return response(Sw.WRONG_P1P2);
+            }
+            int length = Math.min(ne, PHOTO_LENGTH - offset);
+            byte[] chunk = new byte[length];
+            System.arraycopy(photo, offset, chunk, 0, length);
+            readOffset = offset + length;
+            if (readOffset == PHOTO_LENGTH) {
+                readOffset = 0;
+                authorized = false;
+            }
+            return responseWithData(chunk, Sw.OK);
+        }
+
+        ResponseAPDU authorize() {
+            authorized = true;
+            return response(Sw.OK);
+        }
+    }
+
+    private static void checkPhotoOffline() throws CardException {
+        PhotoCard card = new PhotoCard();
+        CardGateway gateway = readyGateway(issuedChannel(command -> {
+            if ((command.getINS() & 0xFF) == 0x20) {
+                return card.authorize();
+            }
+            return card.apply(command);
+        }));
+
+        byte[] image = syntheticPhoto();
+        CardGateway.Result upload = gateway.uploadPhoto(image, ADMIN_PIN_TEXT.toCharArray());
+        record("PH01", "uploadPhoto đủ 4096 byte trả 9000 và FINISH đúng một lần",
+                upload.ok() && card.finishCount() == 1, true);
+        record("PH02", "số byte thẻ nhận đúng 4096", card.receivedBytes(), PHOTO_LENGTH);
+        record("PH03", "số chunk thẻ nhận đúng 32", card.chunksAccepted(), 32);
+        record("PH04", "ảnh trên thẻ khớp từng byte với nguồn",
+                firstMismatch(image, card.photo()) == null, true);
+
+        CardGateway lengthGateway = readyGateway(issuedChannel(command -> card.apply(command)));
+        int before = card.chunksAccepted();
+        CardGateway.Result shortImage = lengthGateway.uploadPhoto(new byte[1024], ADMIN_PIN_TEXT.toCharArray());
+        record("PH05", "uploadPhoto từ chối 1024 byte trước khi gửi APDU",
+                !shortImage.ok() && card.chunksAccepted() == before, true);
+
+        PhotoCard fresh = new PhotoCard();
+        CardGateway offline = readyGateway(issuedChannel(command -> fresh.apply(command)));
+        CardGateway.Result badPin = offline.uploadPhoto(image, "12ab5678".toCharArray());
+        record("PH06", "admin PIN không phải ASCII số trả 6A80",
+                !badPin.ok() && badPin.text().contains("6A80"), true);
+        record("PH07", "admin PIN sai định dạng không tiêu lượt thử", fresh.adminTries(), 5);
+
+        PhotoCard ready = new PhotoCard();
+        CardGateway readyCard = readyGateway(issuedChannel(command -> {
+            if ((command.getINS() & 0xFF) == 0x20) {
+                return ready.authorize();
+            }
+            return ready.apply(command);
+        }));
+        readyCard.uploadPhoto(image, ADMIN_PIN_TEXT.toCharArray());
+        CardGateway.Result second = readyCard.uploadPhoto(image, ADMIN_PIN_TEXT.toCharArray());
+        record("PH08", "uploadPhoto lần hai khi photoReady=true trả 6985",
+                !second.ok() && second.text().contains("6985"), true);
+
+        PhotoCard notReadyCard = new PhotoCard();
+        CardGateway notReadyGateway = readyGateway(issuedChannel(command -> {
+            if ((command.getINS() & 0xFF) == 0x20) {
+                return notReadyCard.authorize();
+            }
+            return notReadyCard.apply(command);
+        }));
+        CardGateway.Result notReady = notReadyGateway.readPhoto("654321".toCharArray());
+        record("PH09", "readPhoto khi photoReady=false trả 6985",
+                !notReady.ok() && notReady.text().contains("6985"), true);
+
+        PhotoCard refusedCard = new PhotoCard();
+        CardGateway refusedGateway = readyGateway(issuedChannel(command -> {
+            if ((command.getINS() & 0xFF) == 0x20) {
+                return response(0x63C2);
+            }
+            return refusedCard.apply(command);
+        }));
+        CardGateway.Result refused = refusedGateway.readPhoto("654321".toCharArray());
+        record("PH10", "VERIFY thất bại thì không gửi chunk đọc nào",
+                !refused.ok() && refusedCard.readAttempts() == 0, true);
+
+        PhotoCard readCard = new PhotoCard();
+        CardGateway reader = readyGateway(issuedChannel(command -> {
+            if ((command.getINS() & 0xFF) == 0x20) {
+                return readCard.authorize();
+            }
+            return readCard.apply(command);
+        }));
+        reader.uploadPhoto(image, ADMIN_PIN_TEXT.toCharArray());
+
+        CardGateway.Result readBack = reader.readPhoto("654321".toCharArray());
+        record("PH11", "readPhoto đọc lại đủ 4096 byte", readBack.ok(), true);
+        record("PH12", "ảnh đọc lại khớp từng byte với nguồn",
+                firstMismatch(image, reader.lastPhoto()) == null, true);
+
+        record("PH13", "sau khi hết chuỗi, READ_CHUNK offset 0 không có VERIFY trả 6982",
+                reader.transmitReadChunk(0, PHOTO_CHUNK).getSW() == Sw.SECURITY_NOT_SATISFIED, true);
+
+        PhotoCard formatCard = new PhotoCard();
+        CardGateway formatGateway = readyGateway(issuedChannel(command -> formatCard.apply(command)));
+        byte[] badFormat = new byte[PHOTO_BEGIN_LENGTH];
+        System.arraycopy(ADMIN_PIN_TEXT.getBytes(), 0, badFormat, 0, 8);
+        badFormat[8] = 0x02;
+        badFormat[9] = 64;
+        badFormat[10] = 64;
+        badFormat[11] = (byte) (PHOTO_LENGTH >> 8);
+        badFormat[12] = (byte) PHOTO_LENGTH;
+        record("PH14", "BEGIN với format=02 trả 6A80 và không mở phiên",
+                formatGateway.transmitPhotoBegin(badFormat).getSW() == Sw.WRONG_DATA
+                        && formatGateway.transmitPhotoWriteChunk(0, new byte[4]).getSW()
+                                == Sw.CONDITIONS_NOT_SATISFIED, true);
+
+        PhotoCard skewCard = new PhotoCard();
+        CardGateway skewGateway = readyGateway(issuedChannel(command -> skewCard.apply(command)));
+        byte[] openData = new byte[PHOTO_BEGIN_LENGTH];
+        System.arraycopy(ADMIN_PIN_TEXT.getBytes(), 0, openData, 0, 8);
+        openData[8] = 0x01;
+        openData[9] = 64;
+        openData[10] = 64;
+        openData[11] = (byte) (PHOTO_LENGTH >> 8);
+        openData[12] = (byte) PHOTO_LENGTH;
+        skewGateway.transmitPhotoBegin(openData);
+        byte[] chunkZero = new byte[PHOTO_CHUNK];
+        System.arraycopy(image, 0, chunkZero, 0, PHOTO_CHUNK);
+        int acceptedFirst = skewGateway.transmitPhotoWriteChunk(0, chunkZero).getSW();
+        record("PH15", "WRITE lặp offset 0 khi phiên đang ở 128 trả 6A86 và không nhận thêm byte",
+                acceptedFirst == Sw.OK
+                        && skewGateway.transmitPhotoWriteChunk(0, chunkZero).getSW()
+                                == Sw.WRONG_P1P2
+                        && skewCard.chunksAccepted() == 1, true);
+
+        PhotoCard earlyCard = new PhotoCard();
+        CardGateway earlyGateway = readyGateway(issuedChannel(command -> earlyCard.apply(command)));
+        byte[] goodBegin = new byte[PHOTO_BEGIN_LENGTH];
+        System.arraycopy(ADMIN_PIN_TEXT.getBytes(), 0, goodBegin, 0, 8);
+        goodBegin[8] = 0x01;
+        goodBegin[9] = 64;
+        goodBegin[10] = 64;
+        goodBegin[11] = (byte) (PHOTO_LENGTH >> 8);
+        goodBegin[12] = (byte) PHOTO_LENGTH;
+        earlyGateway.transmitPhotoBegin(goodBegin);
+        byte[] firstChunk = new byte[PHOTO_CHUNK];
+        System.arraycopy(image, 0, firstChunk, 0, PHOTO_CHUNK);
+        earlyGateway.transmitPhotoWriteChunk(0, firstChunk);
+        record("PH16", "FINISH khi mới có 128/4096 byte trả 6985 và ảnh vẫn chưa ready",
+                earlyGateway.transmitPhotoFinish().getSW() == Sw.CONDITIONS_NOT_SATISFIED
+                        && earlyGateway.transmitReadChunk(0, PHOTO_CHUNK).getSW()
+                                == Sw.CONDITIONS_NOT_SATISFIED, true);
+
+        PhotoCard interleavedCard = new PhotoCard();
+        CardGateway interleaved = readyGateway(issuedChannel(command -> {
+            if ((command.getINS() & 0xFF) == 0x20) {
+                return interleavedCard.authorize();
+            }
+            return interleavedCard.apply(command);
+        }));
+        interleaved.uploadPhoto(image, ADMIN_PIN_TEXT.toCharArray());
+        interleaved.readPhoto("654321".toCharArray());
+        interleaved.identify();
+        record("PH17", "lệnh xen giữa chuỗi đọc (SELECT/GET_STATUS) hủy quyền đọc ảnh",
+                interleaved.transmitReadChunk(0, PHOTO_CHUNK).getSW()
+                        == Sw.SECURITY_NOT_SATISFIED, true);
+
+        record("PH18", "READ_CHUNK với Le=256 (Le=00) bị từ chối 6700",
+                reader.transmitReadChunk(0, 256).getSW() == Sw.WRONG_LENGTH, true);
+
+        PhotoCard failingCard = new PhotoCard();
+        int[] chunkCount = { 0 };
+        CardChannel failingChannel = new CardChannel() {
+            @Override
+            public Card getCard() {
+                return null;
+            }
+
+            @Override
+            public int getChannelNumber() {
+                return 0;
+            }
+
+            @Override
+            public ResponseAPDU transmit(CommandAPDU command) throws CardException {
+                int ins = command.getINS() & 0xFF;
+                if (ins == 0xA4) {
+                    return response(Sw.OK);
+                }
+                if (ins == 0x10) {
+                    return statusApdu(0x01, CARD_ID);
+                }
+                if (ins == 0x33 && ++chunkCount[0] == 3) {
+                    throw new CardException("mat ket noi gia lap giua upload");
+                }
+                return failingCard.apply(command);
+            }
+
+            @Override
+            public int transmit(ByteBuffer command, ByteBuffer response) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        CardGateway failing = readyGateway(failingChannel);
+        boolean threw = false;
+        try {
+            failing.uploadPhoto(image, ADMIN_PIN_TEXT.toCharArray());
+        } catch (CardException expected) {
+            threw = true;
+        }
+        record("PH46", "lỗi truyền giữa upload nổi lên thành CardException, không bị nuốt",
+                threw, true);
+        record("PH47", "lỗi truyền giữa upload không gửi FINISH và ảnh không thành ready",
+                failingCard.finishCount() == 0 && !failingCard.ready(), true);
+        record("PH48", "lỗi truyền dừng đúng sau chunk thứ hai",
+                failingCard.chunksAccepted() == 2, true);
+    }
+
+    private static void checkPhotoOnCard(CardGateway gateway) throws CardException {
+        byte[] image = syntheticPhoto();
+        char[] admin = liveSecret(true);
+        char[] student = liveSecret(false);
+
+        byte[] beginData = new byte[PHOTO_BEGIN_LENGTH];
+        System.arraycopy(ADMIN_PIN_TEXT.getBytes(), 0, beginData, 0, 8);
+        for (int index = 0; index < 8; index++) {
+            beginData[index] = (byte) admin[index];
+        }
+        beginData[8] = 0x01;
+        beginData[9] = 64;
+        beginData[10] = 64;
+        beginData[11] = (byte) (PHOTO_LENGTH >> 8);
+        beginData[12] = (byte) PHOTO_LENGTH;
+
+        record("PH26", "thẻ thật: BEGIN đúng hợp đồng trả 9000",
+                gateway.transmitPhotoBegin(beginData).getSW() == Sw.OK, true);
+
+        byte[] firstChunk = new byte[PHOTO_CHUNK];
+        System.arraycopy(image, 0, firstChunk, 0, PHOTO_CHUNK);
+        record("PH27", "thẻ thật: chunk đầu tại offset 0 trả 9000",
+                gateway.transmitPhotoWriteChunk(0, firstChunk).getSW() == Sw.OK, true);
+        record("PH28", "thẻ thật: lặp offset 0 khi phiên đang ở 128 trả 6A86",
+                gateway.transmitPhotoWriteChunk(0, firstChunk).getSW() == Sw.WRONG_P1P2, true);
+        record("PH33", "thẻ thật: sau chunk lỗi offset, phiên đã đóng nên WRITE đúng offset trả 6985",
+                gateway.transmitPhotoWriteChunk(PHOTO_CHUNK, firstChunk).getSW()
+                        == Sw.CONDITIONS_NOT_SATISFIED, true);
+        record("PH34", "thẻ thật: sau chunk lỗi, BEGIN mới mở lại được phiên từ đầu",
+                gateway.transmitPhotoBegin(beginData).getSW() == Sw.OK, true);
+
+        byte[] oversized = new byte[PHOTO_CHUNK + 1];
+        System.arraycopy(image, 0, oversized, 0, PHOTO_CHUNK + 1);
+        record("PH35", "thẻ thật: chunk đầu sau khi mở lại trả 9000",
+                gateway.transmitPhotoWriteChunk(0, firstChunk).getSW() == Sw.OK, true);
+        record("PH36", "thẻ thật: chunk Lc=129 bị từ chối 6700",
+                gateway.transmitPhotoWriteChunk(PHOTO_CHUNK, oversized).getSW()
+                        == Sw.WRONG_LENGTH, true);
+        record("PH37", "thẻ thật: sau chunk sai độ dài, phiên đã đóng (WRITE trả 6985)",
+                gateway.transmitPhotoWriteChunk(PHOTO_CHUNK, firstChunk).getSW()
+                        == Sw.CONDITIONS_NOT_SATISFIED, true);
+
+        record("PH38", "thẻ thật: BEGIN lại sau lỗi Lc trả 9000",
+                gateway.transmitPhotoBegin(beginData).getSW() == Sw.OK, true);
+        record("PH39", "thẻ thật: chunk 0 sau khi mở lại trả 9000",
+                gateway.transmitPhotoWriteChunk(0, firstChunk).getSW() == Sw.OK, true);
+        CardGateway.Result interleavedVerify = gateway.verifyStudentPin(student);
+        record("PH40", "thẻ thật: VERIFY xen giữa upload vẫn trả 9000",
+                interleavedVerify.ok(), true);
+        record("PH41", "thẻ thật: lệnh xen giữa đóng phiên upload (WRITE trả 6985)",
+                gateway.transmitPhotoWriteChunk(PHOTO_CHUNK, firstChunk).getSW()
+                        == Sw.CONDITIONS_NOT_SATISFIED, true);
+
+        record("PH42", "thẻ thật: BEGIN sau lệnh xen giữa trả 9000",
+                gateway.transmitPhotoBegin(beginData).getSW() == Sw.OK, true);
+        record("PH43", "thẻ thật: FINISH khi thiếu byte trả 6985 (đường hủy chính thức)",
+                gateway.transmitPhotoFinish().getSW() == Sw.CONDITIONS_NOT_SATISFIED, true);
+        record("PH30", "thẻ thật: sau FINISH lỗi, WRITE không còn phiên nên trả 6985",
+                gateway.transmitPhotoWriteChunk(0, firstChunk).getSW()
+                        == Sw.CONDITIONS_NOT_SATISFIED, true);
+        record("PH44", "thẻ thật: sau khi hủy bằng FINISH, BEGIN mở lại được",
+                gateway.transmitPhotoBegin(beginData).getSW() == Sw.OK, true);
+        record("PH45", "thẻ thật: offset vượt tổng ảnh trả 6A86 trong phiên mới",
+                gateway.transmitPhotoWriteChunk(PHOTO_LENGTH, firstChunk).getSW()
+                        == Sw.WRONG_P1P2, true);
+        record("PH31", "thẻ thật: sau 6A86 vượt tổng, phiên đã đóng (WRITE trả 6985)",
+                gateway.transmitPhotoWriteChunk(0, firstChunk).getSW()
+                        == Sw.CONDITIONS_NOT_SATISFIED, true);
+
+        CardGateway.Result noPhoto = gateway.readPhoto(student);
+        record("PH32", "thẻ thật: ảnh dở dang không đọc được (6985)",
+                !noPhoto.ok() && noPhoto.text().contains("6985"), true);
+
+        CardGateway.Result upload = gateway.uploadPhoto(image, admin);
+        record("PH20", "thẻ thật: upload 4096 byte qua 32 chunk + FINISH trả 9000", upload.ok(), true);
+        if (!upload.ok()) {
+            System.out.println("      chi tiet: " + upload.text());
+        }
+
+        CardGateway.Result secondBegin = gateway.uploadPhoto(image, admin);
+        record("PH21", "thẻ thật: upload lần hai bị từ chối vì photoReady=true",
+                !secondBegin.ok() && secondBegin.text().contains("6985"), true);
+
+        CardGateway.Result read = gateway.readPhoto(student);
+        record("PH22", "thẻ thật: VERIFY một lần + 32 chunk đọc trả 9000", read.ok(), true);
+        if (!read.ok()) {
+            System.out.println("      chi tiet: " + read.text());
+        }
+        record("PH23", "thẻ thật: ảnh đọc lại khớp từng byte với nguồn",
+                firstMismatch(image, gateway.lastPhoto()) == null, true);
+
+        CardGateway.Result again = gateway.readPhoto(student);
+        record("PH24", "thẻ thật: đọc lại cần VERIFY mới (quyền đã tiêu thụ)",
+                again.ok(), true);
+        record("PH25", "thẻ thật: sau khi hết chuỗi, READ_CHUNK offset 0 trả 6982",
+                gateway.transmitReadChunk(0, PHOTO_CHUNK).getSW()
+                        == Sw.SECURITY_NOT_SATISFIED, true);
     }
 
     private static CardGateway readyGateway(CardChannel channel) {
