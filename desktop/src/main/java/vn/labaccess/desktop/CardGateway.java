@@ -42,7 +42,14 @@ final class CardGateway {
     private static final byte INS_END_VISIT = (byte) 0x52;
     private static final byte INS_GET_LAST_RECEIPT = (byte) 0x60;
     private static final byte INS_GET_CARD_PUBLIC_KEY = (byte) 0x61;
+    private static final byte INS_GET_PROFILE = (byte) 0x31;
+    private static final byte INS_GET_PROFILE_CRYPTO_META = (byte) 0x40;
+    private static final byte INS_PHOTO_BEGIN = (byte) 0x32;
+    private static final byte INS_PHOTO_WRITE_CHUNK = (byte) 0x33;
+    private static final byte INS_PHOTO_READ_CHUNK = (byte) 0x34;
+    private static final byte INS_PHOTO_FINISH = (byte) 0x35;
     private static final int PUBLIC_KEY_LE = 256;
+    private static final int PROFILE_LE = 256;
     private static final int RECEIPT_LE = 256;
     private static final int STATE_RESPONSE_LENGTH = 6;
     private static final int PIN_LENGTH = 6;
@@ -79,6 +86,9 @@ final class CardGateway {
     private final Reconciliation reconciliation = new Reconciliation();
     private Receipt lastReceipt;
     private java.security.PublicKey cardPublicKey;
+    private Profile lastProfile;
+    private ProfileCryptoMeta lastProfileMeta;
+    private byte[] lastPhoto;
     private int lastResponseSw = -1;
     private volatile int lastPinSw = -1;
 
@@ -122,6 +132,9 @@ final class CardGateway {
         ready = false;
         status = null;
         lastReceipt = null;
+        lastProfile = null;
+        lastProfileMeta = null;
+        lastPhoto = null;
         lastPinSw = -1;
         connectedFlag = true;
 
@@ -137,6 +150,9 @@ final class CardGateway {
         requireConnected();
         ready = false;
         status = null;
+        lastProfile = null;
+        lastProfileMeta = null;
+        lastPhoto = null;
         lastPinSw = -1;
 
         ResponseAPDU selectResponse = channel.transmit(
@@ -299,6 +315,260 @@ final class CardGateway {
             return "P1/P2 phải 0000";
         }
         return "không đọc được public key";
+    }
+
+    Result readProfile() throws CardException {
+        return readProfile(0x00, 0x00);
+    }
+
+    Result readProfile(int p1, int p2) throws CardException {
+        requireConnected();
+        lastProfile = null;
+        ResponseAPDU response = channel.transmit(new CommandAPDU(
+                CLA_APPLICATION, INS_GET_PROFILE, p1, p2, PROFILE_LE));
+        int sw = response.getSW();
+        byte[] data = response.getData();
+        lastResponseSw = sw;
+        String apdu = String.format(
+                "GET_PROFILE INS=31 P1P2=%02X%02X Le=00 SW=%04X dataLen=%d",
+                p1, p2, sw, data.length);
+
+        if (sw != Sw.OK) {
+            return Result.fail(apdu + " | " + profileStatusText(sw));
+        }
+        ProfileCodec.Parse parse = ProfileCodec.parse(data);
+        if (!parse.ok()) {
+            return Result.fail(apdu + " | parser=FAIL (" + parse.problem() + ")");
+        }
+        lastProfile = parse.profile();
+        return Result.ok(apdu + " | parser=PASS | " + lastProfile.evidence()
+                + " | UTF-8 nghiêm ngặt=PASS");
+    }
+
+    Result readProfileCryptoMeta() throws CardException {
+        return readProfileCryptoMeta(0x00, 0x00);
+    }
+
+    Result readProfileCryptoMeta(int p1, int p2) throws CardException {
+        requireConnected();
+        lastProfileMeta = null;
+        ResponseAPDU response = channel.transmit(new CommandAPDU(
+                CLA_APPLICATION, INS_GET_PROFILE_CRYPTO_META, p1, p2, PROFILE_LE));
+        int sw = response.getSW();
+        byte[] data = response.getData();
+        lastResponseSw = sw;
+        String apdu = String.format(
+                "GET_PROFILE_CRYPTO_META INS=40 P1P2=%02X%02X Le=00 SW=%04X dataLen=%d",
+                p1, p2, sw, data.length);
+
+        if (sw != Sw.OK) {
+            return Result.fail(apdu + " | " + profileStatusText(sw));
+        }
+        ProfileMetaCodec.Parse parse = ProfileMetaCodec.parse(data);
+        if (!parse.ok()) {
+            return Result.fail(apdu + " | parser=FAIL (" + parse.problem() + ")");
+        }
+        lastProfileMeta = parse.meta();
+        return Result.ok(apdu + " | parser=PASS | " + lastProfileMeta.evidence());
+    }
+
+    Result readProfileWithPin(char[] pin) throws CardException {
+        return withFreshAuthorization("GET_PROFILE", pin, this::readProfile);
+    }
+
+    Result readProfileCryptoMetaWithPin(char[] pin) throws CardException {
+        return withFreshAuthorization("GET_PROFILE_CRYPTO_META", pin,
+                this::readProfileCryptoMeta);
+    }
+
+    private Result withFreshAuthorization(String label, char[] pin, ReadOperation read)
+            throws CardException {
+        lastProfile = null;
+        lastProfileMeta = null;
+        Result verified = verifyStudentPin(pin);
+        if (!verified.ok()) {
+            return Result.fail(label + " không chạy — VERIFY: " + verified.text());
+        }
+        Result result = read.run();
+        if (!result.ok()) {
+            return result;
+        }
+        return Result.ok("VERIFY SW=9000 (quyền chỉ dùng cho lệnh vừa gửi) | " + result.text());
+    }
+
+    interface ReadOperation {
+        Result run() throws CardException;
+    }
+
+    ResponseAPDU transmitPhotoBegin(byte[] data) throws CardException {
+        requireConnected();
+        ResponseAPDU begin = channel.transmit(new CommandAPDU(
+                CLA_APPLICATION, INS_PHOTO_BEGIN, 0x00, 0x00, data));
+        lastResponseSw = begin.getSW();
+        return begin;
+    }
+
+    ResponseAPDU transmitPhotoWriteChunk(int offset, byte[] chunk) throws CardException {
+        requireConnected();
+        ResponseAPDU write = channel.transmit(new CommandAPDU(CLA_APPLICATION,
+                INS_PHOTO_WRITE_CHUNK, (offset >> 8) & 0xFF, offset & 0xFF, chunk));
+        lastResponseSw = write.getSW();
+        return write;
+    }
+
+    ResponseAPDU transmitPhotoFinish() throws CardException {
+        requireConnected();
+        ResponseAPDU finish = channel.transmit(new CommandAPDU(
+                CLA_APPLICATION, INS_PHOTO_FINISH, 0x00, 0x00));
+        lastResponseSw = finish.getSW();
+        return finish;
+    }
+
+    Result uploadPhoto(byte[] image, char[] adminPin) throws CardException {
+        requireConnected();
+        lastPhoto = null;
+        if (image == null || image.length != PhotoImage.LENGTH) {
+            return Result.fail("ảnh phải đúng " + PhotoImage.LENGTH
+                    + " byte grayscale raw 8-bit (chưa gửi APDU)");
+        }
+        if (adminPin == null || adminPin.length != PhotoImage.ADMIN_PIN_LENGTH) {
+            return Result.fail("admin PIN phải đúng " + PhotoImage.ADMIN_PIN_LENGTH
+                    + " ký tự (chưa gửi APDU)");
+        }
+        byte[] beginData = PhotoImage.beginPayload(adminPin);
+        try {
+            ResponseAPDU begin = transmitPhotoBegin(beginData);
+            if (begin.getSW() != Sw.OK) {
+                return Result.fail(String.format(
+                        "PHOTO_BEGIN Case 3S Lc=%d SW=%04X | %s",
+                        beginData.length, begin.getSW(), photoStatusText(begin.getSW())));
+            }
+
+            int offset = 0;
+            int chunks = 0;
+            while (offset < PhotoImage.LENGTH) {
+                int length = PhotoImage.chunkLength(offset);
+                ResponseAPDU write = transmitPhotoWriteChunk(offset,
+                        PhotoImage.chunk(image, offset, length));
+                if (write.getSW() != Sw.OK) {
+                    return Result.fail(String.format(
+                            "PHOTO_WRITE_CHUNK offset=%d Lc=%d SW=%04X | %s",
+                            offset, length, write.getSW(), photoStatusText(write.getSW())));
+                }
+                offset += length;
+                chunks++;
+            }
+
+            ResponseAPDU finish = transmitPhotoFinish();
+            if (finish.getSW() != Sw.OK) {
+                return Result.fail(String.format(
+                        "PHOTO_FINISH Case 1 SW=%04X | %s",
+                        finish.getSW(), photoStatusText(finish.getSW())));
+            }
+            return Result.ok(String.format(
+                    "PHOTO_BEGIN SW=9000 | PHOTO_WRITE_CHUNK x%d tổng=%d byte SW=9000"
+                            + " | PHOTO_FINISH SW=9000 | photoReady=true | sha256 nguồn=%s",
+                    chunks, offset, PhotoImage.fingerprint(image)));
+        } finally {
+            Arrays.fill(beginData, (byte) 0);
+        }
+    }
+
+    ResponseAPDU transmitReadChunk(int offset, int le) throws CardException {
+        requireConnected();
+        ResponseAPDU chunk = channel.transmit(new CommandAPDU(CLA_APPLICATION,
+                INS_PHOTO_READ_CHUNK, (offset >> 8) & 0xFF, offset & 0xFF, le));
+        lastResponseSw = chunk.getSW();
+        return chunk;
+    }
+
+    Result readPhoto(char[] pin) throws CardException {
+        requireConnected();
+        lastPhoto = null;
+        Result verified = verifyStudentPin(pin);
+        if (!verified.ok()) {
+            return Result.fail("đọc ảnh không chạy — VERIFY: " + verified.text());
+        }
+        byte[] image = new byte[PhotoImage.LENGTH];
+        int offset = 0;
+        int chunks = 0;
+        while (offset < PhotoImage.LENGTH) {
+            int length = PhotoImage.chunkLength(offset);
+            ResponseAPDU chunk = transmitReadChunk(offset, length);
+            if (chunk.getSW() != Sw.OK) {
+                return Result.fail(String.format(
+                        "PHOTO_READ_CHUNK offset=%d Le=%d SW=%04X | %s",
+                        offset, length, chunk.getSW(), photoStatusText(chunk.getSW())));
+            }
+            byte[] data = chunk.getData();
+            if (data.length == 0 || data.length > length) {
+                return Result.fail(String.format(
+                        "PHOTO_READ_CHUNK offset=%d trả %d byte, vượt Le=%d",
+                        offset, data.length, length));
+            }
+            System.arraycopy(data, 0, image, offset, data.length);
+            offset += data.length;
+            chunks++;
+        }
+        lastPhoto = image;
+        return Result.ok(String.format(
+                "VERIFY SW=9000 (quyền tiêu thụ khi hết chuỗi) | PHOTO_READ_CHUNK x%d"
+                        + " tổng=%d byte SW=9000 | sha256 đọc lại=%s",
+                chunks, offset, PhotoImage.fingerprint(image)));
+    }
+
+    byte[] lastPhoto() {
+        return lastPhoto;
+    }
+
+    private static String photoStatusText(int sw) {
+        if (sw == Sw.CONDITIONS_NOT_SATISFIED) {
+            return "photoReady/phiên không cho phép: chưa BEGIN, đã ready, hoặc thiếu dữ liệu";
+        }
+        if (sw == Sw.SECURITY_NOT_SATISFIED) {
+            return "thiếu quyền student — VERIFY ngay trước chuỗi đọc";
+        }
+        if (sw == Sw.WRONG_P1P2) {
+            return "offset không liền mạch hoặc vượt tổng ảnh";
+        }
+        if (sw == Sw.WRONG_LENGTH) {
+            return "Lc/Le sai (chunk 1..128, BEGIN Lc=13, FINISH không data/Le)";
+        }
+        if (sw == Sw.WRONG_DATA) {
+            return "admin PIN sai định dạng hoặc format/kích thước sai";
+        }
+        if (sw == Sw.AUTH_BLOCKED) {
+            return "admin PIN đã bị khóa";
+        }
+        return String.format("SW=%04X không đọc được ảnh", sw);
+    }
+
+    private static String profileStatusText(int sw) {
+        if (sw == Sw.SECURITY_NOT_SATISFIED) {
+            return "thiếu quyền student — VERIFY_STUDENT_PIN ngay trước lệnh đọc,"
+                    + " quyền chỉ dùng cho một lệnh";
+        }
+        if (sw == Sw.CONDITIONS_NOT_SATISFIED) {
+            return "thẻ chưa ISSUED — chưa có hồ sơ để đọc";
+        }
+        if (sw == Sw.WRONG_P1P2) {
+            return "P1/P2 phải 0000";
+        }
+        if (sw == Sw.WRONG_LENGTH) {
+            return "Le nhỏ hơn độ dài response";
+        }
+        if (sw == Sw.INTERNAL_ERROR) {
+            return "record hồ sơ hỏng (tag/version/schema) — không trả dữ liệu";
+        }
+        return String.format("SW=%04X không đọc được hồ sơ", sw);
+    }
+
+    Profile lastProfile() {
+        return lastProfile;
+    }
+
+    ProfileCryptoMeta lastProfileMeta() {
+        return lastProfileMeta;
     }
 
     int lastPinSw() {
@@ -860,6 +1130,9 @@ final class CardGateway {
         ready = false;
         status = null;
         lastReceipt = null;
+        lastProfile = null;
+        lastProfileMeta = null;
+        lastPhoto = null;
         lastPinSw = -1;
         channel = null;
         terminal = null;

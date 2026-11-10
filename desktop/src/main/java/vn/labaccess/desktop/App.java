@@ -68,6 +68,8 @@ public class App extends Application {
 
     private PinPanel pinPanel;
     private PersonalizePanel personalizePanel;
+    private ProfilePanel profilePanel;
+    private PhotoPanel photoPanel;
     private DemoScenario demo;
 
     private final PendingJournal journal = new PendingJournal(
@@ -129,7 +131,10 @@ public class App extends Application {
             stateSnapshotKnown = false;
             showStatus();
         });
-        demo = new DemoScenario(this, pinPanel, personalizePanel, this::log);
+        profilePanel = new ProfilePanel(gateway, this::runOp, this::log);
+        photoPanel = new PhotoPanel(gateway, this::runOp, this::log);
+        demo = new DemoScenario(this, pinPanel, personalizePanel, profilePanel, photoPanel,
+                this::log);
 
         HBox buttons = new HBox(10, btnConnect, btnIdentify, btnDisconnect, btnReconcile);
         buttons.setAlignment(Pos.CENTER_LEFT);
@@ -176,8 +181,9 @@ public class App extends Application {
         info.add(UiLabels.caption("Đối soát"), 0, 6);
         info.add(valueReconcile, 1, 6);
 
-        VBox top = new VBox(buttons, personalizePanel.node(), pinPanel.node(), receiptControls,
-                txnControls, new Separator(), info);
+        VBox top = new VBox(buttons, personalizePanel.node(), pinPanel.node(),
+                profilePanel.node(), photoPanel.node(), receiptControls, txnControls,
+                new Separator(), info);
 
         statusLabel = new Label("Chưa kết nối");
         statusLabel.setId("status");
@@ -196,7 +202,7 @@ public class App extends Application {
         root.setCenter(logArea);
         root.setBottom(statusBar);
 
-        Scene scene = new Scene(root, 1180, 680);
+        Scene scene = new Scene(root, 1180, 760);
         stage.setTitle("LabAccess — nhận diện applet (PID " + pid + ")");
         stage.setScene(scene);
         stage.setOnCloseRequest(e -> {
@@ -224,19 +230,23 @@ public class App extends Application {
             uiReady = false;
             stateSnapshotKnown = false;
             clearInfo();
+            photoPanel.clearCardImage(ok
+                    ? "vừa kết nối, chưa đọc ảnh từ thẻ"
+                    : "kết nối lỗi, không giữ ảnh của phiên trước");
             if (ok) {
                 pinPanel.resetState("vừa kết nối, chưa đọc trạng thái PIN từ thẻ");
+                profilePanel.resetView("vừa kết nối, chưa đọc hồ sơ");
             }
         });
     }
 
     private void doIdentify() {
+        profilePanel.resetView("bắt đầu SELECT lại, không giữ hồ sơ của lần đọc trước");
+        pinPanel.resetState("bắt đầu SELECT lại, chưa thử PIN");
+        photoPanel.clearCardImage("bắt đầu SELECT lại, không giữ ảnh của lần đọc trước");
         runOp("SELECT + GET_STATUS", gateway::identify, ok -> {
             uiReady = ok;
             stateSnapshotKnown = false;
-            if (ok) {
-                pinPanel.resetState("vừa SELECT lại, chưa thử PIN");
-            }
             showStatus();
             if (ok) {
                 Platform.runLater(this::offerPendingReconciliation);
@@ -250,8 +260,12 @@ public class App extends Application {
             uiReady = false;
             stateSnapshotKnown = false;
             clearInfo();
+            photoPanel.clearCardImage(ok
+                    ? "đã ngắt kết nối, không giữ ảnh cũ"
+                    : "ngắt kết nối lỗi, vẫn không giữ ảnh cũ");
             if (ok) {
                 pinPanel.resetState("đã ngắt kết nối, không giữ trạng thái cũ");
+                profilePanel.resetView("đã ngắt kết nối, không giữ hồ sơ cũ");
             }
         });
     }
@@ -607,6 +621,7 @@ public class App extends Application {
         valueReconcile.setText(gateway.reconciliation().state().toString());
         personalizePanel.resetView();
         pinPanel.clearState();
+        profilePanel.clearView();
     }
 
     private void runOp(String label, Callable<CardGateway.Result> op, Consumer<Boolean> onResult) {
@@ -663,6 +678,8 @@ public class App extends Application {
             btnReconcile.setDisable(true);
             pinPanel.setEnabled(false);
             personalizePanel.updateAvailability(false, false);
+            profilePanel.setEnabled(false);
+            photoPanel.setEnabled(false);
             statusLabel.setText("Trạng thái: đang đóng cửa sổ");
             return;
         }
@@ -688,6 +705,8 @@ public class App extends Application {
         personalizePanel.updateAvailability(
                 !busy && uiConnected && !journalPresent && !issued,
                 !busy && uiConnected);
+        profilePanel.setEnabled(!busy && uiConnected && issued);
+        photoPanel.setEnabled(!busy && uiConnected && issued);
 
         String state = busy ? "đang xử lý"
                 : !uiConnected ? "chưa kết nối"
