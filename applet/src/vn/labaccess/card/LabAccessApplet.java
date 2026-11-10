@@ -181,7 +181,11 @@ public final class LabAccessApplet extends Applet {
         }
 
         byte aidLength = instanceAid.getBytes(buffer, Protocol.OFFSET_INSTANCE_AID);
-        short responseLength = Protocol.statusResponseLength(aidLength);
+        short publicLength = Protocol.statusResponseLength(aidLength);
+        boolean includeStudentState = state.isIssued() && pins.isStudentAuthorized();
+        short responseLength = includeStudentState
+                ? Protocol.authenticatedStatusResponseLength(aidLength)
+                : publicLength;
 
         short ne = apdu.setOutgoing();
         if (ne == (short) 0 || ne < responseLength) {
@@ -197,6 +201,18 @@ public final class LabAccessApplet extends Applet {
         buffer[lifecycleOffset] = state.lifecycle();
         Util.arrayCopyNonAtomic(state.cardId(), (short) 0, buffer,
                 Protocol.cardIdOffset(aidLength), Protocol.CARD_ID_LENGTH);
+
+        if (includeStudentState) {
+            Util.setShort(buffer, publicLength, state.quota().balance());
+            state.quota().writeCounter(buffer,
+                    (short) (publicLength + Protocol.STATUS_AUTH_OFFSET_COUNTER));
+            VisitLedger visits = state.visits();
+            buffer[(short) (publicLength + Protocol.STATUS_AUTH_OFFSET_ACTIVE_VISIT)] =
+                    visits.hasActiveVisit() ? Protocol.STATUS_ACTIVE_VISIT_OPEN
+                            : Protocol.STATUS_ACTIVE_VISIT_CLOSED;
+            visits.writeActiveVisitId(buffer,
+                    (short) (publicLength + Protocol.STATUS_AUTH_OFFSET_ACTIVE_VISIT_ID));
+        }
 
         apdu.setOutgoingLength(responseLength);
         apdu.sendBytes((short) 0, responseLength);

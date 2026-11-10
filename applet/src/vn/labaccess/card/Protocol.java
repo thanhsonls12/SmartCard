@@ -138,12 +138,22 @@ final class Protocol {
     static final short OFFSET_PROTOCOL_VERSION = (short) 9;
     static final short OFFSET_AID_LENGTH = (short) 10;
     static final short OFFSET_INSTANCE_AID = (short) 11;
-
-    private Protocol() {
-    }
+    static final short STATUS_AUTH_OFFSET_BALANCE = (short) 0;
+    static final short STATUS_AUTH_OFFSET_COUNTER = STATE_OFFSET_COUNTER;
+    static final short STATUS_AUTH_OFFSET_ACTIVE_VISIT = STATE_RESPONSE_LENGTH;
+    static final short STATUS_AUTH_OFFSET_ACTIVE_VISIT_ID =
+            (short) (STATUS_AUTH_OFFSET_ACTIVE_VISIT + 1);
+    static final byte STATUS_ACTIVE_VISIT_CLOSED = (byte) 0x00;
+    static final byte STATUS_ACTIVE_VISIT_OPEN = (byte) 0x01;
+    static final short STATUS_AUTH_STATE_LENGTH =
+            (short) (STATUS_AUTH_OFFSET_ACTIVE_VISIT_ID + VISIT_ID_LENGTH);
 
     static short statusResponseLength(byte instanceAidLength) {
         return (short) (OFFSET_INSTANCE_AID + instanceAidLength + 1 + CARD_ID_LENGTH);
+    }
+
+    static short authenticatedStatusResponseLength(byte instanceAidLength) {
+        return (short) (statusResponseLength(instanceAidLength) + STATUS_AUTH_STATE_LENGTH);
     }
 
     static short lifecycleOffset(byte instanceAidLength) {
@@ -160,5 +170,8 @@ final class Protocol {
 
     static short profileResponseLength(short studentIdLength, short displayNameLength) {
         return (short) (profileDisplayNameLengthOffset(studentIdLength) + 1 + displayNameLength);
+    }
+
+    private Protocol() {
     }
 }

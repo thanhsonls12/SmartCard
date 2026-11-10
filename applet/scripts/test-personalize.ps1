@@ -79,7 +79,9 @@ $variantRoot = Join-Path $buildDir 'variants'
 $variantNames = @('ciphertext', 'tag', 'nonce', 'counter-near-max',
     'quota-fault-before-commit', 'quota-fault-after-commit',
     'visit-counter-near-max', 'visit-fault-before-commit', 'visit-fault-after-commit',
-    'receipt-fault-before-commit', 'receipt-signature-too-long')
+    'visit-fault-after-close-before-commit',
+    'receipt-fault-before-commit', 'receipt-signature-too-long',
+    'photo-finish-after-length-fault')
 foreach ($variantName in $variantNames) {
     $candidate = Join-Path $variantRoot "$variantName-deliverables/vn/labaccess/card/javacard/card.cap"
     if (-not (Test-Path $candidate)) {

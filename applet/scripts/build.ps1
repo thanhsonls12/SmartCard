@@ -231,6 +231,15 @@ $variants = @(
         )
     },
     [pscustomobject]@{
+        Name = 'visit-fault-after-close-before-commit'
+        Target = 'vn/labaccess/card/LabAccessApplet.java'
+        Anchor = '                visits.close();'
+        After = $true
+        Lines = @(
+            '                ISOException.throwIt(Sw.INTERNAL_ERROR);'
+        )
+    },
+    [pscustomobject]@{
         Name = 'visit-fault-after-commit'
         Target = 'vn/labaccess/card/LabAccessApplet.java'
         Anchor = '            writeStateResponse(ledger, buffer);'
@@ -250,6 +259,17 @@ $variants = @(
             '            if (delta == (short) 7777) {',
             '                ISOException.throwIt(Sw.INTERNAL_ERROR);',
             '            }'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'photo-finish-after-length-fault'
+        Target = 'vn/labaccess/card/PhotoStore.java'
+        Anchor = '        photoLength = total;'
+        After = $true
+        Lines = @(
+            '        if (buffer[(short) 0] == (byte) 0xA5) {',
+            '            javacard.framework.ISOException.throwIt(Sw.INTERNAL_ERROR);',
+            '        }'
         )
     },
     [pscustomobject]@{

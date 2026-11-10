@@ -23,8 +23,8 @@ final class VisitLedger {
 
     void reset() {
         activeVisit = false;
-        Util.arrayFillNonAtomic(activeVisitId, (short) 0, Protocol.VISIT_ID_LENGTH, UNASSIGNED_BYTE);
-        Util.arrayFillNonAtomic(lastClosedVisitId, (short) 0, Protocol.VISIT_ID_LENGTH,
+        Util.arrayFill(activeVisitId, (short) 0, Protocol.VISIT_ID_LENGTH, UNASSIGNED_BYTE);
+        Util.arrayFill(lastClosedVisitId, (short) 0, Protocol.VISIT_ID_LENGTH,
                 UNASSIGNED_BYTE);
     }
 
@@ -43,15 +43,20 @@ final class VisitLedger {
     }
 
     void open(byte[] source, short offset) {
-        Util.arrayCopyNonAtomic(source, offset, activeVisitId, (short) 0,
+        Util.arrayCopy(source, offset, activeVisitId, (short) 0,
                 Protocol.VISIT_ID_LENGTH);
         activeVisit = true;
     }
 
-    void close() {
-        Util.arrayCopyNonAtomic(activeVisitId, (short) 0, lastClosedVisitId, (short) 0,
+    void writeActiveVisitId(byte[] target, short offset) {
+        Util.arrayCopyNonAtomic(activeVisitId, (short) 0, target, offset,
                 Protocol.VISIT_ID_LENGTH);
-        Util.arrayFillNonAtomic(activeVisitId, (short) 0, Protocol.VISIT_ID_LENGTH,
+    }
+
+    void close() {
+        Util.arrayCopy(activeVisitId, (short) 0, lastClosedVisitId, (short) 0,
+                Protocol.VISIT_ID_LENGTH);
+        Util.arrayFill(activeVisitId, (short) 0, Protocol.VISIT_ID_LENGTH,
                 UNASSIGNED_BYTE);
         activeVisit = false;
     }

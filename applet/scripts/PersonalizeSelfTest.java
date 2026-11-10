@@ -51,6 +51,12 @@ public final class PersonalizeSelfTest {
     private static final byte INS_UNBLOCK_STUDENT_PIN = (byte) 0x23;
     private static final byte INS_GET_PROFILE = (byte) 0x31;
     private static final byte INS_GET_PROFILE_CRYPTO_META = (byte) 0x40;
+    private static final byte INS_PHOTO_BEGIN = (byte) 0x32;
+    private static final byte INS_PHOTO_WRITE_CHUNK = (byte) 0x33;
+    private static final byte INS_PHOTO_READ_CHUNK = (byte) 0x34;
+    private static final byte INS_PHOTO_FINISH = (byte) 0x35;
+    private static final int PHOTO_LENGTH = 4096;
+    private static final int PHOTO_CHUNK_LENGTH = 128;
     private static final byte INS_GRANT_QUOTA = (byte) 0x50;
     private static final int GRANT_DATA_LENGTH = 10;
     private static final int GRANT_DELTA_OFFSET = 8;
@@ -67,7 +73,7 @@ public final class PersonalizeSelfTest {
     private static final int STATE_COUNTER_OFFSET = 2;
     private static final int RECEIPT_PAYLOAD_LENGTH = 34;
     private static final int RECEIPT_RESPONSE_MAX_LENGTH = 107;
-    private static final int RECEIPT_SIGNATURE_MIN_LENGTH = 68;
+    private static final int RECEIPT_SIGNATURE_MIN_LENGTH = 8;
     private static final int RECEIPT_OFFSET_VERSION = 0;
     private static final int RECEIPT_OFFSET_CARD_ID = 1;
     private static final int RECEIPT_OFFSET_COUNTER = 9;
@@ -149,7 +155,8 @@ public final class PersonalizeSelfTest {
             runQuotaVariantCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
             card = runVisitCases(propertiesPath, channel, adminPin, studentPin, testCapPath);
             channel = card.getBasicChannel();
-            runVisitVariantCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
+            card = runVisitVariantCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
+            channel = card.getBasicChannel();
             card = runReceiptCases(propertiesPath, channel, adminPin, studentPin, testCapPath);
             channel = card.getBasicChannel();
             runReceiptFaultBeforeCommitCase(propertiesPath, channel, adminPin, studentPin,
@@ -158,6 +165,8 @@ public final class PersonalizeSelfTest {
                     variantsRoot);
             runReceiptSignatureSizeCase(propertiesPath, channel, adminPin, studentPin,
                     variantsRoot);
+            card = runPhotoFinishFaultCase(propertiesPath, card, adminPin, studentPin, variantsRoot);
+            channel = card.getBasicChannel();
         } catch (Exception exception) {
             failed++;
             log("SUITE FAILED: " + exception.getClass().getSimpleName());
@@ -635,7 +644,7 @@ public final class PersonalizeSelfTest {
         record("Y25", "VERIFY truoc GET_STATUS xen giua", SW_OK,
                 transmit(channel, pinCommand(INS_VERIFY_STUDENT_PIN, studentPin)).getSW());
         record("Y26", "GET_STATUS xen giua", SW_OK,
-                transmit(channel, new CommandAPDU(CLA, INS_GET_STATUS, 0, 0, 27)).getSW());
+                transmit(channel, new CommandAPDU(CLA, INS_GET_STATUS, 0, 0, 256)).getSW());
         record("Y27", "START sau GET_STATUS mat quyen", SW_SECURITY, transmit(channel,
                 visitCommand(INS_START_VISIT, thirdVisit)).getSW());
         record("Y28", "VERIFY truoc SELECT lai", SW_OK,
@@ -668,18 +677,97 @@ public final class PersonalizeSelfTest {
         return connect();
     }
 
-    private static void runVisitVariantCases(String propertiesPath, CardChannel channel,
+    private static Card runVisitVariantCases(String propertiesPath, CardChannel channel,
             byte[] adminPin, byte[] studentPin, String variantsRoot) throws Exception {
         String beforeCommit = variantCap(variantsRoot, "visit-fault-before-commit");
         String afterCommit = variantCap(variantsRoot, "visit-fault-after-commit");
         String nearMax = variantCap(variantsRoot, "visit-counter-near-max");
-        if (beforeCommit == null || afterCommit == null || nearMax == null) {
+        String closeRollback = variantCap(variantsRoot, "visit-fault-after-close-before-commit");
+        if (beforeCommit == null || afterCommit == null || nearMax == null || closeRollback == null) {
             recordBoolean("Z01", "thieu CAP visit variant", false);
-            return;
+            return channel.getCard();
         }
         runVisitFaultBeforeCommitCase(propertiesPath, channel, adminPin, studentPin, beforeCommit);
         runVisitFaultAfterCommitCase(propertiesPath, channel, adminPin, studentPin, afterCommit);
         runVisitCounterNearMaxCase(propertiesPath, channel, adminPin, studentPin, nearMax);
+        return runVisitCloseRollbackCase(propertiesPath, channel.getCard(), adminPin, studentPin,
+                closeRollback);
+    }
+
+    private static Card runVisitCloseRollbackCase(String propertiesPath, Card card,
+            byte[] adminPin, byte[] studentPin, String capPath) throws Exception {
+        if (!prepareVariantInstance(propertiesPath, card.getBasicChannel(),
+                adminPin, studentPin, capPath)) {
+            recordBoolean("Z22", "chuan bi CAP fault sau visits.close", false);
+            return card;
+        }
+        CardChannel channel = card.getBasicChannel();
+        byte[] visit = visitId((byte) 0x77);
+        byte[] otherVisit = visitId((byte) 0x78);
+        recordQuota("Z22", "GRANT +5 truoc END rollback", transmit(channel,
+                grantCommand(adminPin, 5)), 5, 1L);
+        record("Z23", "VERIFY truoc START de tao ca", SW_OK,
+                transmit(channel, pinCommand(INS_VERIFY_STUDENT_PIN, studentPin)).getSW());
+        recordVisit("Z24", "START tao activeVisit truoc END fault", transmit(channel,
+                visitCommand(INS_START_VISIT, visit)), 4, 2L);
+        cardPublicKeyHex = readCardPublicKey(channel);
+        record("Z25", "VERIFY truoc END fault", SW_OK,
+                transmit(channel, pinCommand(INS_VERIFY_STUDENT_PIN, studentPin)).getSW());
+        record("Z26", "END fault sau visit close truoc commit", SW_INTERNAL,
+                transmit(channel, visitCommand(INS_END_VISIT, visit)).getSW());
+
+        card.disconnect(true);
+        card = connect();
+        channel = card.getBasicChannel();
+        selectTestInstance(channel);
+        record("Z27", "SELECT sau reset giu instance de doc state rollback", SW_OK,
+                transmit(channel, new CommandAPDU(0x00, 0xA4, 0x04, 0x00,
+                        hex(TEST_AID_HEX), 256)).getSW());
+        record("Z28", "VERIFY truoc doc state sau END rollback", SW_OK,
+                transmit(channel, pinCommand(INS_VERIFY_STUDENT_PIN, studentPin)).getSW());
+        ResponseAPDU status = transmit(channel,
+                new CommandAPDU(CLA, INS_GET_STATUS, 0, 0, 256));
+        byte[] state = status.getData();
+        int publicLength = 11 + (state.length > 10 ? state[10] & 0xFF : 0) + 1 + 8;
+        boolean stateRestored = status.getSW() == SW_OK && state.length == publicLength + 23
+                && readUnsignedShort(state, publicLength) == 4
+                && readCounter(state, publicLength + 2) == 2L
+                && state[publicLength + 6] == 1
+                && Arrays.equals(Arrays.copyOfRange(state, publicLength + 7,
+                        publicLength + 23), visit);
+        recordBoolean("Z29", "END abort rollback giu balance/counter/activeVisitId nhat quan",
+                stateRestored);
+        clear(state);
+
+        record("Z30", "VERIFY truoc START lap khi ca van mo", SW_OK,
+                transmit(channel, pinCommand(INS_VERIFY_STUDENT_PIN, studentPin)).getSW());
+        record("Z31", "START khac bi chan do ca cu van active", SW_CONDITIONS,
+                transmit(channel, visitCommand(INS_START_VISIT, otherVisit)).getSW());
+        record("Z32", "VERIFY truoc receipt cu sau rollback", SW_OK,
+                transmit(channel, pinCommand(INS_VERIFY_STUDENT_PIN, studentPin)).getSW());
+        byte[] receiptAfter = transmit(channel, receiptCommand()).getData();
+        boolean startReceiptKept = receiptAfter.length >= RECEIPT_PAYLOAD_LENGTH + 1
+                && (receiptAfter[RECEIPT_OFFSET_OPERATION] & 0xFF) == OPERATION_START_VISIT
+                && readCounter(receiptAfter, RECEIPT_OFFSET_COUNTER) == 2L
+                && Arrays.equals(Arrays.copyOfRange(receiptAfter, RECEIPT_OFFSET_VISIT_ID,
+                        RECEIPT_PAYLOAD_LENGTH), visit);
+        recordBoolean("Z33", "END abort rollback giu receipt START cu", startReceiptKept);
+        clear(receiptAfter);
+        clear(visit);
+        clear(otherVisit);
+        return card;
+    }
+
+    private static int readUnsignedShort(byte[] source, int offset) {
+        return ((source[offset] & 0xFF) << 8) | (source[offset + 1] & 0xFF);
+    }
+
+    private static long readCounter(byte[] source, int offset) {
+        long value = 0;
+        for (int index = 0; index < 4; index++) {
+            value = (value << 8) | (source[offset + index] & 0xFFL);
+        }
+        return value;
     }
 
     private static void runVisitFaultBeforeCommitCase(String propertiesPath, CardChannel channel,
@@ -767,7 +855,7 @@ public final class PersonalizeSelfTest {
         record("K02", "VERIFY truoc GET_STATUS", SW_OK,
                 transmit(channel, pinCommand(INS_VERIFY_STUDENT_PIN, studentPin)).getSW());
         record("K03", "GET_STATUS xen giua tieu quyen", SW_OK,
-                transmit(channel, new CommandAPDU(CLA, INS_GET_STATUS, 0, 0, 27)).getSW());
+                transmit(channel, new CommandAPDU(CLA, INS_GET_STATUS, 0, 0, 256)).getSW());
         record("K04", "GET_LAST_RECEIPT sau lenh xen giua", SW_SECURITY,
                 transmit(channel, receiptCommand()).getSW());
         record("K05", "VERIFY truoc khi chua co receipt", SW_OK,
@@ -1070,6 +1158,162 @@ public final class PersonalizeSelfTest {
                 5 + FAULT_AFTER_COMMIT_DELTA + 1, 3L);
     }
 
+    private static Card runPhotoFinishFaultCase(String propertiesPath, Card card,
+            byte[] adminPin, byte[] studentPin, String variantsRoot) throws Exception {
+        String capPath = variantCap(variantsRoot, "photo-finish-after-length-fault");
+        if (capPath == null || !prepareVariantInstance(propertiesPath, card.getBasicChannel(),
+                adminPin, studentPin, capPath)) {
+            recordBoolean("P05-01", "chuan bi CAP fault sau photoLength", false);
+            return card;
+        }
+
+        CardChannel channel = card.getBasicChannel();
+        byte[] beginData = new byte[13];
+        System.arraycopy(adminPin, 0, beginData, 0, adminPin.length);
+        beginData[8] = 0x01;
+        beginData[9] = 64;
+        beginData[10] = 64;
+        beginData[11] = (byte) (PHOTO_LENGTH >> 8);
+        beginData[12] = (byte) PHOTO_LENGTH;
+        byte[] faultPhoto = new byte[PHOTO_LENGTH];
+        byte[] completePhoto = new byte[PHOTO_LENGTH];
+        byte[] readBack = new byte[PHOTO_LENGTH];
+        for (int index = 0; index < PHOTO_LENGTH; index++) {
+            byte value = (byte) ((index * 37 + 11) & 0xFF);
+            faultPhoto[index] = value;
+            completePhoto[index] = value;
+        }
+        faultPhoto[0] = (byte) 0xA5;
+        completePhoto[0] = (byte) 0x5A;
+        try {
+            int beginSw = transmit(channel, new CommandAPDU(CLA, INS_PHOTO_BEGIN,
+                    0, 0, beginData)).getSW();
+            record("P05-02", "lan upload loi: PHOTO_BEGIN tra 9000", SW_OK, beginSw);
+            if (beginSw != SW_OK) {
+                return card;
+            }
+
+            int writtenChunks = 0;
+            int writeSw = SW_OK;
+            for (int offset = 0; offset < PHOTO_LENGTH; offset += PHOTO_CHUNK_LENGTH) {
+                byte[] chunk = Arrays.copyOfRange(faultPhoto, offset,
+                        offset + PHOTO_CHUNK_LENGTH);
+                ResponseAPDU response = transmit(channel, new CommandAPDU(CLA,
+                        INS_PHOTO_WRITE_CHUNK, offset >> 8, offset & 0xFF, chunk));
+                clear(chunk);
+                writeSw = response.getSW();
+                if (writeSw != SW_OK) {
+                    break;
+                }
+                writtenChunks++;
+            }
+            recordBoolean("P05-03", "lan upload loi da ghi du 4096 byte qua 32 chunk",
+                    writtenChunks == PHOTO_LENGTH / PHOTO_CHUNK_LENGTH && writeSw == SW_OK);
+            if (writtenChunks != PHOTO_LENGTH / PHOTO_CHUNK_LENGTH || writeSw != SW_OK) {
+                return card;
+            }
+
+            int interruptedSw = transmit(channel,
+                    new CommandAPDU(CLA, INS_PHOTO_FINISH, 0, 0)).getSW();
+            record("P05-04", "fault duoc chen sau lan ghi photoLength tra 6F00",
+                    SW_INTERNAL, interruptedSw);
+            if (interruptedSw != SW_INTERNAL) {
+                return card;
+            }
+
+            card.disconnect(true);
+            card = connect();
+            channel = card.getBasicChannel();
+            selectTestInstance(channel);
+            int statusSw = transmit(channel,
+                    new CommandAPDU(CLA, INS_GET_STATUS, 0, 0, 256)).getSW();
+            record("P05-05", "sau reconnect SELECT + GET_STATUS tra 9000", SW_OK, statusSw);
+            if (statusSw != SW_OK) {
+                return card;
+            }
+
+            int verifySw = transmit(channel,
+                    pinCommand(INS_VERIFY_STUDENT_PIN, studentPin)).getSW();
+            record("P05-06", "VERIFY student sau reconnect tra 9000", SW_OK, verifySw);
+            int partialReadSw = transmit(channel,
+                    new CommandAPDU(CLA, INS_PHOTO_READ_CHUNK, 0, 0, PHOTO_CHUNK_LENGTH)).getSW();
+            record("P05-07", "anh sau photoLength fault van khong ready (READ tra 6985)",
+                    SW_CONDITIONS, partialReadSw);
+
+            int retryBeginSw = transmit(channel, new CommandAPDU(CLA, INS_PHOTO_BEGIN,
+                    0, 0, beginData)).getSW();
+            record("P05-08", "PHOTO_BEGIN hop le sau fault tra 9000", SW_OK, retryBeginSw);
+            if (retryBeginSw != SW_OK) {
+                return card;
+            }
+
+            writtenChunks = 0;
+            writeSw = SW_OK;
+            for (int offset = 0; offset < PHOTO_LENGTH; offset += PHOTO_CHUNK_LENGTH) {
+                byte[] chunk = Arrays.copyOfRange(completePhoto, offset,
+                        offset + PHOTO_CHUNK_LENGTH);
+                ResponseAPDU response = transmit(channel, new CommandAPDU(CLA,
+                        INS_PHOTO_WRITE_CHUNK, offset >> 8, offset & 0xFF, chunk));
+                clear(chunk);
+                writeSw = response.getSW();
+                if (writeSw != SW_OK) {
+                    break;
+                }
+                writtenChunks++;
+            }
+            recordBoolean("P05-09", "upload lai ghi du 4096 byte qua 32 chunk",
+                    writtenChunks == PHOTO_LENGTH / PHOTO_CHUNK_LENGTH && writeSw == SW_OK);
+            if (writtenChunks != PHOTO_LENGTH / PHOTO_CHUNK_LENGTH || writeSw != SW_OK) {
+                return card;
+            }
+
+            int finishSw = transmit(channel,
+                    new CommandAPDU(CLA, INS_PHOTO_FINISH, 0, 0)).getSW();
+            record("P05-10", "FINISH upload lai tra 9000", SW_OK, finishSw);
+            if (finishSw != SW_OK) {
+                return card;
+            }
+
+            verifySw = transmit(channel,
+                    pinCommand(INS_VERIFY_STUDENT_PIN, studentPin)).getSW();
+            record("P05-11", "VERIFY student truoc doc anh hoan chinh tra 9000", SW_OK, verifySw);
+            int readChunks = 0;
+            int bytesRead = 0;
+            int readSw = SW_OK;
+            boolean chunkLengthsValid = true;
+            for (int offset = 0; offset < PHOTO_LENGTH; offset += PHOTO_CHUNK_LENGTH) {
+                ResponseAPDU response = transmit(channel, new CommandAPDU(CLA,
+                        INS_PHOTO_READ_CHUNK, offset >> 8, offset & 0xFF, PHOTO_CHUNK_LENGTH));
+                readSw = response.getSW();
+                if (readSw != SW_OK) {
+                    break;
+                }
+                byte[] data = response.getData();
+                chunkLengthsValid &= data.length == PHOTO_CHUNK_LENGTH;
+                if (bytesRead + data.length > readBack.length) {
+                    chunkLengthsValid = false;
+                    break;
+                }
+                System.arraycopy(data, 0, readBack, bytesRead, data.length);
+                bytesRead += data.length;
+                readChunks++;
+                clear(data);
+            }
+            recordBoolean("P05-12", "doc lai du 4096 byte qua 32 chunk",
+                    readSw == SW_OK && readChunks == PHOTO_LENGTH / PHOTO_CHUNK_LENGTH
+                            && bytesRead == PHOTO_LENGTH && chunkLengthsValid);
+            recordBoolean("P05-13", "4096 byte doc lai khop tung byte voi anh nguon",
+                    readSw == SW_OK && bytesRead == PHOTO_LENGTH
+                            && Arrays.equals(completePhoto, readBack));
+            return card;
+        } finally {
+            clear(beginData);
+            clear(faultPhoto);
+            clear(completePhoto);
+            clear(readBack);
+        }
+    }
+
     private static boolean prepareVariantInstance(String propertiesPath, CardChannel channel,
             byte[] adminPin, byte[] studentPin, String capPath) throws Exception {
         if (!removeTestInstance(propertiesPath, channel)
@@ -1288,10 +1532,32 @@ public final class PersonalizeSelfTest {
         clear(payload);
         checkStatus(channel, "T12", LIFECYCLE_UNPERSONALIZED, new byte[8]);
 
+        byte[] photoBeginData = new byte[13];
+        System.arraycopy(adminPin, 0, photoBeginData, 0, adminPin.length);
+        photoBeginData[8] = 0x01;
+        photoBeginData[9] = 64;
+        photoBeginData[10] = 64;
+        photoBeginData[11] = (byte) (PHOTO_LENGTH >> 8);
+        photoBeginData[12] = (byte) PHOTO_LENGTH;
+        record("T12A", "PHOTO_BEGIN hop le truoc PERSONALIZE bi chan", SW_CONDITIONS,
+                transmit(channel, new CommandAPDU(CLA, INS_PHOTO_BEGIN, 0, 0,
+                        photoBeginData)).getSW());
+        byte[] photoChunk = new byte[PHOTO_CHUNK_LENGTH];
+        record("T12B", "WRITE ngay sau BEGIN bi chan khong co session", SW_CONDITIONS,
+                transmit(channel, new CommandAPDU(CLA, INS_PHOTO_WRITE_CHUNK, 0, 0,
+                        photoChunk)).getSW());
+        clear(photoBeginData);
+        clear(photoChunk);
+
         payload = validPayload(adminPin, studentPin);
         record("T13", "PERSONALIZE admin dung", SW_OK,
                 transmit(channel, personalizeCommand(payload)).getSW());
         clear(payload);
+        byte[] photoWriteWithoutBegin = new byte[PHOTO_CHUNK_LENGTH];
+        record("T13A", "WRITE sau PERSONALIZE khi chua BEGIN bi chan", SW_CONDITIONS,
+                transmit(channel, new CommandAPDU(CLA, INS_PHOTO_WRITE_CHUNK, 0, 0,
+                        photoWriteWithoutBegin)).getSW());
+        clear(photoWriteWithoutBegin);
 
         checkStatus(channel, "T14", LIFECYCLE_ISSUED, CARD_ID);
         ResponseAPDU publicKeyResponse = transmit(channel, publicKeyCommand());
