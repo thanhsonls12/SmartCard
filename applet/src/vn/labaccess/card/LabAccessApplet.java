@@ -20,12 +20,14 @@ public final class LabAccessApplet extends Applet {
     private final PinStore pins;
     private final CardState state;
     private final Personalization personalization;
+    private final PhotoStore photos;
 
     private LabAccessApplet(byte[] installParameters, short aidOffset, byte aidLength,
-            PinStore pins, CardState state, Personalization personalization) {
+            PinStore pins, CardState state, Personalization personalization, PhotoStore photos) {
         this.pins = pins;
         this.state = state;
         this.personalization = personalization;
+        this.photos = photos;
         register(installParameters, aidOffset, aidLength);
     }
 
@@ -38,20 +40,30 @@ public final class LabAccessApplet extends Applet {
         CardState cardState = new CardState();
         cardState.resetUnissued();
         Personalization personalization = new Personalization(cardState, store);
+        PhotoStore photoStore = new PhotoStore();
         new LabAccessApplet(installParameters, (short) (offset + 1),
-                installParameters[offset], store, cardState, personalization);
+                installParameters[offset], store, cardState, personalization, photoStore);
     }
 
     public void process(APDU apdu) {
         if (selectingApplet()) {
             pins.clearStudentAuthorization();
             pins.resetValidatedPins();
+            photos.clearReadStream();
+            photos.closeUpload();
             return;
         }
 
         byte[] buffer = apdu.getBuffer();
         byte ins = buffer[ISO7816.OFFSET_INS];
         boolean authorizationGranted = false;
+        if (ins != Protocol.INS_PHOTO_READ_CHUNK) {
+            photos.clearReadStream();
+        }
+        if (ins != Protocol.INS_PHOTO_BEGIN && ins != Protocol.INS_PHOTO_WRITE_CHUNK
+                && ins != Protocol.INS_PHOTO_FINISH) {
+            photos.closeUpload();
+        }
         try {
             requireApplicationCla(buffer);
             if (ins == Protocol.INS_GET_STATUS) {
@@ -83,6 +95,24 @@ public final class LabAccessApplet extends Applet {
             }
             if (ins == Protocol.INS_GET_PROFILE_CRYPTO_META) {
                 handleGetProfileCryptoMeta(apdu, buffer);
+                return;
+            }
+            if (ins == Protocol.INS_PHOTO_BEGIN) {
+                handlePhotoBegin(apdu, buffer);
+                return;
+            }
+            if (ins == Protocol.INS_PHOTO_WRITE_CHUNK) {
+                handlePhotoWriteChunk(apdu, buffer);
+                return;
+            }
+            if (ins == Protocol.INS_PHOTO_FINISH) {
+                handlePhotoFinish(apdu, buffer);
+                return;
+            }
+            if (ins == Protocol.INS_PHOTO_READ_CHUNK) {
+                if (handlePhotoReadChunk(apdu, buffer)) {
+                    authorizationGranted = true;
+                }
                 return;
             }
             if (ins == Protocol.INS_GRANT_QUOTA) {
@@ -121,7 +151,9 @@ public final class LabAccessApplet extends Applet {
         return ins == Protocol.INS_PERSONALIZE
                 || ins == Protocol.INS_VERIFY_STUDENT_PIN
                 || ins == Protocol.INS_CHANGE_STUDENT_PIN
-                || ins == Protocol.INS_UNBLOCK_STUDENT_PIN;
+                || ins == Protocol.INS_UNBLOCK_STUDENT_PIN
+                || ins == Protocol.INS_PHOTO_BEGIN
+                || ins == Protocol.INS_PHOTO_WRITE_CHUNK;
     }
 
     public void deselect() {
@@ -406,6 +438,176 @@ public final class LabAccessApplet extends Applet {
             state.clearWorkingBuffers();
             pins.clearStudentAuthorization();
         }
+    }
+
+    private void handlePhotoBegin(APDU apdu, byte[] buffer) {
+        try {
+            requireZeroP1P2(buffer);
+            state.ensureCommandBuffer();
+            short lc = receiveCommandData(apdu, buffer, state.commandData(),
+                    Protocol.PHOTO_BEGIN_DATA_LENGTH);
+            requireCase3(apdu);
+            if (lc != Protocol.PHOTO_BEGIN_DATA_LENGTH) {
+                ISOException.throwIt(Sw.WRONG_LENGTH);
+            }
+            if (!state.isIssued()) {
+                ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            if (photos.ready() || photos.uploadOpen()) {
+                ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            requirePhotoFormat(state.commandData());
+            PinFormat.requireDigits(state.commandData(), Protocol.PHOTO_BEGIN_OFFSET_ADMIN_PIN,
+                    Protocol.ADMIN_PIN_LENGTH);
+            AdminPinVerifier.verify(pins.admin(), state.commandData(),
+                    Protocol.PHOTO_BEGIN_OFFSET_ADMIN_PIN);
+            photos.openUpload();
+            ISOException.throwIt(Sw.OK);
+        } catch (ISOException exception) {
+            throw exception;
+        } catch (APDUException exception) {
+            ISOException.throwIt(Sw.WRONG_LENGTH);
+        } catch (RuntimeException exception) {
+            ISOException.throwIt(Sw.INTERNAL_ERROR);
+        } finally {
+            pins.admin().reset();
+            state.clearCommandData();
+        }
+    }
+
+    private static void requirePhotoFormat(byte[] data) {
+        short total = Util.getShort(data, Protocol.PHOTO_BEGIN_OFFSET_TOTAL);
+        if (data[Protocol.PHOTO_BEGIN_OFFSET_FORMAT] != Protocol.PHOTO_FORMAT_GRAYSCALE_RAW8
+                || data[Protocol.PHOTO_BEGIN_OFFSET_WIDTH] != (byte) Protocol.PHOTO_WIDTH
+                || data[Protocol.PHOTO_BEGIN_OFFSET_HEIGHT] != (byte) Protocol.PHOTO_HEIGHT
+                || total != Protocol.PHOTO_LENGTH) {
+            ISOException.throwIt(Sw.WRONG_DATA);
+        }
+    }
+
+    private void handlePhotoWriteChunk(APDU apdu, byte[] buffer) {
+        boolean accepted = false;
+        try {
+            short offset = Util.getShort(buffer, ISO7816.OFFSET_P1);
+            if (!photos.uploadOpen()) {
+                ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            state.ensureCommandBuffer();
+            short lc = receiveCommandData(apdu, buffer, state.commandData(),
+                    Protocol.PHOTO_CHUNK_MAX_LENGTH);
+            requireCase3(apdu);
+            if (lc <= (short) 0 || lc > Protocol.PHOTO_CHUNK_MAX_LENGTH) {
+                ISOException.throwIt(Sw.WRONG_LENGTH);
+            }
+            if (offset != photos.uploadOffset()) {
+                ISOException.throwIt(Sw.WRONG_P1P2);
+            }
+            if ((short) (offset + lc) > photos.capacity()) {
+                ISOException.throwIt(Sw.WRONG_P1P2);
+            }
+            photos.appendUploaded(state.commandData(), (short) 0, lc);
+            accepted = true;
+            ISOException.throwIt(Sw.OK);
+        } catch (ISOException exception) {
+            throw exception;
+        } catch (APDUException exception) {
+            ISOException.throwIt(Sw.WRONG_LENGTH);
+        } catch (RuntimeException exception) {
+            ISOException.throwIt(Sw.INTERNAL_ERROR);
+        } finally {
+            state.clearCommandData();
+            if (!accepted) {
+                photos.closeUpload();
+            }
+        }
+    }
+
+    private void handlePhotoFinish(APDU apdu, byte[] buffer) {
+        try {
+            requireZeroP1P2(buffer);
+            requireNoDataNoLe(apdu);
+            if (!photos.uploadOpen()) {
+                ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            if (photos.ready()) {
+                ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            if (photos.uploadOffset() < photos.capacity()) {
+                ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            photos.commitPhoto(photos.capacity());
+            ISOException.throwIt(Sw.OK);
+        } catch (ISOException exception) {
+            throw exception;
+        } catch (APDUException exception) {
+            ISOException.throwIt(Sw.WRONG_LENGTH);
+        } catch (RuntimeException exception) {
+            ISOException.throwIt(Sw.INTERNAL_ERROR);
+        } finally {
+            photos.closeUpload();
+        }
+    }
+
+    private void requireNoDataNoLe(APDU apdu) {
+        short received = apdu.setIncomingAndReceive();
+        if (received != (short) 0 || apdu.getIncomingLength() != (short) 0) {
+            ISOException.throwIt(Sw.WRONG_LENGTH);
+        }
+        if (apdu.setOutgoing() != (short) 0) {
+            ISOException.throwIt(Sw.WRONG_LENGTH);
+        }
+    }
+
+    private boolean handlePhotoReadChunk(APDU apdu, byte[] buffer) {
+        boolean advanced = false;
+        try {
+            short offset = Util.getShort(buffer, ISO7816.OFFSET_P1);
+            short ne = apdu.setOutgoing();
+            if (ne <= (short) 0 || ne > Protocol.PHOTO_READ_MAX_LENGTH) {
+                ISOException.throwIt(Sw.WRONG_LENGTH);
+            }
+            if (!photos.ready()) {
+                ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            if (!pins.isStudentAuthorized()) {
+                ISOException.throwIt(Sw.SECURITY_STATUS_NOT_SATISFIED);
+            }
+            short length = photos.length();
+            if (offset > length) {
+                ISOException.throwIt(Sw.WRONG_P1P2);
+            }
+            if (offset == length) {
+                ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            if (offset != photos.readOffset()) {
+                ISOException.throwIt(Sw.WRONG_P1P2);
+            }
+            short remaining = (short) (length - offset);
+            short chunk = ne < remaining ? ne : remaining;
+            photos.copyPhoto(offset, buffer, (short) 0, chunk);
+            apdu.setOutgoingLength(chunk);
+            apdu.sendBytes((short) 0, chunk);
+            photos.setReadOffset((short) (offset + chunk));
+            advanced = true;
+            if (photos.readOffset() == length) {
+                photos.clearReadStream();
+                pins.clearStudentAuthorization();
+                return false;
+            }
+            return true;
+        } catch (ISOException exception) {
+            throw exception;
+        } catch (APDUException exception) {
+            ISOException.throwIt(Sw.WRONG_LENGTH);
+        } catch (RuntimeException exception) {
+            ISOException.throwIt(Sw.INTERNAL_ERROR);
+        } finally {
+            if (!advanced) {
+                photos.clearReadStream();
+                pins.clearStudentAuthorization();
+            }
+        }
+        return false;
     }
 
     private void handleGrantQuota(APDU apdu, byte[] buffer) {

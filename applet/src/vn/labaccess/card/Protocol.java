@@ -10,6 +10,10 @@ final class Protocol {
     static final byte INS_PERSONALIZE = (byte) 0x30;
     static final byte INS_GET_PROFILE = (byte) 0x31;
     static final byte INS_GET_PROFILE_CRYPTO_META = (byte) 0x40;
+    static final byte INS_PHOTO_BEGIN = (byte) 0x32;
+    static final byte INS_PHOTO_WRITE_CHUNK = (byte) 0x33;
+    static final byte INS_PHOTO_READ_CHUNK = (byte) 0x34;
+    static final byte INS_PHOTO_FINISH = (byte) 0x35;
     static final byte INS_GRANT_QUOTA = (byte) 0x50;
     static final byte INS_START_VISIT = (byte) 0x51;
     static final byte INS_END_VISIT = (byte) 0x52;
@@ -60,6 +64,20 @@ final class Protocol {
             (short) (PROFILE_META_OFFSET_CIPHERTEXT_HASH + PROFILE_META_CIPHERTEXT_HASH_LENGTH);
 
     static final short MAX_BALANCE = (short) 9999;
+
+    static final short PHOTO_WIDTH = (short) 64;
+    static final short PHOTO_HEIGHT = (short) 64;
+    static final short PHOTO_LENGTH = (short) (PHOTO_WIDTH * PHOTO_HEIGHT);
+    static final byte PHOTO_FORMAT_GRAYSCALE_RAW8 = (byte) 0x01;
+    static final short PHOTO_BEGIN_DATA_LENGTH = (short) 13;
+    static final short PHOTO_BEGIN_OFFSET_ADMIN_PIN = (short) 0;
+    static final short PHOTO_BEGIN_OFFSET_FORMAT = (short) (PHOTO_BEGIN_OFFSET_ADMIN_PIN
+            + ADMIN_PIN_LENGTH);
+    static final short PHOTO_BEGIN_OFFSET_WIDTH = (short) (PHOTO_BEGIN_OFFSET_FORMAT + 1);
+    static final short PHOTO_BEGIN_OFFSET_HEIGHT = (short) (PHOTO_BEGIN_OFFSET_WIDTH + 1);
+    static final short PHOTO_BEGIN_OFFSET_TOTAL = (short) (PHOTO_BEGIN_OFFSET_HEIGHT + 1);
+    static final short PHOTO_CHUNK_MAX_LENGTH = (short) 128;
+    static final short PHOTO_READ_MAX_LENGTH = (short) 128;
     static final short COUNTER_LENGTH = (short) 4;
     static final short GRANT_QUOTA_DATA_LENGTH = (short) (ADMIN_PIN_LENGTH + 2);
     static final short GRANT_ADMIN_PIN_OFFSET = (short) 0;
