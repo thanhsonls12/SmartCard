@@ -24,6 +24,7 @@ final class CardState {
     private byte lifecycle;
     private boolean keysReady;
     private ReceiptSigner receiptSigner;
+    private EnrollmentSigner enrollmentSigner;
 
     CardState() {
     }
@@ -120,6 +121,14 @@ final class CardState {
 
     void setReceiptSigner(ReceiptSigner signer) {
         receiptSigner = signer;
+    }
+
+    EnrollmentSigner enrollmentSigner() {
+        return enrollmentSigner;
+    }
+
+    void setEnrollmentSigner(EnrollmentSigner signer) {
+        enrollmentSigner = signer;
     }
 
     void setCardId(byte[] source, short offset) {

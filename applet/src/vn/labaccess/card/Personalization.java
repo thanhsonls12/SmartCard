@@ -3,6 +3,7 @@ package vn.labaccess.card;
 import javacard.framework.JCSystem;
 import javacard.framework.ISOException;
 import javacard.framework.Util;
+import javacard.security.ECPublicKey;
 
 final class Personalization {
 
@@ -45,6 +46,7 @@ final class Personalization {
             crypto.generateAesKey();
             ecKeys.generatePair();
             state.setReceiptSigner(new ReceiptSigner(ecKeys.privateKey()));
+            state.setEnrollmentSigner(new EnrollmentSigner(ecKeys.privateKey()));
             buildProfilePlaintext(buffer);
             short recordLength = crypto.encryptRecord(
                     state.profilePlaintext(), state.profilePlaintextLength(),
@@ -76,6 +78,7 @@ final class Personalization {
         }
         state.resetUnissued();
         state.setReceiptSigner(null);
+        state.setEnrollmentSigner(null);
         if (crypto != null) {
             crypto.clearAesKey();
         }
@@ -105,6 +108,10 @@ final class Personalization {
 
     void readPublicKey(byte[] target, short offset) {
         ecKeys.publicKey().getW(target, offset);
+    }
+
+    ECPublicKey publicKey() {
+        return ecKeys.publicKey();
     }
 
     short readProfilePlaintext(byte[] plaintext) {

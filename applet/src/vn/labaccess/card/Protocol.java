@@ -19,6 +19,7 @@ final class Protocol {
     static final byte INS_END_VISIT = (byte) 0x52;
     static final byte INS_GET_LAST_RECEIPT = (byte) 0x60;
     static final byte INS_GET_CARD_PUBLIC_KEY = (byte) 0x61;
+    static final byte INS_SIGN_REGISTRATION_CHALLENGE = (byte) 0x62;
 
     static final byte PROTOCOL_VERSION = (byte) 0x01;
 
@@ -117,6 +118,18 @@ final class Protocol {
     };
     static final short RECEIPT_DOMAIN_LENGTH = (short) 20;
 
+    static final short ENROLLMENT_NONCE_LENGTH = (short) 32;
+    static final short ENROLLMENT_PUBLIC_KEY_HASH_LENGTH = (short) 32;
+    static final short ENROLLMENT_SIGNATURE_MAX_LENGTH = (short) 72;
+    static final short ENROLLMENT_MIN_LE = (short) 72;
+    static final byte[] ENROLLMENT_DOMAIN = {
+            (byte) 'L', (byte) 'A', (byte) 'B', (byte) 'A', (byte) 'C', (byte) 'C',
+            (byte) 'E', (byte) 'S', (byte) 'S', (byte) '-', (byte) 'E', (byte) 'N',
+            (byte) 'R', (byte) 'O', (byte) 'L', (byte) 'L', (byte) 'M', (byte) 'E',
+            (byte) 'N', (byte) 'T', (byte) '-', (byte) 'v', (byte) '1'
+    };
+    static final short ENROLLMENT_DOMAIN_LENGTH = (short) 23;
+
     static final byte VERIFY_STUDENT_PIN_DATA_LENGTH = STUDENT_PIN_LENGTH;
     static final byte CHANGE_STUDENT_PIN_DATA_LENGTH = (byte) (STUDENT_PIN_LENGTH * 2);
     static final byte UNBLOCK_STUDENT_PIN_DATA_LENGTH = (byte) (ADMIN_PIN_LENGTH + STUDENT_PIN_LENGTH);
@@ -132,6 +145,14 @@ final class Protocol {
     static final byte LIFECYCLE_UNPERSONALIZED = (byte) 0x00;
     static final byte LIFECYCLE_ISSUED = (byte) 0x01;
     static final short CARD_ID_LENGTH = (short) 8;
+
+    static final short ENROLLMENT_OFFSET_CARD_ID = ENROLLMENT_DOMAIN_LENGTH;
+    static final short ENROLLMENT_OFFSET_PUBLIC_KEY_HASH =
+            (short) (ENROLLMENT_OFFSET_CARD_ID + CARD_ID_LENGTH);
+    static final short ENROLLMENT_OFFSET_NONCE =
+            (short) (ENROLLMENT_OFFSET_PUBLIC_KEY_HASH + ENROLLMENT_PUBLIC_KEY_HASH_LENGTH);
+    static final short ENROLLMENT_MESSAGE_LENGTH =
+            (short) (ENROLLMENT_OFFSET_NONCE + ENROLLMENT_NONCE_LENGTH);
     static final byte CARD_ID_UNASSIGNED = (byte) 0x00;
 
     static final short OFFSET_MAGIC = (short) 0;

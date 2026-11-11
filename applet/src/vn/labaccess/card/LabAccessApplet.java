@@ -135,6 +135,10 @@ public final class LabAccessApplet extends Applet {
                 handleGetCardPublicKey(apdu, buffer);
                 return;
             }
+            if (ins == Protocol.INS_SIGN_REGISTRATION_CHALLENGE) {
+                handleSignRegistrationChallenge(apdu, buffer);
+                return;
+            }
             ISOException.throwIt(Sw.INS_NOT_SUPPORTED);
         } finally {
             pins.resetValidatedPins();
@@ -153,7 +157,8 @@ public final class LabAccessApplet extends Applet {
                 || ins == Protocol.INS_CHANGE_STUDENT_PIN
                 || ins == Protocol.INS_UNBLOCK_STUDENT_PIN
                 || ins == Protocol.INS_PHOTO_BEGIN
-                || ins == Protocol.INS_PHOTO_WRITE_CHUNK;
+                || ins == Protocol.INS_PHOTO_WRITE_CHUNK
+                || ins == Protocol.INS_SIGN_REGISTRATION_CHALLENGE;
     }
 
     public void deselect() {
@@ -868,5 +873,39 @@ public final class LabAccessApplet extends Applet {
         }
         apdu.setOutgoingLength(PUBLIC_KEY_LENGTH);
         apdu.sendBytes((short) 0, PUBLIC_KEY_LENGTH);
+    }
+
+    private void handleSignRegistrationChallenge(APDU apdu, byte[] buffer) {
+        requireZeroP1P2(buffer);
+        state.ensureCommandBuffer();
+        short lc = receiveCommandData(apdu, buffer, state.commandData(),
+                Protocol.ENROLLMENT_NONCE_LENGTH);
+        if (lc != Protocol.ENROLLMENT_NONCE_LENGTH) {
+            ISOException.throwIt(Sw.WRONG_LENGTH);
+        }
+        short ne = apdu.setOutgoing();
+        if (ne != (short) 0 && ne < Protocol.ENROLLMENT_MIN_LE) {
+            ISOException.throwIt(Sw.WRONG_LENGTH);
+        }
+        if (!state.isIssued() || !state.keysReady()) {
+            ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
+        }
+        EnrollmentSigner signer = state.enrollmentSigner();
+        if (signer == null) {
+            ISOException.throwIt(Sw.INTERNAL_ERROR);
+        }
+        short length = (short) 0;
+        try {
+            length = signer.sign(state.commandData(), state.cardId(), personalization.publicKey());
+        } catch (RuntimeException exception) {
+            ISOException.throwIt(Sw.INTERNAL_ERROR);
+        } finally {
+            state.clearCommandData();
+        }
+        if (length <= (short) 0 || length > Protocol.ENROLLMENT_SIGNATURE_MAX_LENGTH) {
+            ISOException.throwIt(Sw.INTERNAL_ERROR);
+        }
+        apdu.setOutgoingLength(length);
+        apdu.sendBytesLong(signer.signature(), (short) 0, length);
     }
 }

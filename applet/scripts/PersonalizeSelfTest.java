@@ -46,6 +46,7 @@ public final class PersonalizeSelfTest {
     private static final byte INS_PERSONALIZE = (byte) 0x30;
     private static final byte INS_GET_STATUS = (byte) 0x10;
     private static final byte INS_GET_PUBLIC_KEY = (byte) 0x61;
+    private static final byte INS_SIGN_ENROLLMENT = (byte) 0x62;
     private static final byte INS_VERIFY_STUDENT_PIN = (byte) 0x20;
     private static final byte INS_CHANGE_STUDENT_PIN = (byte) 0x21;
     private static final byte INS_UNBLOCK_STUDENT_PIN = (byte) 0x23;
@@ -144,6 +145,7 @@ public final class PersonalizeSelfTest {
             }
             selectTestInstance(channel);
             runCases(channel, adminPin, studentPin, unblockedPin, changedPin);
+            runEnrollmentCases(channel, studentPin);
             runProfileCases(channel, studentPin);
             metadata = runMetadataCases(channel, studentPin);
             runQuotaCases(channel, adminPin);
@@ -1480,6 +1482,8 @@ public final class PersonalizeSelfTest {
                 transmit(channel, publicKeyCommand()).getSW());
         record("T02A", "GRANT_QUOTA truoc PERSONALIZE", SW_CONDITIONS,
                 transmit(channel, grantCommand(adminPin, 5)).getSW());
+        record("T02B", "SIGN_REGISTRATION_CHALLENGE truoc PERSONALIZE", SW_CONDITIONS,
+                transmit(channel, enrollmentCommand(enrollmentNonce(1))).getSW());
 
         byte[] payload = validPayload(adminPin, studentPin);
         payload[0] = 7;
@@ -1694,6 +1698,141 @@ public final class PersonalizeSelfTest {
                 transmit(channel, pinCommand(INS_VERIFY_STUDENT_PIN, wrongFinal)).getSW());
         clear(wrongFinal);
         clear(wrongStudentPin);
+    }
+
+    private static void runEnrollmentCases(CardChannel channel, byte[] studentPin) throws Exception {
+        String publicKeyHex = readCardPublicKey(channel);
+        byte[] publicKey = publicKeyHex == null ? null : hex(publicKeyHex);
+        recordBoolean("E01", "doc duoc public key truoc khi ky", publicKey != null);
+
+        byte[] nonce = enrollmentNonce(1);
+        ResponseAPDU response = transmit(channel, enrollmentCommand(nonce));
+        record("E02", "SIGN_REGISTRATION_CHALLENGE hop le", SW_OK, response.getSW());
+        byte[] signature = response.getSW() == SW_OK ? response.getData() : new byte[0];
+        boolean derShape = signature.length >= 8 && signature.length <= 72
+                && signature[0] == 0x30 && (signature[1] & 0xFF) == signature.length - 2;
+        recordBoolean("E03", "chu ky DER dung hinh dang len=" + signature.length, derShape);
+
+        recordBoolean("E04", "Node verify chu ky that tren Simulator", nodeVerifyEnrollment(
+                publicKeyHex, encodeHex(CARD_ID), encodeHex(nonce), encodeHex(signature),
+                "valid", true));
+        recordBoolean("E05", "sai nonce bi tu choi", nodeVerifyEnrollment(
+                publicKeyHex, encodeHex(CARD_ID), encodeHex(nonce), encodeHex(signature),
+                "nonce", false));
+        recordBoolean("E06", "sai cardId bi tu choi", nodeVerifyEnrollment(
+                publicKeyHex, encodeHex(CARD_ID), encodeHex(nonce), encodeHex(signature),
+                "cardId", false));
+        recordBoolean("E07", "public key khac bi tu choi", nodeVerifyEnrollment(
+                publicKeyHex, encodeHex(CARD_ID), encodeHex(nonce), encodeHex(signature),
+                "key", false));
+        recordBoolean("E08", "domain khac bi tu choi", nodeVerifyEnrollment(
+                publicKeyHex, encodeHex(CARD_ID), encodeHex(nonce), encodeHex(signature),
+                "domain", false));
+        recordBoolean("E09", "sua 1 byte chu ky bi tu choi", nodeVerifyEnrollment(
+                publicKeyHex, encodeHex(CARD_ID), encodeHex(nonce), encodeHex(signature),
+                "sig", false));
+
+        byte[] otherNonce = enrollmentNonce(2);
+        byte[] otherSignature = transmit(channel, enrollmentCommand(otherNonce)).getData();
+        recordBoolean("E10", "nonce khac cho chu ky khac",
+                !encodeHex(otherSignature).equals(encodeHex(signature)));
+        recordBoolean("E11", "chu ky nonce thu hai verify duoc", nodeVerifyEnrollment(
+                publicKeyHex, encodeHex(CARD_ID), encodeHex(otherNonce),
+                encodeHex(otherSignature), "valid", true));
+        writeEnrollmentArtifact(publicKeyHex, encodeHex(nonce), encodeHex(signature),
+                encodeHex(otherNonce), encodeHex(otherSignature));
+
+        record("E12", "Lc=31 bi tu choi", SW_WRONG_LENGTH,
+                transmit(channel, enrollmentCommand(Arrays.copyOf(nonce, 31))).getSW());
+        record("E13", "Lc=33 bi tu choi", SW_WRONG_LENGTH,
+                transmit(channel, enrollmentCommand(Arrays.copyOf(nonce, 33))).getSW());
+        record("E14", "P1 khac 00 bi tu choi", 0x6A86,
+                transmit(channel, new CommandAPDU(CLA, INS_SIGN_ENROLLMENT, 1, 0, nonce, 256))
+                        .getSW());
+        record("E15", "Le=71 bi tu choi", SW_WRONG_LENGTH,
+                transmit(channel, new CommandAPDU(CLA, INS_SIGN_ENROLLMENT, 0, 0, nonce, 71))
+                        .getSW());
+        ResponseAPDU minLe = transmit(channel,
+                new CommandAPDU(CLA, INS_SIGN_ENROLLMENT, 0, 0, nonce, 72));
+        record("E16", "Le=72 duoc chap nhan", SW_OK, minLe.getSW());
+        recordBoolean("E17", "Le=72 van verify duoc", nodeVerifyEnrollment(
+                publicKeyHex, encodeHex(CARD_ID), encodeHex(nonce), encodeHex(minLe.getData()),
+                "valid", true));
+        record("E18", "khong gui Le van duoc chap nhan", SW_OK,
+                transmit(channel, new CommandAPDU(CLA, INS_SIGN_ENROLLMENT, 0, 0, nonce)).getSW());
+
+        record("E19", "khong tao receipt", SW_CONDITIONS,
+                transmit(channel, pinCommand(INS_VERIFY_STUDENT_PIN, studentPin)).getSW() == SW_OK
+                        ? transmit(channel, receiptCommand(256)).getSW() : -1);
+
+        clear(publicKey);
+        clear(nonce);
+        clear(otherNonce);
+        clear(otherSignature);
+        clear(signature);
+    }
+
+    private static CommandAPDU enrollmentCommand(byte[] nonce) {
+        return new CommandAPDU(CLA, INS_SIGN_ENROLLMENT, 0, 0, nonce, 256);
+    }
+
+    private static void writeEnrollmentArtifact(String publicKeyHex, String nonceHex,
+            String signatureHex, String secondNonceHex, String secondSignatureHex) {
+        String line = "{\"cardId\":\"" + encodeHex(CARD_ID) + "\",\"publicKey\":\"" + publicKeyHex
+                + "\",\"nonce\":\"" + nonceHex + "\",\"signature\":\"" + signatureHex
+                + "\",\"secondNonce\":\"" + secondNonceHex + "\",\"secondSignature\":\""
+                + secondSignatureHex + "\"}";
+        try {
+            java.nio.file.Path target = java.nio.file.Paths.get("applet/build/enrollment-artifacts.jsonl");
+            if (target.getParent() != null) {
+                java.nio.file.Files.createDirectories(target.getParent());
+            }
+            java.nio.file.Files.write(target, List.of(line),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            log("    enrollment artifact -> " + target);
+        } catch (Exception exception) {
+            failed++;
+            log("    enrollment artifact write failed: " + exception.getClass().getSimpleName());
+        }
+    }
+
+    private static byte[] enrollmentNonce(int seed) {
+        byte[] nonce = new byte[32];
+        for (int index = 0; index < nonce.length; index++) {
+            nonce[index] = (byte) (seed * 0x21 + index + 1);
+        }
+        return nonce;
+    }
+
+    private static boolean nodeVerifyEnrollment(String publicKeyHex, String cardIdHex,
+            String nonceHex, String signatureHex, String mode, boolean expected) throws Exception {
+        if (publicKeyHex == null || signatureHex == null || signatureHex.isEmpty()) {
+            return false;
+        }
+        String script = "const c=require('crypto');"
+                + "const [pk,cardArg,nonceArg,sig,mode]=process.argv.slice(1);"
+                + "const point=Buffer.from(pk,'hex');"
+                + "const hash=c.createHash('sha256').update(point).digest();"
+                + "let cardId=Buffer.from(cardArg,'hex');"
+                + "let nonce=Buffer.from(nonceArg,'hex');"
+                + "let domain=Buffer.from('LABACCESS-ENROLLMENT-v1','ascii');"
+                + "let keyPoint=point;"
+                + "if(mode==='cardId'){cardId[0]^=1;}"
+                + "if(mode==='nonce'){nonce[0]^=1;}"
+                + "if(mode==='domain'){domain=Buffer.from('LABACCESS-ENROLLMENT-v2','ascii');}"
+                + "if(mode==='key'){keyPoint=Buffer.from(c.createECDH('prime256v1').generateKeys());}"
+                + "let signature=Buffer.from(sig,'hex');"
+                + "if(mode==='sig'){signature[signature.length-1]^=1;}"
+                + "const key=c.createPublicKey({key:{kty:'EC',crv:'P-256',"
+                + "x:keyPoint.subarray(1,33).toString('base64url'),"
+                + "y:keyPoint.subarray(33,65).toString('base64url')},format:'jwk'});"
+                + "const message=Buffer.concat([domain,cardId,hash,nonce]);"
+                + "if(message.length!==95)process.exit(2);"
+                + "const ok=c.verify(null,message,{key,dsaEncoding:'der'},signature);"
+                + "process.exit(ok===" + (expected ? "true" : "false") + "?0:1);";
+        Process process = new ProcessBuilder("node", "-e", script, publicKeyHex, cardIdHex,
+                nonceHex, signatureHex, mode).inheritIO().start();
+        return process.waitFor() == 0;
     }
 
     private static void selectTestInstance(CardChannel channel) throws Exception {
