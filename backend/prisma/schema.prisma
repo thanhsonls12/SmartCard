@@ -6,3 +6,85 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+model AdminSession {
+  id        String    @id @default(uuid()) @db.Uuid
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+  expiresAt DateTime  @db.Timestamptz(6)
+  revokedAt DateTime? @db.Timestamptz(6)
+
+  enrollmentChallenges EnrollmentChallenge[]
+
+  @@map("admin_sessions")
+}
+
+model EnrollmentChallenge {
+  id             String    @id @default(uuid()) @db.Uuid
+  nonce          Bytes     @db.ByteA
+  cardId         Bytes     @db.ByteA
+  studentId      String    @db.VarChar(64)
+  publicKey      Bytes     @db.ByteA
+  publicKeyHash  Bytes     @db.ByteA
+  adminSessionId String    @db.Uuid
+  createdAt      DateTime  @default(now()) @db.Timestamptz(6)
+  expiresAt      DateTime  @db.Timestamptz(6)
+  usedAt         DateTime? @db.Timestamptz(6)
+
+  adminSession AdminSession @relation(fields: [adminSessionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([nonce])
+  @@index([cardId])
+  @@index([adminSessionId])
+  @@index([expiresAt])
+  @@map("enrollment_challenges")
+}
+
+enum Operation {
+  GRANT
+  START
+  END
+}
+
+model Student {
+  id         String   @id @default(uuid()) @db.Uuid
+  cardId     Bytes    @unique @db.ByteA
+  studentId  String   @db.VarChar(64)
+  publicKey  Bytes    @db.ByteA
+  enrolledAt DateTime @default(now()) @db.Timestamptz(6)
+
+  ledger       CardLedger?
+  transactions Transaction[]
+
+  @@index([studentId])
+  @@map("students")
+}
+
+model CardLedger {
+  cardId        Bytes    @id @db.ByteA
+  lastCounter   BigInt   @default(0)
+  lastBalance   BigInt   @default(0)
+  activeVisitId Bytes?   @db.ByteA
+  updatedAt     DateTime @updatedAt @db.Timestamptz(6)
+
+  student Student @relation(fields: [cardId], references: [cardId], onDelete: Restrict, onUpdate: Cascade)
+
+  @@map("card_ledgers")
+}
+
+model Transaction {
+  id           String    @id @default(uuid()) @db.Uuid
+  cardId       Bytes     @db.ByteA
+  counterAfter BigInt
+  operation    Operation
+  delta        BigInt
+  balanceAfter BigInt
+  visitId      Bytes?    @db.ByteA
+  payload      Bytes     @db.ByteA
+  signature    Bytes     @db.ByteA
+  recordedAt   DateTime  @default(now()) @db.Timestamptz(6)
+
+  student Student @relation(fields: [cardId], references: [cardId], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([cardId, counterAfter])
+  @@map("transactions")
+}
