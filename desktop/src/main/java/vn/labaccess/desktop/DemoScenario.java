@@ -49,6 +49,7 @@ final class DemoScenario {
             startPersonalizeDemo();
             return;
         }
+        app.showTab(App.TAB_OPERATIONS);
         run(new Runnable[] {
                 () -> fire(app.pressConnect(), "Connect"),
                 () -> fire(app.pressIdentify(), "SELECT + GET_STATUS"),
@@ -90,6 +91,7 @@ final class DemoScenario {
 
     private void startTransactionDemo() {
         log.accept("DEMO UI-06: PERSONALIZE và chạy hai chuỗi giao dịch qua JavaFX buttons");
+        app.showTab(App.TAB_OPERATIONS);
         readDemoPins(this::buildTransactionDemo);
     }
 
@@ -153,6 +155,7 @@ final class DemoScenario {
 
     private void startPersonalizeDemo() {
         log.accept("DEMO: PERSONALIZE qua handler GUI — PIN đọc từ stdin, không qua -D và không vào log");
+        app.showTab(App.TAB_CARD);
         readDemoPins(this::buildPersonalizeDemo);
     }
 
@@ -185,6 +188,7 @@ final class DemoScenario {
                         "GET_CARD_PUBLIC_KEY (sau PERSONALIZE)"),
                 () -> fire(personalizePanel.pressPublicKey(),
                         "GET_CARD_PUBLIC_KEY (đọc lại — kỳ vọng cùng key)"),
+                () -> app.showTab(App.TAB_RECORDS),
                 () -> readMeta(studentPin,
                         "GET_PROFILE_CRYPTO_META — VERIFY ngay trước, kỳ vọng 9000 + 65 byte"),
                 () -> readProfile(studentPin,
@@ -197,6 +201,7 @@ final class DemoScenario {
                         "GET_PROFILE lại để panel có hồ sơ trước ca identify lỗi"),
                 () -> identify(
                         "SELECT lại sau khi panel đang hiện hồ sơ — panel phải xoá bất kể kết quả"),
+                () -> app.showTab(App.TAB_CARD),
                 () -> pinOp(studentPin, "VERIFY PIN hiện tại — kỳ vọng 9000"),
                 () -> pinOp(wrongStudentPin, "VERIFY PIN sai — kỳ vọng 63C2"),
                 () -> pinOp(studentPin, "VERIFY PIN đúng lại — kỳ vọng 9000"),
@@ -213,6 +218,7 @@ final class DemoScenario {
                         "UNBLOCK admin PIN đúng — kỳ vọng 9000"),
                 () -> pinOp(unblockedPin, "VERIFY PIN sau UNBLOCK — kỳ vọng 9000")));
         if (Boolean.getBoolean("labaccess.demo.photo")) {
+            steps.add(() -> app.showTab(App.TAB_RECORDS));
             steps.addAll(photoSteps(adminPin, unblockedPin));
         }
         steps.add(() -> fire(app.pressDisconnect(), "Disconnect"));
