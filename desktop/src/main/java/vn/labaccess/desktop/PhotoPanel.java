@@ -22,7 +22,7 @@ import javafx.stage.FileChooser;
 
 final class PhotoPanel {
 
-    static final int PREVIEW_SIZE = 64;
+    static final int PREVIEW_SIZE = 192;
     private static final int ADMIN_PIN_LENGTH = 8;
     private static final int STUDENT_PIN_LENGTH = 6;
 
