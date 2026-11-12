@@ -24,6 +24,10 @@
         <labaccess.demo>false</labaccess.demo>
         <!-- Cong simulator; doi duoc khi can test (vi du tro vao mot cong treo). -->
         <labaccess.port>9025</labaccess.port>
+        <!-- Chon kich ban demo nao chay khi bat labaccess.demo. -->
+        <labaccess.demo.transactions>false</labaccess.demo.transactions>
+        <labaccess.demo.personalize>false</labaccess.demo.personalize>
+        <labaccess.demo.photo>false</labaccess.demo.photo>
     </properties>
 
     <dependencies>
@@ -75,6 +79,9 @@
                          Chuyen tiep tuong minh qua <options>. -->
                     <options>
                         <option>-Dlabaccess.demo=${labaccess.demo}</option>
+                        <option>-Dlabaccess.demo.transactions=${labaccess.demo.transactions}</option>
+                        <option>-Dlabaccess.demo.personalize=${labaccess.demo.personalize}</option>
+                        <option>-Dlabaccess.demo.photo=${labaccess.demo.photo}</option>
                         <option>-Dlabaccess.port=${labaccess.port}</option>
                     </options>
                 </configuration>
