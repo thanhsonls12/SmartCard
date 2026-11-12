@@ -11,20 +11,28 @@ import java.util.function.Consumer;
 
 import javafx.application.Application;
 import javafx.application.Platform;
-import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.Scene;
+import javafx.geometry.Orientation;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
-import javafx.scene.control.Separator;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.SplitPane;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TitledPane;
+import javafx.scene.control.ToggleButton;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 
 public class App extends Application {
@@ -43,13 +51,19 @@ public class App extends Application {
 
     private TextArea logArea;
     private Label statusLabel;
+    private Label valueConnection;
+    private TabPane mainTabs;
+
+    /** Thứ tự tab cố định: kịch bản demo chọn tab theo chỉ số này. */
+    static final int TAB_OPERATIONS = 0;
+    static final int TAB_RECORDS = 1;
+    static final int TAB_CARD = 2;
 
     private Label valueAid;
     private Label valueProtocol;
     private Label valueLifecycle;
     private Label valueCardId;
     private Label valueResult;
-    private Label valueReceipt;
     private Label valueReconcile;
 
     private Button btnConnect;
@@ -65,6 +79,19 @@ public class App extends Application {
     private TextField fieldDelta;
     private PasswordField fieldStudentPin;
     private PasswordField fieldAdminPin;
+    private ToggleButton techToggle;
+    private SplitPane workSplit;
+    private TitledPane logPane;
+    private ReceiptView receiptView;
+    private String busyLabel;
+    private String lastFeedback = "Chưa có thao tác";
+    private UiLabels.Tone lastTone = UiLabels.Tone.NEUTRAL;
+    private boolean logShowsFailure;
+
+    /** Dưới bề ngang này nhật ký chuyển xuống dưới vùng nghiệp vụ. */
+    private static final double NARROW_WIDTH = 1000;
+    /** Tỉ lệ vùng nghiệp vụ trong SplitPane. */
+    private static final double SPLIT_BUSINESS = 0.60;
 
     private PinPanel pinPanel;
     private PersonalizePanel personalizePanel;
@@ -96,18 +123,36 @@ public class App extends Application {
         log("Socket target " + System.getProperty("labaccess.host", "127.0.0.1")
                 + ":" + Integer.getInteger("labaccess.port", 9025));
 
-        btnConnect = new Button("Connect");
-        btnIdentify = new Button("SELECT + GET_STATUS");
-        btnDisconnect = new Button("Disconnect");
-        btnReadReceipt = new Button("GET_LAST_RECEIPT");
-        btnGrant = new Button("GRANT_QUOTA");
-        btnStart = new Button("START_VISIT");
-        btnEnd = new Button("END_VISIT");
-        btnReconcile = new Button("RECONCILE_PENDING");
+        btnConnect = new Button("Kết nối", Icons.connect());
+        btnIdentify = new Button("Nhận diện thẻ", Icons.identify());
+        btnDisconnect = new Button("Ngắt kết nối", Icons.disconnect());
+        btnReadReceipt = new Button("Đọc biên nhận cuối", Icons.receipt());
+        btnGrant = new Button("Cấp quota");
+        btnStart = new Button("Mở ca");
+        btnEnd = new Button("Đóng ca");
+        btnReconcile = new Button("Đối soát giao dịch", Icons.reconcile());
+        for (Button action : new Button[] {btnConnect, btnIdentify, btnDisconnect,
+                btnReadReceipt, btnGrant, btnStart, btnEnd, btnReconcile}) {
+            action.getStyleClass().add("la-action");
+        }
+        // Nhãn nút dùng ngôn ngữ nghiệp vụ; mã APDU và điều kiện bật nút nằm trong tooltip.
+        UiLabels.apduHint(btnConnect, "CONNECT");
+        UiLabels.apduHint(btnIdentify, "SELECT + GET_STATUS\nCần kết nối thẻ trước");
+        UiLabels.apduHint(btnDisconnect, "DISCONNECT");
+        UiLabels.apduHint(btnReadReceipt,
+                "VERIFY_STUDENT_PIN + GET_LAST_RECEIPT\nCần nhận diện thẻ và không có biên nhận chờ đối soát");
+        UiLabels.apduHint(btnGrant,
+                "GRANT_QUOTA\nCần nhận diện thẻ, không có biên nhận chờ đối soát");
+        UiLabels.apduHint(btnStart,
+                "START_VISIT\nCần nhận diện thẻ, chưa mở ca, số dư lớn hơn 0");
+        UiLabels.apduHint(btnEnd, "END_VISIT\nCần nhận diện thẻ và đang có ca mở");
+        UiLabels.apduHint(btnReconcile, "RECONCILE_PENDING\nCần có biên nhận chờ đối soát");
+        techToggle = new ToggleButton("Chi tiết kỹ thuật");
+        techToggle.getStyleClass().add("la-technical-toggle");
 
         fieldVisitId = new TextField();
         fieldVisitId.setPrefColumnCount(34);
-        fieldVisitId.setPromptText("visitId 16 byte hex của ca đang mở");
+        fieldVisitId.setPromptText("32 ký tự hex của ca đang mở");
         fieldVisitId.setEditable(false);
         fieldDelta = new TextField("5");
         fieldDelta.setPrefColumnCount(6);
@@ -136,74 +181,125 @@ public class App extends Application {
         demo = new DemoScenario(this, pinPanel, personalizePanel, profilePanel, photoPanel,
                 this::log);
 
-        HBox buttons = new HBox(10, btnConnect, btnIdentify, btnDisconnect, btnReconcile);
-        buttons.setAlignment(Pos.CENTER_LEFT);
-        buttons.setPadding(new Insets(10));
+        FlowPane receiptControls = UiRows.wrapping(
+                UiRows.field("Visit ID đang mở", fieldVisitId), btnReadReceipt);
 
-        HBox receiptControls = new HBox(8,
-                UiLabels.caption("Visit ID đang mở"), fieldVisitId,
-                btnReadReceipt);
-        receiptControls.setAlignment(Pos.CENTER_LEFT);
-        receiptControls.setPadding(new Insets(0, 10, 10, 10));
-
-        HBox txnControls = new HBox(8,
-                UiLabels.caption("Student PIN"), fieldStudentPin,
-                UiLabels.caption("Admin PIN"), fieldAdminPin,
-                UiLabels.caption("Delta"), fieldDelta,
+        FlowPane txnControls = UiRows.wrapping(
+                UiRows.field("PIN học viên", fieldStudentPin),
+                UiRows.field("PIN quản trị", fieldAdminPin),
+                UiRows.field("Số lượt thay đổi", fieldDelta),
                 btnGrant, btnStart, btnEnd);
-        txnControls.setAlignment(Pos.CENTER_LEFT);
-        txnControls.setPadding(new Insets(0, 10, 10, 10));
 
+        valueConnection = UiLabels.chip();
         valueAid = UiLabels.value();
         valueProtocol = UiLabels.value();
-        valueLifecycle = UiLabels.value();
+        valueLifecycle = UiLabels.chip();
         valueCardId = UiLabels.value();
-        valueResult = UiLabels.value();
-        valueReceipt = UiLabels.value();
-        valueReconcile = UiLabels.value();
+        valueCardId.getStyleClass().add("la-card-id");
+        valueResult = UiLabels.chip();
+        valueReconcile = UiLabels.chip();
 
-        GridPane info = new GridPane();
-        info.setHgap(12);
-        info.setVgap(6);
-        info.setPadding(new Insets(4, 10, 10, 10));
-        info.add(UiLabels.caption("Instance AID"), 0, 0);
-        info.add(valueAid, 1, 0);
-        info.add(UiLabels.caption("Protocol"), 0, 1);
-        info.add(valueProtocol, 1, 1);
-        info.add(UiLabels.caption("Lifecycle"), 0, 2);
-        info.add(valueLifecycle, 1, 2);
-        info.add(UiLabels.caption("Card ID"), 0, 3);
-        info.add(valueCardId, 1, 3);
-        info.add(UiLabels.caption("Nhận diện"), 0, 4);
-        info.add(valueResult, 1, 4);
-        info.add(UiLabels.caption("Receipt cuối"), 0, 5);
-        info.add(valueReceipt, 1, 5);
-        info.add(UiLabels.caption("Đối soát"), 0, 6);
-        info.add(valueReconcile, 1, 6);
+        // Header: trạng thái phiên lâu dài. Chip chỉ dành cho trạng thái, Card ID là giá trị nổi bật.
+        FlowPane summary = UiRows.wrapping(
+                UiRows.pair(UiLabels.caption("Kết nối"), valueConnection),
+                UiRows.pair(UiLabels.caption("Mã thẻ"), valueCardId),
+                UiRows.pair(UiLabels.caption("Vòng đời"), valueLifecycle),
+                UiRows.pair(UiLabels.caption("Nhận diện"), valueResult),
+                UiRows.pair(UiLabels.caption("Đối soát"), valueReconcile));
 
-        VBox top = new VBox(buttons, personalizePanel.node(), pinPanel.node(),
-                profilePanel.node(), photoPanel.node(), receiptControls, txnControls,
-                new Separator(), info);
+        FlowPane sessionActions = UiRows.wrapping(btnConnect, btnIdentify, btnDisconnect,
+                btnReconcile, techToggle);
+
+        // Chi tiết kỹ thuật tách khỏi trạng thái nghiệp vụ; mặc định ẩn để không chiếm chỗ.
+        GridPane technical = new GridPane();
+        technical.getStyleClass().add("la-info");
+        technical.setHgap(UiScale.SPACE_3);
+        technical.setVgap(UiScale.SPACE_1);
+        technical.setPadding(UiScale.blockInsets());
+        technical.add(UiLabels.caption("Instance AID"), 0, 0);
+        technical.add(valueAid, 1, 0);
+        technical.add(UiLabels.caption("Protocol"), 0, 1);
+        technical.add(valueProtocol, 1, 1);
+        technical.setManaged(false);
+        technical.setVisible(false);
+        techToggle.selectedProperty().addListener((observable, was, now) -> {
+            technical.setManaged(now);
+            technical.setVisible(now);
+        });
+
+        VBox header = new VBox(UiScale.SPACE_2, summary, sessionActions, technical);
+        header.getStyleClass().add("la-header");
+        header.setPadding(UiScale.headerInsets());
+
+        // Vận hành: cấp quota, mở ca, đóng ca, đọc biên nhận.
+        receiptView = new ReceiptView();
+        Tab tabOperations = tab("Vận hành",
+                UiSection.of("Giao dịch thẻ", txnControls),
+                UiSection.of("Biên nhận", receiptControls, receiptView.node()));
+
+        Tab tabRecords = tab("Hồ sơ & ảnh", profilePanel.node(), photoPanel.node());
+
+        Tab tabCard = tab("Cấp thẻ & bảo mật", personalizePanel.node(), pinPanel.node());
+
+        mainTabs = new TabPane(tabOperations, tabRecords, tabCard);
+        mainTabs.getStyleClass().add("la-tabs");
+        mainTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        mainTabs.getSelectionModel().selectFirst();
+        mainTabs.setMinHeight(0);
+        VBox.setVgrow(mainTabs, Priority.ALWAYS);
 
         statusLabel = new Label("Chưa kết nối");
         statusLabel.setId("status");
-        statusLabel.setStyle("-fx-font-family: 'Consolas', monospace; -fx-font-size: 12px;");
+        statusLabel.getStyleClass().add("la-status");
         HBox statusBar = new HBox(statusLabel);
-        statusBar.setPadding(new Insets(6, 10, 8, 10));
+        statusBar.getStyleClass().add("la-status-bar");
+        statusBar.setPadding(UiScale.statusBarInsets());
 
         logArea = new TextArea();
         logArea.setEditable(false);
-        logArea.setWrapText(false);
-        logArea.setStyle("-fx-font-family: 'Consolas', monospace; -fx-font-size: 12px;");
-        VBox.setVgrow(logArea, Priority.ALWAYS);
+        // Cột log hẹp: xuống dòng để đọc trọn dòng APDU thay vì cuộn ngang trong ô log.
+        logArea.setWrapText(true);
+        logArea.getStyleClass().add("la-log");
+        TitledPane logPane = new TitledPane("Nhật ký thao tác", logArea);
+        logPane.setExpanded(true);
+        logPane.setMinWidth(200);
+        // TitledPane mặc định co theo nội dung; mở maxHeight để nó giãn hết cột phải.
+        logPane.setMaxHeight(Double.MAX_VALUE);
+        logPane.getStyleClass().add("la-log-pane");
+        this.logPane = logPane;
+
+        // Nghiệp vụ bên trái, nhật ký bên phải: thao tác và quan sát log cùng lúc.
+        VBox business = new VBox(mainTabs);
+        business.setMinHeight(0);
+        business.setPadding(UiScale.centerInsets());
+
+        VBox logColumn = new VBox(logPane);
+        logColumn.setMinWidth(200);
+        logColumn.setPadding(UiScale.centerInsets());
+        // Nhật ký giãn hết cột phải: không để khoảng trống cố định dưới khung log.
+        VBox.setVgrow(logPane, Priority.ALWAYS);
+
+        workSplit = new SplitPane(business, logColumn);
+        workSplit.getStyleClass().add("la-split");
+        workSplit.setDividerPositions(SPLIT_BUSINESS);
+        SplitPane.setResizableWithParent(logColumn, false);
+        VBox.setVgrow(workSplit, Priority.ALWAYS);
 
         BorderPane root = new BorderPane();
-        root.setTop(top);
-        root.setCenter(logArea);
+        root.setTop(header);
+        root.setCenter(workSplit);
         root.setBottom(statusBar);
 
-        Scene scene = new Scene(root, 1180, 760);
+        Scene scene = new Scene(root, windowWidth(), windowHeight());
+        UiTheme.apply(scene);
+        // Hẹp thì nhật ký xuống dưới để vùng nghiệp vụ giữ đủ bề ngang, không sinh cuộn ngang.
+        scene.widthProperty().addListener((observable, was, now) -> layoutForWidth(now.doubleValue()));
+        mainTabs.getSelectionModel().selectedIndexProperty().addListener(
+                (observable, was, now) -> updateButtons());
+        layoutForWidth(windowWidth());
         stage.setTitle("LabAccess — nhận diện applet (PID " + pid + ")");
+        stage.setMinWidth(900);
+        stage.setMinHeight(600);
         stage.setScene(scene);
         stage.setOnCloseRequest(e -> {
             if (closing) {
@@ -214,6 +310,7 @@ public class App extends Application {
             shutdown();
         });
         stage.show();
+        stage.centerOnScreen();
 
         clearInfo();
         updateButtons();
@@ -221,6 +318,44 @@ public class App extends Application {
         if (Boolean.getBoolean("labaccess.demo")) {
             stage.setAlwaysOnTop(true);
             demo.start();
+        }
+    }
+
+    /** Một tab: nội dung cuộn dọc, không bao giờ cuộn ngang để control không bị cắt. */
+    private static Tab tab(String title, Node... content) {
+        VBox body = new VBox(UiScale.SPACE_4, content);
+        ScrollPane scroll = new ScrollPane(body);
+        scroll.setFitToWidth(true);
+        scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        scroll.getStyleClass().add("la-scroll");
+        // Cho phép co lại: cửa sổ thấp thì tab cuộn, không đè lên nhật ký.
+        scroll.setMinHeight(0);
+        Tab tab = new Tab(title, scroll);
+        tab.setClosable(false);
+        return tab;
+    }
+
+    /** Kịch bản demo chọn tab trước mỗi bước; panel không tự biết tab (Q-34). */
+    void showTab(int index) {
+        if (mainTabs != null) {
+            mainTabs.getSelectionModel().select(index);
+        }
+    }
+
+    /**
+     * Bố cục theo bề ngang cửa sổ: đủ rộng thì nghiệp vụ trái — nhật ký phải,
+     * hẹp thì nhật ký xuống dưới. Tỉ lệ 70/30 ở cả hai chiều.
+     */
+    private void layoutForWidth(double width) {
+        if (workSplit == null) {
+            return;
+        }
+        boolean narrow = width < NARROW_WIDTH;
+        workSplit.setOrientation(narrow ? Orientation.VERTICAL : Orientation.HORIZONTAL);
+        workSplit.setDividerPositions(SPLIT_BUSINESS);
+        if (logPane != null) {
+            logPane.setExpanded(!narrow || logShowsFailure);
         }
     }
 
@@ -283,6 +418,11 @@ public class App extends Application {
             return;
         }
         char[] studentPin = fieldStudentPin.getText().toCharArray();
+        if (!validPin(studentPin, 6)) {
+            clearBuffers(studentPin, null);
+            log("[FAIL] đọc biên nhận: PIN học viên phải đúng 6 chữ số");
+            return;
+        }
         fieldStudentPin.clear();
         runOp("VERIFY + GET_LAST_RECEIPT + GET_STATUS state", () -> {
             try {
@@ -363,12 +503,12 @@ public class App extends Application {
         }
 
         char[] studentPin = fieldStudentPin.getText().toCharArray();
-        fieldStudentPin.clear();
         if (!validPin(studentPin, 6)) {
             clearBuffers(studentPin, null);
-            log("[FAIL] RECONCILE_PENDING: student PIN phải đúng 6 chữ số");
+            log("[FAIL] đối soát giao dịch: PIN học viên phải đúng 6 chữ số");
             return;
         }
+        fieldStudentPin.clear();
         runOp("RECONCILE_PENDING", () -> {
             try {
                 CardGateway.Result reconciled = gateway.reconcilePending(journal, studentPin);
@@ -425,10 +565,15 @@ public class App extends Application {
         }
         byte[] adminPin = pinToBytes(fieldAdminPin);
         if (adminPin == null) {
-            log("[FAIL] GRANT_QUOTA: admin PIN phải gồm đúng 8 chữ số");
+            log("[FAIL] cấp quota: PIN quản trị phải đúng 8 chữ số");
             return;
         }
         char[] studentPin = fieldStudentPin.getText().toCharArray();
+        if (!validPin(studentPin, 6)) {
+            clearBuffers(studentPin, adminPin);
+            log("[FAIL] cấp quota: PIN học viên phải đúng 6 chữ số");
+            return;
+        }
         fieldAdminPin.clear();
         fieldStudentPin.clear();
         ReceiptExpectation expectation = new ReceiptExpectation(
@@ -462,6 +607,11 @@ public class App extends Application {
         }
         byte[] visitId = newVisitId();
         char[] studentPin = fieldStudentPin.getText().toCharArray();
+        if (!validPin(studentPin, 6)) {
+            clearBuffers(studentPin, null);
+            log("[FAIL] mở ca: PIN học viên phải đúng 6 chữ số");
+            return;
+        }
         fieldStudentPin.clear();
         ReceiptExpectation expectation = new ReceiptExpectation(
                 HexFormat.of().parseHex(status.cardId()), status.counter() + 1,
@@ -493,6 +643,11 @@ public class App extends Application {
                 HexFormat.of().parseHex(status.cardId()), status.counter() + 1,
                 Receipt.OPERATION_END, visitId);
         char[] studentPin = fieldStudentPin.getText().toCharArray();
+        if (!validPin(studentPin, 6)) {
+            clearBuffers(studentPin, null);
+            log("[FAIL] đóng ca: PIN học viên phải đúng 6 chữ số");
+            return;
+        }
         fieldStudentPin.clear();
         runTransaction("END_VISIT", studentPin, null, expectation, 0,
                 status.balance(), gateway.visitCommand((byte) 0x52, visitId));
@@ -503,7 +658,7 @@ public class App extends Application {
             CardGateway.CommandSupplier supplier) {
         if (!validPin(studentPin, 6)) {
             clearBuffers(studentPin, adminPin);
-            log("[FAIL] " + label + ": student PIN phải đúng 6 chữ số");
+            log("[FAIL] " + UiLabels.actionName(label) + ": PIN học viên phải đúng 6 chữ số");
             return;
         }
         if (closing || busy) {
@@ -555,7 +710,6 @@ public class App extends Application {
 
     private byte[] pinToBytes(PasswordField field) {
         String text = field.getText();
-        field.clear();
         if (text == null || text.length() != 8) {
             return null;
         }
@@ -606,52 +760,75 @@ public class App extends Application {
         CardGateway.Status status = gateway.status();
         boolean authenticated = status != null && status.studentStateAvailable();
         if (receipt == null) {
-            valueReceipt.setText(authenticated
-                    ? String.format("balance=%d | counter=%d",
-                            status.balance(), status.counter()) : "-");
+            receiptView.clear(authenticated ? "Chưa có biên nhận" : "Chưa đọc biên nhận từ thẻ");
         } else {
-            valueReceipt.setText(receipt + " | sigLen=" + receipt.signature().length
-                    + (authenticated ? String.format(" | state balance=%d counter=%d",
-                            status.balance(), status.counter()) : ""));
+            receiptView.show(receipt, gateway.lastReceiptSignatureChecked(),
+                    gateway.lastReceiptSignatureOk());
         }
         fieldVisitId.setText(authenticated && status.hasActiveVisit()
                 ? status.activeVisitId() : "");
-        Reconciliation reconciliation = gateway.reconciliation();
-        valueReconcile.setText(reconciliation.state() + (reconciliation.detail().isEmpty()
-                ? ""
-                : " — " + reconciliation.detail()));
+        showReconcile();
+        if (!gateway.reconciliation().detail().isEmpty()) {
+            log("Đối soát: " + gateway.reconciliation().detail());
+        }
     }
 
     private void showStatus() {
         CardGateway.Status status = gateway.status();
         if (!uiReady || status == null) {
+            valueConnection.setText(uiConnected ? "Đã kết nối" : "Chưa kết nối");
+            UiLabels.applyChip(valueConnection, uiConnected
+                    ? UiLabels.Tone.PENDING : UiLabels.Tone.NEUTRAL);
             valueAid.setText("-");
             valueProtocol.setText("-");
-            valueLifecycle.setText("-");
+            valueLifecycle.setText("Chưa rõ");
+            UiLabels.applyChip(valueLifecycle, UiLabels.Tone.NEUTRAL);
             valueCardId.setText("-");
-            valueResult.setText("CHƯA SẴN SÀNG");
+            valueResult.setText("Chưa sẵn sàng");
+            UiLabels.applyChip(valueResult, UiLabels.Tone.PENDING);
+            showReconcile();
             return;
         }
+        valueConnection.setText("Đã kết nối");
+        UiLabels.applyChip(valueConnection, UiLabels.Tone.OK);
         valueAid.setText(status.instanceAid());
         valueProtocol.setText(String.format("%02X", status.protocolVersion()));
-        valueLifecycle.setText(CardGateway.lifecycleText(status.lifecycle()));
+        valueLifecycle.setText(CardGateway.lifecycleCaption(status.lifecycle()));
+        UiLabels.applyChip(valueLifecycle, status.lifecycle() == 0x01
+                ? UiLabels.Tone.OK : UiLabels.Tone.PENDING);
         valueCardId.setText(status.cardId());
-        valueResult.setText("SẴN SÀNG");
+        valueResult.setText("Sẵn sàng");
+        UiLabels.applyChip(valueResult, UiLabels.Tone.OK);
+        showReconcile();
         personalizePanel.showPublicKey();
     }
 
+    private void showReconcile() {
+        boolean known = gateway.reconciliation().transactionAllowed();
+        valueReconcile.setText(known ? "Không treo" : "Cần đối soát");
+        UiLabels.Tone tone = !known
+                ? UiLabels.Tone.ERROR
+                : (uiConnected ? UiLabels.Tone.OK : UiLabels.Tone.NEUTRAL);
+        UiLabels.applyChip(valueReconcile, tone);
+    }
+
     private void clearInfo() {
+        valueConnection.setText("Chưa kết nối");
+        UiLabels.applyChip(valueConnection, UiLabels.Tone.NEUTRAL);
+        valueLifecycle.setText("Chưa rõ");
+        UiLabels.applyChip(valueLifecycle, UiLabels.Tone.NEUTRAL);
         valueAid.setText("-");
         valueProtocol.setText("-");
-        valueLifecycle.setText("-");
         valueCardId.setText("-");
-        valueResult.setText("CHƯA SẴN SÀNG");
-        valueReceipt.setText("-");
+        valueResult.setText("Chưa sẵn sàng");
+        UiLabels.applyChip(valueResult, UiLabels.Tone.NEUTRAL);
+        showReconcile();
         fieldVisitId.clear();
-        valueReconcile.setText(gateway.reconciliation().state().toString());
+        receiptView.clear("Chưa đọc biên nhận từ thẻ");
         personalizePanel.resetView();
         pinPanel.clearState();
         profilePanel.clearView();
+        photoPanel.resetView();
     }
 
     private void runOp(String label, Callable<CardGateway.Result> op, Consumer<Boolean> onResult) {
@@ -664,6 +841,7 @@ public class App extends Application {
             return;
         }
         busy = true;
+        busyLabel = label;
         updateButtons();
         log("> " + label + " ...");
 
@@ -685,6 +863,9 @@ public class App extends Application {
                     onResult.accept(okFinal);
                 }
                 busy = false;
+                busyLabel = null;
+                lastFeedback = UiLabels.outcome(okFinal, label);
+                lastTone = okFinal ? UiLabels.Tone.OK : UiLabels.Tone.ERROR;
                 updateButtons();
             });
         });
@@ -710,7 +891,8 @@ public class App extends Application {
             personalizePanel.updateAvailability(false, false);
             profilePanel.setEnabled(false);
             photoPanel.setEnabled(false);
-            statusLabel.setText("Trạng thái: đang đóng cửa sổ");
+            statusLabel.setText("Đang đóng cửa sổ");
+            UiLabels.applyTone(statusLabel, UiLabels.Tone.PENDING);
             return;
         }
 
@@ -741,16 +923,37 @@ public class App extends Application {
         profilePanel.setEnabled(!busy && uiConnected && issued);
         photoPanel.setEnabled(!busy && uiConnected && issued);
 
-        String state = busy ? "đang xử lý"
-                : !uiConnected ? "chưa kết nối"
-                : !uiReady ? "đã kết nối, chưa sẵn sàng"
-                : "đã kết nối, sẵn sàng";
-        String journalText = !journalPresent ? "pending journal: không"
-                : loaded.valid() ? "pending journal: " + loaded.status()
-                : "pending journal: KHÔNG HỢP LỆ";
-        statusLabel.setText("Trạng thái: " + state
-                + " | đối soát=" + gateway.reconciliation().state()
-                + " | " + journalText);
+        // Thanh trạng thái: phản hồi thao tác cuối, không lặp lại trạng thái phiên ở header.
+        String feedback;
+        UiLabels.Tone tone;
+        if (busy) {
+            feedback = "Đang xử lý: " + (busyLabel == null ? "…" : UiLabels.actionName(busyLabel));
+            tone = UiLabels.Tone.PENDING;
+        } else if (journalPresent) {
+            feedback = validPending
+                    ? "Có biên nhận chờ đối soát — đối soát trước khi giao dịch tiếp"
+                    : "Pending journal không hợp lệ — cần xử lý thủ công";
+            tone = validPending ? UiLabels.Tone.PENDING : UiLabels.Tone.ERROR;
+        } else if (!gateway.reconciliation().transactionAllowed()) {
+            feedback = "Cần đối soát giao dịch trước khi tiếp tục";
+            tone = UiLabels.Tone.ERROR;
+        } else {
+            feedback = lastFeedback;
+            tone = lastTone;
+        }
+        statusLabel.setText(feedback);
+        UiLabels.applyTone(statusLabel, tone);
+
+        int tab = mainTabs.getSelectionModel().getSelectedIndex();
+        boolean operations = uiReady && tab == TAB_OPERATIONS;
+        UiLabels.markPrimary(btnIdentify, !btnIdentify.isDisable() && !uiReady);
+        boolean canEnd = operations && !btnEnd.isDisable();
+        boolean canStart = operations && !btnStart.isDisable();
+        UiLabels.markPrimary(btnEnd, canEnd);
+        UiLabels.markPrimary(btnStart, !canEnd && canStart);
+        UiLabels.markPrimary(btnGrant, operations && !canEnd && !canStart && !btnGrant.isDisable());
+        personalizePanel.setIssuePrimary(uiReady && tab == TAB_CARD);
+        photoPanel.setUploadPrimary(uiReady && tab == TAB_RECORDS);
     }
 
     void fillTransactionInputs(char[] studentPin, char[] adminPin, int delta) {
@@ -825,6 +1028,25 @@ public class App extends Application {
                     + System.lineSeparator());
             logArea.setScrollTop(Double.MAX_VALUE);
         }
+        boolean failure = message.startsWith("[FAIL]") || message.startsWith("[ERROR]");
+        boolean success = message.startsWith("[OK]");
+        if (!failure && !success) {
+            return;
+        }
+        logShowsFailure = failure;
+        if (failure) {
+            int end = message.indexOf(']');
+            String detail = end >= 0 ? message.substring(end + 1).strip() : message;
+            lastFeedback = detail;
+            lastTone = UiLabels.Tone.ERROR;
+        }
+        if (logPane != null) {
+            boolean narrow = workSplit != null && workSplit.getOrientation() == Orientation.VERTICAL;
+            logPane.setExpanded(failure || !narrow);
+        }
+        if (failure && !busy && statusLabel != null) {
+            updateButtons();
+        }
     }
 
     private void shutdown() {
@@ -879,5 +1101,14 @@ public class App extends Application {
 
     public static void main(String[] args) {
         launch(args);
+    }
+
+    /** Cửa sổ vừa màn hình đang dùng; màn hình nhỏ hoặc scaling cao thì thu lại, không tràn ra ngoài. */
+    private static double windowWidth() {
+        return Math.min(1180, Screen.getPrimary().getVisualBounds().getWidth() - UiScale.SPACE_5 * 2);
+    }
+
+    private static double windowHeight() {
+        return Math.min(760, Screen.getPrimary().getVisualBounds().getHeight() - UiScale.SPACE_5 * 2);
     }
 }
