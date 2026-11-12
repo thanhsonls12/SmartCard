@@ -8,6 +8,7 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
@@ -20,9 +21,9 @@ final class PinPanel {
     private final PasswordField fieldPin = new PasswordField();
     private final PasswordField fieldNewPin = new PasswordField();
     private final PasswordField fieldAdminPin = new PasswordField();
-    private final Button btnVerify = new Button("VERIFY");
-    private final Button btnChange = new Button("CHANGE");
-    private final Button btnUnblock = new Button("UNBLOCK");
+    private final Button btnVerify = new Button("Xác thực PIN");
+    private final Button btnChange = new Button("Đổi PIN");
+    private final Button btnUnblock = new Button("Mở khóa PIN");
     private final Label valueState = UiLabels.value();
     private final VBox node;
 
@@ -38,19 +39,22 @@ final class PinPanel {
         btnVerify.setOnAction(e -> verify());
         btnChange.setOnAction(e -> change());
         btnUnblock.setOnAction(e -> unblock());
+        UiLabels.apduHint(btnVerify, "VERIFY_STUDENT_PIN");
+        UiLabels.apduHint(btnChange, "CHANGE_STUDENT_PIN");
+        UiLabels.apduHint(btnUnblock, "UNBLOCK_STUDENT_PIN");
+        btnVerify.getStyleClass().add("la-action");
+        btnChange.getStyleClass().add("la-action");
+        btnUnblock.getStyleClass().add("la-action");
 
-        HBox controls = new HBox(8,
-                UiLabels.caption("PIN hiện tại"), fieldPin,
-                UiLabels.caption("PIN mới"), fieldNewPin,
-                UiLabels.caption("admin PIN"), fieldAdminPin,
+        FlowPane controls = UiRows.wrapping(
+                UiRows.field("PIN hiện tại", fieldPin),
+                UiRows.field("PIN mới", fieldNewPin),
+                UiRows.field("PIN quản trị", fieldAdminPin),
                 btnVerify, btnChange, btnUnblock);
-        controls.setAlignment(Pos.CENTER_LEFT);
 
-        HBox state = new HBox(8, UiLabels.caption("Trạng thái PIN"), valueState);
-        state.setAlignment(Pos.CENTER_LEFT);
+        VBox state = UiRows.valueBlock("Trạng thái PIN", valueState);
 
-        node = new VBox(6, controls, state);
-        node.setPadding(new Insets(0, 10, 10, 10));
+        node = UiSection.of("PIN học viên", controls, state);
     }
 
     VBox node() {
@@ -107,6 +111,11 @@ final class PinPanel {
 
     private void verify() {
         char[] pin = fieldPin.getText().toCharArray();
+        if (!digits(pin, 6)) {
+            Arrays.fill(pin, '\0');
+            log.accept("[FAIL] xác thực PIN: PIN học viên phải đúng 6 chữ số");
+            return;
+        }
         fieldPin.clear();
         runner.run("VERIFY_STUDENT_PIN", () -> {
             try {
@@ -120,6 +129,12 @@ final class PinPanel {
     private void change() {
         char[] oldPin = fieldPin.getText().toCharArray();
         char[] newPin = fieldNewPin.getText().toCharArray();
+        if (!digits(oldPin, 6) || !digits(newPin, 6)) {
+            Arrays.fill(oldPin, '\0');
+            Arrays.fill(newPin, '\0');
+            log.accept("[FAIL] đổi PIN: PIN học viên phải đúng 6 chữ số");
+            return;
+        }
         fieldPin.clear();
         fieldNewPin.clear();
         runner.run("CHANGE_STUDENT_PIN", () -> {
@@ -135,6 +150,12 @@ final class PinPanel {
     private void unblock() {
         char[] adminPin = fieldAdminPin.getText().toCharArray();
         char[] newPin = fieldNewPin.getText().toCharArray();
+        if (!digits(adminPin, 8) || !digits(newPin, 6)) {
+            Arrays.fill(adminPin, '\0');
+            Arrays.fill(newPin, '\0');
+            log.accept("[FAIL] mở khóa PIN: PIN quản trị phải đúng 8 chữ số và PIN học viên phải đúng 6 chữ số");
+            return;
+        }
         fieldAdminPin.clear();
         fieldNewPin.clear();
         runner.run("UNBLOCK_STUDENT_PIN", () -> {
@@ -145,6 +166,18 @@ final class PinPanel {
                 Arrays.fill(newPin, '\0');
             }
         }, ok -> showState(PinState.Operation.UNBLOCK, ok));
+    }
+
+    private static boolean digits(char[] pin, int length) {
+        if (pin == null || pin.length != length) {
+            return false;
+        }
+        for (char c : pin) {
+            if (c < '0' || c > '9') {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void showState(PinState.Operation operation, boolean ok) {

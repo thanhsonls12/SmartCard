@@ -10,6 +10,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
@@ -25,8 +26,8 @@ final class PersonalizePanel {
     private final TextField fieldName = new TextField();
     private final PasswordField fieldAdminPin = new PasswordField();
     private final PasswordField fieldStudentPin = new PasswordField();
-    private final Button btnPersonalize = new Button("PERSONALIZE");
-    private final Button btnPublicKey = new Button("GET_CARD_PUBLIC_KEY");
+    private final Button btnPersonalize = new Button("Phát hành thẻ");
+    private final Button btnPublicKey = new Button("Đọc khóa công khai");
     private final Label valuePublicKey = UiLabels.value();
     private final VBox node;
 
@@ -38,31 +39,32 @@ final class PersonalizePanel {
         this.afterPersonalize = afterPersonalize;
 
         fieldCardId.setPrefColumnCount(17);
-        fieldCardId.setPromptText("cardId 16 hex");
+        fieldCardId.setPromptText("16 ký tự hex");
         fieldStudentId.setPrefColumnCount(12);
-        fieldStudentId.setPromptText("studentId A-Z 0-9 -");
+        fieldStudentId.setPromptText("A-Z, 0-9, dấu -");
         fieldName.setPrefColumnCount(20);
-        fieldName.setPromptText("tên hiển thị UTF-8 ≤96 byte");
+        fieldName.setPromptText("tên, tối đa 96 byte");
         fieldAdminPin.setPrefColumnCount(9);
         fieldStudentPin.setPrefColumnCount(7);
 
         btnPersonalize.setOnAction(e -> personalize());
         btnPublicKey.setOnAction(e -> readPublicKey());
+        UiLabels.apduHint(btnPersonalize, "PERSONALIZE");
+        UiLabels.apduHint(btnPublicKey, "GET_CARD_PUBLIC_KEY");
+        btnPersonalize.getStyleClass().add("la-action");
+        btnPublicKey.getStyleClass().add("la-action");
 
-        HBox controls = new HBox(8,
-                UiLabels.caption("cardId"), fieldCardId,
-                UiLabels.caption("studentId"), fieldStudentId,
-                UiLabels.caption("tên"), fieldName,
-                UiLabels.caption("admin PIN"), fieldAdminPin,
-                UiLabels.caption("student PIN"), fieldStudentPin,
+        FlowPane controls = UiRows.wrapping(
+                UiRows.field("Mã thẻ", fieldCardId),
+                UiRows.field("Mã sinh viên", fieldStudentId),
+                UiRows.field("Tên hiển thị", fieldName),
+                UiRows.field("PIN quản trị", fieldAdminPin),
+                UiRows.field("PIN học viên", fieldStudentPin),
                 btnPersonalize, btnPublicKey);
-        controls.setAlignment(Pos.CENTER_LEFT);
 
-        HBox keyRow = new HBox(8, UiLabels.caption("Public key"), valuePublicKey);
-        keyRow.setAlignment(Pos.CENTER_LEFT);
+        VBox keyRow = UiRows.valueBlock("Khóa công khai", valuePublicKey);
 
-        node = new VBox(6, controls, keyRow);
-        node.setPadding(new Insets(0, 10, 10, 10));
+        node = UiSection.of("Phát hành thẻ", controls, keyRow);
     }
 
     VBox node() {
@@ -74,14 +76,18 @@ final class PersonalizePanel {
         btnPublicKey.setDisable(!publicKeyEnabled);
     }
 
+    void setIssuePrimary(boolean preferred) {
+        UiLabels.markPrimary(btnPersonalize, preferred && !btnPersonalize.isDisable());
+    }
+
     void resetView() {
-        valuePublicKey.setText("-");
+        valuePublicKey.setText("Chưa đọc khóa công khai");
     }
 
     void showPublicKey() {
         java.security.PublicKey key = gateway.cardPublicKey();
         if (key == null) {
-            valuePublicKey.setText("-");
+            valuePublicKey.setText("Chưa đọc khóa công khai");
             return;
         }
         CardGateway.Status current = gateway.status();
@@ -119,9 +125,7 @@ final class PersonalizePanel {
 
     private void personalize() {
         char[] adminPin = fieldAdminPin.getText().toCharArray();
-        fieldAdminPin.clear();
         char[] studentPin = fieldStudentPin.getText().toCharArray();
-        fieldStudentPin.clear();
         String cardId = fieldCardId.getText();
         String studentId = fieldStudentId.getText().strip();
         String displayName = fieldName.getText();
@@ -131,9 +135,11 @@ final class PersonalizePanel {
         if (problem != null) {
             Arrays.fill(studentPin, '\0');
             Arrays.fill(adminPin, '\0');
-            log.accept("[FAIL] PERSONALIZE: " + problem + " — không gửi APDU");
+            log.accept("[FAIL] phát hành thẻ: " + problem);
             return;
         }
+        fieldAdminPin.clear();
+        fieldStudentPin.clear();
 
         runner.run("PERSONALIZE", () -> {
             try {

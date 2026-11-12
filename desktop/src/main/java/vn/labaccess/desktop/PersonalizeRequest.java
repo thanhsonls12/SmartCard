@@ -29,7 +29,7 @@ final class PersonalizeRequest {
     static String problem(char[] adminPin, String cardIdHex, String studentId,
             char[] studentPin, String displayName) {
         if (!isDigits(adminPin, ADMIN_PIN_LENGTH)) {
-            return "admin PIN phải đúng " + ADMIN_PIN_LENGTH + " chữ số";
+            return "PIN quản trị phải đúng " + ADMIN_PIN_LENGTH + " chữ số";
         }
         String cardIdProblem = cardIdProblem(cardIdHex);
         if (cardIdProblem != null) {
@@ -40,31 +40,31 @@ final class PersonalizeRequest {
             return studentIdProblem;
         }
         if (!isDigits(studentPin, STUDENT_PIN_LENGTH)) {
-            return "student PIN phải đúng " + STUDENT_PIN_LENGTH + " chữ số";
+            return "PIN học viên phải đúng " + STUDENT_PIN_LENGTH + " chữ số";
         }
         return displayNameProblem(displayName);
     }
 
     static String cardIdProblem(String cardIdHex) {
         if (cardIdHex == null || cardIdHex.isBlank()) {
-            return "cardId không được để trống";
+            return "mã thẻ không được để trống";
         }
         String value = cardIdHex.strip();
         if (!value.matches(CARD_ID_PATTERN)) {
-            return "cardId phải đúng " + (CARD_ID_LENGTH * 2) + " ký tự hex (" + CARD_ID_LENGTH + " byte)";
+            return "mã thẻ phải đúng " + (CARD_ID_LENGTH * 2) + " ký tự hex";
         }
         if (isAllZero(HexFormat.of().parseHex(value))) {
-            return "cardId không được toàn 00";
+            return "mã thẻ không được toàn 00";
         }
         return null;
     }
 
     static String studentIdProblem(String studentId) {
         if (studentId == null || studentId.isEmpty()) {
-            return "studentId phải 1–" + STUDENT_ID_MAX_LENGTH + " ký tự A–Z, 0–9, -";
+            return "mã sinh viên phải 1-" + STUDENT_ID_MAX_LENGTH + " ký tự A-Z, 0-9, -";
         }
         if (!studentId.matches(STUDENT_ID_PATTERN)) {
-            return "studentId chỉ nhận A–Z, 0–9 và -, tối đa " + STUDENT_ID_MAX_LENGTH + " byte";
+            return "mã sinh viên chỉ nhận A-Z, 0-9 và -, tối đa " + STUDENT_ID_MAX_LENGTH + " ký tự";
         }
         return null;
     }
