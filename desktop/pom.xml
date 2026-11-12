@@ -14,6 +14,11 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>25</maven.compiler.release>
         <javafx.version>25</javafx.version>
+        <!-- AtlantaFX 2.1.0 duoc build bang Java 21 va JavaFX 23: chay tren JavaFX 25
+             vi JavaFX giu tuong thich API ve sau. Khong dung 3.0.0 vi ban do build
+             bang JavaFX 27, co the goi API chua co trong 25. -->
+        <atlantafx.version>2.1.0</atlantafx.version>
+        <ikonli.version>12.4.0</ikonli.version>
         <!-- Chi dung cho kiem thu giao dien: bat che do tu bam nut de chup anh.
              Mac dinh false; chay that thi bo qua. -->
         <labaccess.demo>false</labaccess.demo>
@@ -27,6 +32,26 @@
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-controls</artifactId>
             <version>${javafx.version}</version>
+        </dependency>
+
+        <!-- AtlantaFX: nen theme + control phu. Chi dung atlantafx-base,
+             khong keo module decorations/spins de giu dependency gon. -->
+        <dependency>
+            <groupId>io.github.mkpaz</groupId>
+            <artifactId>atlantafx-base</artifactId>
+            <version>${atlantafx.version}</version>
+        </dependency>
+
+        <!-- Ikonli: icon vector trong JavaFX; pack Feather cho bo icon toi gian. -->
+        <dependency>
+            <groupId>org.kordamp.ikonli</groupId>
+            <artifactId>ikonli-javafx</artifactId>
+            <version>${ikonli.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.kordamp.ikonli</groupId>
+            <artifactId>ikonli-feather-pack</artifactId>
+            <version>${ikonli.version}</version>
         </dependency>
 
         <!-- JAR Oracle da cai vao local repo bang install:install-file.
