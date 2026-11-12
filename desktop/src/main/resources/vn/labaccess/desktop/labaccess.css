@@ -1,0 +1,377 @@
+/*
+ * LabAccess — giao diện vận hành thẻ.
+ *
+ * File này nạp SAU theme AtlantaFX (PrimerLight) và chỉ làm hai việc: khai báo
+ * bảng màu LabAccess một lần, rồi phủ lên các token ngữ nghĩa của AtlantaFX để
+ * control có sẵn nhận bảng màu đó. Không dựng lại style của control.
+ *
+ * Thang dùng trong file (không dùng giá trị ngoài các thang này):
+ *   bo góc: 4px · 8px · 12px · 999px (pill)
+ *   cỡ chữ: 11px · 12px · 13px · 15px
+ *   khoảng cách: xem UiScale (Java) vì Insets và gap không đặt được bằng CSS.
+ */
+
+.root {
+    /* Bảng màu LabAccess: nền xanh xám rất nhạt, chữ xanh đen. */
+    -la-surface: #eef3f4;
+    -la-surface-raised: #ffffff;
+    -la-surface-sunken: #e2eaec;
+    -la-fg: #10242c;
+    -la-fg-muted: #4a6371;
+    -la-fg-subtle: #6b828d;
+
+    /* Accent xanh lục lạnh. */
+    -la-accent: #0b7a6b;
+    -la-accent-strong: #095f53;
+    -la-accent-soft: #d9ede8;
+
+    /* Amber chỉ cho pending/UNKNOWN; đỏ chỉ cho lỗi hoặc thao tác bị từ chối. */
+    -la-pending: #8a5a0c;
+    -la-pending-soft: #fbf1dc;
+    -la-danger: #b3261e;
+    -la-danger-soft: #fbe9e7;
+
+    -la-border: #c6d3d7;
+    -la-border-soft: #d8e2e5;
+
+    /* Phủ token ngữ nghĩa của AtlantaFX. Control mặc định đọc các token này,
+       nên chỉ cần đổi ở đây là cả cửa sổ theo bảng màu LabAccess. */
+    -color-bg-default: -la-surface;
+    -color-bg-subtle: -la-surface-raised;
+    -color-bg-inset: -la-surface-sunken;
+    -color-bg-overlay: -la-surface-raised;
+    -color-fg-default: -la-fg;
+    -color-fg-muted: -la-fg-muted;
+    -color-fg-subtle: -la-fg-subtle;
+    -color-accent-fg: -la-accent-strong;
+    -color-accent-emphasis: -la-accent;
+    -color-accent-subtle: -la-accent-soft;
+    -color-accent-muted: rgba(11, 122, 107, 0.35);
+    -color-success-fg: -la-accent-strong;
+    -color-success-emphasis: -la-accent;
+    -color-success-subtle: -la-accent-soft;
+    -color-warning-fg: -la-pending;
+    -color-warning-emphasis: -la-pending;
+    -color-warning-subtle: -la-pending-soft;
+    -color-warning-muted: rgba(169, 105, 11, 0.35);
+    -color-danger-fg: -la-danger;
+    -color-danger-emphasis: -la-danger;
+    -color-danger-subtle: -la-danger-soft;
+    -color-danger-muted: rgba(179, 38, 30, 0.35);
+    -color-border-default: -la-border;
+    -color-border-muted: -la-border-soft;
+    -color-border-subtle: -la-border-soft;
+
+    -fx-background-color: -la-surface;
+    -fx-font-size: 13px;
+}
+
+/* ---- Chữ ---- */
+
+.la-caption {
+    -fx-font-size: 11px;
+    -fx-text-fill: -la-fg-muted;
+}
+
+.la-value {
+    -fx-font-family: 'Consolas', monospace;
+    -fx-font-size: 12px;
+    -fx-text-fill: -la-fg;
+}
+
+/* Card ID là giá trị nhận dạng chính của phiên: nổi hơn các giá trị phụ. */
+.la-card-id {
+    -fx-font-family: 'Consolas', monospace;
+    -fx-font-size: 15px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -la-fg;
+}
+
+/* Chip: chỉ dùng cho trạng thái (kết nối, lifecycle, đối soát, chữ ký). */
+.la-chip {
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-padding: 2px 8px;
+    -fx-background-radius: 999px;
+}
+
+.la-chip--neutral {
+    -fx-background-color: -la-surface-sunken;
+    -fx-text-fill: -la-fg-muted;
+}
+
+.la-chip--ok {
+    -fx-background-color: -la-accent-soft;
+    -fx-text-fill: -la-accent-strong;
+}
+
+.la-chip--pending {
+    -fx-background-color: -la-pending-soft;
+    -fx-text-fill: -la-pending;
+}
+
+.la-chip--error {
+    -fx-background-color: -la-danger-soft;
+    -fx-text-fill: -la-danger;
+}
+
+/* ---- Ô nhập: phân biệt rõ ô dùng được và ô bị khoá ---- */
+
+.text-input,
+.password-field {
+    -fx-background-color: -la-surface-raised;
+    -fx-text-fill: -la-fg;
+    -fx-border-color: -la-border;
+    -fx-border-width: 1px;
+    -fx-border-radius: 4px;
+    -fx-background-radius: 4px;
+}
+
+.text-input:focused,
+.password-field:focused {
+    -fx-border-color: -la-accent;
+    -fx-border-width: 2px;
+}
+
+/* Ô bị khoá: nền chìm, không viền, chữ mờ — khác hẳn ô dùng được. */
+.text-input:disabled,
+.password-field:disabled {
+    -fx-opacity: 1;
+    -fx-background-color: -la-surface-sunken;
+    -fx-text-fill: -la-fg-subtle;
+    -fx-border-color: transparent;
+    -fx-border-width: 1px;
+}
+
+.la-title {
+    -fx-font-size: 15px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -la-fg;
+}
+
+/* ---- Trạng thái (đang xử lý / thành công / thất bại / cần đối soát) ---- */
+
+.la-status {
+    -fx-font-family: 'Consolas', monospace;
+    -fx-font-size: 12px;
+    -fx-text-fill: -la-fg-muted;
+}
+
+.la-status--ok {
+    -fx-text-fill: -la-accent-strong;
+}
+
+.la-status--pending {
+    -fx-text-fill: -la-pending;
+}
+
+.la-status--error {
+    -fx-text-fill: -la-danger;
+}
+
+.la-status-bar {
+    -fx-background-color: -la-surface-sunken;
+    -fx-border-color: -la-border-soft;
+    -fx-border-width: 1px 0 0 0;
+}
+
+/* ---- Icon (Ikonli Feather) ---- */
+
+.la-icon {
+    -fx-icon-color: -la-fg-muted;
+}
+
+.la-icon--accent {
+    -fx-icon-color: -la-accent;
+}
+
+.la-icon--pending {
+    -fx-icon-color: -la-pending;
+}
+
+.la-icon--danger {
+    -fx-icon-color: -la-danger;
+}
+
+/* ---- Khối và control riêng ---- */
+
+.la-log {
+    -fx-font-family: 'Consolas', monospace;
+    -fx-font-size: 12px;
+    -fx-control-inner-background: -la-surface-raised;
+}
+
+/* Khung ảnh: nền và viền nằm trên StackPane nên khung không co giãn theo ảnh. */
+.la-preview {
+    -fx-background-color: -la-surface-sunken;
+    -fx-background-radius: 8px;
+    -fx-border-color: -la-border;
+    -fx-border-radius: 8px;
+    -fx-border-width: 1px;
+    -fx-padding: 4px;
+}
+
+.la-info {
+    -fx-background-color: transparent;
+}
+
+/* ---- Khung cửa sổ ---- */
+
+/* Header cố định: tách khỏi vùng cuộn để trạng thái luôn nhìn thấy. */
+.la-header {
+    -fx-background-color: -la-surface-raised;
+    -fx-border-color: -la-border-soft;
+    -fx-border-width: 0 0 1px 0;
+}
+
+/* Khối nội dung phẳng: một viền, một nền, không lồng khối trong khối. */
+.la-section {
+    -fx-background-color: -la-surface-raised;
+    -fx-background-radius: 8px;
+    -fx-border-color: -la-border-soft;
+    -fx-border-radius: 8px;
+    -fx-border-width: 1px;
+    -fx-padding: 12px;
+}
+
+.la-section-title {
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -la-fg;
+}
+
+/* ---- Tab ---- */
+
+.la-tabs {
+    -fx-tab-min-height: 28px;
+}
+
+.la-tabs > .tab-header-area {
+    -fx-padding: 0;
+}
+
+.la-tabs > .tab-header-area > .tab-header-background {
+    -fx-background-color: transparent;
+}
+
+.la-tabs > .tab-header-area > .headers-region > .tab {
+    -fx-background-color: transparent;
+    -fx-background-radius: 8px 8px 0 0;
+    -fx-padding: 4px 14px;
+}
+
+.la-tabs > .tab-header-area > .headers-region > .tab:selected {
+    -fx-background-color: -la-surface-raised;
+    -fx-border-color: -la-border-soft -la-border-soft transparent -la-border-soft;
+    -fx-border-width: 1px 1px 0 1px;
+    -fx-border-radius: 8px 8px 0 0;
+}
+
+.la-tabs > .tab-header-area > .headers-region > .tab .tab-label {
+    -fx-text-fill: -la-fg-muted;
+    -fx-font-size: 13px;
+}
+
+.la-tabs > .tab-header-area > .headers-region > .tab:selected .tab-label {
+    -fx-text-fill: -la-accent-strong;
+    -fx-font-weight: bold;
+}
+
+.la-tabs > .tab-content-area {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+/* ---- Nhật ký và chi tiết kỹ thuật (thu gọn được) ---- */
+
+.la-log-pane > .title {
+    -fx-background-color: -la-surface-sunken;
+    -fx-background-radius: 8px 8px 0 0;
+    -fx-font-size: 12px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -la-fg-muted;
+}
+
+.la-log-pane > .content {
+    -fx-background-color: -la-surface-raised;
+    -fx-border-color: -la-border-soft;
+    -fx-border-width: 1px;
+    -fx-padding: 4px;
+}
+
+/* Nút bật/tắt chi tiết kỹ thuật: phụ, không tranh vai với nút nghiệp vụ. */
+.la-technical-toggle {
+    -fx-background-color: transparent;
+    -fx-border-color: -la-border;
+    -fx-border-radius: 4px;
+    -fx-background-radius: 4px;
+    -fx-text-fill: -la-fg-muted;
+    -fx-font-size: 12px;
+    -fx-padding: 4px 10px;
+}
+
+.la-technical-toggle:selected {
+    -fx-background-color: -la-accent-soft;
+    -fx-text-fill: -la-accent-strong;
+}
+
+.la-action {
+    -fx-graphic-text-gap: 6px;
+}
+
+/* Một nút chính mỗi luồng: nền accent, chữ trắng. Các nút còn lại giữ kiểu phụ. */
+.la-primary {
+    -fx-background-color: -la-accent;
+    -fx-text-fill: white;
+    -fx-background-radius: 4px;
+    -fx-font-weight: bold;
+}
+
+.la-primary:hover {
+    -fx-background-color: -la-accent-strong;
+}
+
+.button:disabled,
+.la-primary:disabled {
+    -fx-opacity: 1;
+    -fx-background-color: -la-surface-sunken;
+    -fx-text-fill: -la-fg-subtle;
+}
+
+/* Một dòng cảnh báo nghiệp vụ: icon ngữ nghĩa + nền nhẹ, không phải banner lớn. */
+.la-note {
+    -fx-background-color: -la-pending-soft;
+    -fx-background-radius: 4px;
+    -fx-padding: 4px 8px;
+    -fx-font-size: 12px;
+    -fx-text-fill: -la-pending;
+}
+
+/* Kết quả biên nhận: giá trị chính là con số lớn. */
+.la-receipt-value {
+    -fx-font-family: 'Consolas', monospace;
+    -fx-font-size: 24px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -la-fg;
+}
+
+/* Vùng panel cuộn: không viền, không nền riêng để không cắt tầm nhìn. */
+.la-scroll {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.la-scroll > .viewport {
+    -fx-background-color: transparent;
+}
+
+/* Chia nghiệp vụ và nhật ký: chỉ một vạch mảnh, không nền riêng. */
+.la-split {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.la-split > .split-pane-divider {
+    -fx-background-color: -la-border-soft;
+    -fx-padding: 0 1px 0 1px;
+}
