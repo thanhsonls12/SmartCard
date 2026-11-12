@@ -81,6 +81,8 @@ final class CardGateway {
 
     private final Reconciliation reconciliation = new Reconciliation();
     private Receipt lastReceipt;
+    private boolean lastReceiptSignatureOk;
+    private boolean signatureChecked;
     private java.security.PublicKey cardPublicKey;
     private Profile lastProfile;
     private ProfileCryptoMeta lastProfileMeta;
@@ -199,13 +201,23 @@ final class CardGateway {
         return true;
     }
     static String lifecycleText(int lifecycle) {
-        if (lifecycle == 0x00) {
+        if (lifecycle == LIFECYCLE_UNPERSONALIZED) {
             return "00 UNPERSONALIZED";
         }
-        if (lifecycle == 0x01) {
+        if (lifecycle == LIFECYCLE_ISSUED) {
             return "01 ISSUED";
         }
         return String.format("%02X KHÔNG RÕ", lifecycle);
+    }
+
+    static String lifecycleCaption(int lifecycle) {
+        if (lifecycle == LIFECYCLE_UNPERSONALIZED) {
+            return "Chưa phát hành";
+        }
+        if (lifecycle == LIFECYCLE_ISSUED) {
+            return "Đã phát hành";
+        }
+        return "Không rõ";
     }
 
     Result readLastReceipt(ReceiptExpectation expectation) throws CardException {
@@ -713,9 +725,13 @@ final class CardGateway {
     private Result verifyReceiptSignature(Receipt receipt) throws CardException {
         Result loaded = ensureCardPublicKeyLoaded();
         if (!loaded.ok()) {
+            lastReceiptSignatureOk = false;
+            signatureChecked = false;
             return Result.fail(loaded.text());
         }
         ReceiptVerifier.Result verified = ReceiptVerifier.verifyReceipt(cardPublicKey, receipt);
+        lastReceiptSignatureOk = verified.ok();
+        signatureChecked = true;
         if (verified.ok()) {
             return Result.ok("ECDSA P-256/SHA-256 hợp lệ");
         }
@@ -1084,6 +1100,15 @@ final class CardGateway {
 
     Receipt lastReceipt() {
         return lastReceipt;
+    }
+
+    /** Kết quả xác minh chữ ký của biên nhận đọc gần nhất; chỉ có nghĩa khi đã kiểm tra. */
+    boolean lastReceiptSignatureOk() {
+        return lastReceiptSignatureOk;
+    }
+
+    boolean lastReceiptSignatureChecked() {
+        return signatureChecked;
     }
 
     int lastResponseSw() {
