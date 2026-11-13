@@ -18,7 +18,7 @@ final class DemoScenario {
     private final Consumer<String> log;
 
     private Timeline timeline;
-    private java.nio.file.Path photoSampleFile;
+    private final DemoPhotoScenario photoScenario;
     private volatile boolean stopped;
     private Thread pinReader;
     private Runnable[] queuedSteps;
@@ -42,6 +42,7 @@ final class DemoScenario {
         this.profilePanel = profilePanel;
         this.photoPanel = photoPanel;
         this.log = log;
+        this.photoScenario = new DemoPhotoScenario(app, photoPanel, log);
     }
 
     void start() {
@@ -77,6 +78,10 @@ final class DemoScenario {
             startPersonalizeDemo();
             return;
         }
+        if (Boolean.getBoolean("labaccess.demo.profile")) {
+            startProfileDemo();
+            return;
+        }
         app.showTab(App.TAB_OPERATIONS);
         run(new Runnable[] {
                 () -> fire(app.pressConnect(), "Connect"),
@@ -106,15 +111,7 @@ final class DemoScenario {
             timeline = null;
             log.accept("DEMO: đã dừng Timeline");
         }
-        if (photoSampleFile != null && System.getProperty("labaccess.demo.photo.file", "").isEmpty()) {
-            try {
-                java.nio.file.Files.deleteIfExists(photoSampleFile);
-                log.accept("DEMO: đã xoá ảnh mẫu tạm " + photoSampleFile.getFileName());
-            } catch (java.io.IOException exception) {
-                log.accept("DEMO: không xoá được ảnh mẫu tạm: " + exception);
-            }
-            photoSampleFile = null;
-        }
+        photoScenario.disposeSample();
         wipe();
     }
 
@@ -857,6 +854,75 @@ final class DemoScenario {
         run(steps.toArray(new Runnable[0]), 8000, 5000);
     }
 
+    private void startProfileDemo() {
+        log.accept("DEMO REFACTOR: PERSONALIZE, đọc hồ sơ + metadata có VERIFY, đọc lại bằng nút thật với"
+                + " PIN sai hợp định dạng (kỳ vọng 63Cx, panel xoá kết quả cũ), rồi GRANT để kiểm đường journal");
+        app.showTab(App.TAB_CARD);
+        readDemoPins(this::buildProfileDemo);
+    }
+
+    private void buildProfileDemo(char[] adminPin, char[] studentPin) {
+        demoAdminPin = adminPin;
+        demoStudentPin = studentPin;
+        char[] wrongStudentPin = shiftDigits(studentPin, 5);
+        String cardId = System.getProperty("labaccess.demo.cardId", "A1B2C3D41122EF21");
+        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024-021");
+        String displayName = System.getProperty("labaccess.demo.displayName", "Nguyen Van Refactor");
+        java.util.List<Runnable> steps = new java.util.ArrayList<>();
+        steps.add(() -> fire(app.pressConnect(), "Connect"));
+        steps.add(() -> fire(app.pressIdentify(), "SELECT + GET_STATUS"));
+        steps.add(() -> {
+            personalizePanel.fillInputs(cardId, studentId, displayName, adminPin, studentPin);
+            log.accept("DEMO REFACTOR: PERSONALIZE thẻ mới");
+            fire(personalizePanel.pressPersonalize(), "PERSONALIZE");
+        });
+        steps.add(() -> {
+            app.showTab(App.TAB_ENROLL);
+            enrollmentPanel.fillInputs(studentId, studentPin);
+            log.accept("DEMO REFACTOR: đăng ký thẻ trên Backend để GRANT không bị chặn");
+            fire(enrollmentPanel.pressEnroll(), "ENROLLMENT");
+        });
+        steps.add(() -> app.showTab(App.TAB_RECORDS));
+        steps.add(() -> readProfile(studentPin,
+                "GET_PROFILE — VERIFY ngay trước, kỳ vọng 9000 + UTF-8 + hex"));
+        steps.add(() -> capture("01-ho-so-9000"));
+        steps.add(() -> readMeta(studentPin,
+                "GET_PROFILE_CRYPTO_META — VERIFY ngay trước, kỳ vọng 9000 + ciphertextLen"));
+        steps.add(() -> capture("02-metadata-9000"));
+        steps.add(() -> readProfile(wrongStudentPin,
+                "GET_PROFILE với PIN sai nhưng hợp định dạng — kỳ vọng 63Cx, panel xoá kết quả cũ"));
+        steps.add(() -> capture("03-pin-sai-63cx"));
+        steps.add(() -> {
+            app.showTab(App.TAB_OPERATIONS);
+            app.fillTransactionInputs(studentPin, null, 5);
+            log.accept("DEMO REFACTOR: đọc mốc state thẻ trước GRANT");
+            fire(app.pressReadReceipt(), "VERIFY + GET_LAST_RECEIPT + GET_STATUS state");
+        });
+        steps.add(() -> {
+            app.fillTransactionInputs(studentPin, adminPin, 5);
+            log.accept("DEMO REFACTOR: GRANT +5 — journal PENDING trước APDU, RESOLVED sau receipt");
+            fire(app.pressGrant(), "GRANT_QUOTA +5");
+        });
+        steps.add(() -> app.logTransactionState("sau GRANT"));
+        steps.add(() -> capture("04-grant-journal"));
+        steps.add(() -> fire(app.pressDisconnect(), "Disconnect"));
+        run(steps.toArray(new Runnable[0]), 2500, 4500);
+    }
+
+    private void capture(String name) {
+        try {
+            app.captureScene(java.nio.file.Path.of("..", "artifacts", "desktop-ui",
+                    "refactor-desktop-" + name + "-" + runStamp() + ".png"));
+        } catch (java.io.IOException exception) {
+            log.accept("[FAIL] DEMO REFACTOR ảnh: " + exception);
+        }
+    }
+
+    private static String runStamp() {
+        return java.time.LocalDateTime.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"));
+    }
+
     private void startPersonalizeDemo() {
         log.accept("DEMO: PERSONALIZE qua handler GUI — PIN đọc từ stdin, không qua -D và không vào log");
         app.showTab(App.TAB_CARD);
@@ -927,7 +993,7 @@ final class DemoScenario {
         }
         steps.add(() -> fire(app.pressDisconnect(), "Disconnect"));
         if (Boolean.getBoolean("labaccess.demo.photo")) {
-            steps.add(this::photoAfterDisconnect);
+            steps.add(() -> photoScenario.afterDisconnect());
         }
         run(steps.toArray(new Runnable[0]), 1200, 4500);
     }
@@ -1065,122 +1131,7 @@ final class DemoScenario {
     }
 
     private java.util.List<Runnable> photoSteps(char[] adminPin, char[] studentPin) {
-        java.nio.file.Path sample = photoSample();
-        java.util.List<Runnable> steps = new java.util.ArrayList<>();
-        if (sample == null) {
-            return steps;
-        }
-        char[] wrongStudentPin = shiftDigits(studentPin, 5);
-        steps.add(() -> {
-            log.accept("DEMO: chọn ảnh mẫu bất đối xứng " + sample.getFileName()
-                    + " — kỳ vọng preview ảnh nháp hiện 64×64");
-            if (!photoPanel.loadDraft(sample)) {
-                log.accept("DEMO: không nạp được ảnh mẫu");
-            }
-        });
-        steps.add(() -> {
-            photoPanel.fillAdminPin(adminPin);
-            log.accept("DEMO: upload ảnh nháp — kỳ vọng PHOTO_BEGIN + 32 chunk + FINISH 9000");
-            fire(photoPanel.pressUpload(), "PHOTO upload");
-        });
-        steps.add(() -> {
-            photoPanel.fillStudentPin("123".toCharArray());
-            log.accept("DEMO: đọc với student PIN sai định dạng — kỳ vọng KHÔNG gửi APDU,"
-                    + " preview thẻ và nhãn trạng thái phải về (trống)");
-            fire(photoPanel.pressRead(), "PHOTO read (PIN sai định dạng)");
-            photoState("MARK A", "sau read PIN sai định dạng");
-        });
-        steps.add(() -> {
-            photoPanel.fillStudentPin(studentPin);
-            log.accept("DEMO: đọc ảnh từ thẻ — kỳ vọng VERIFY + 32 chunk 9000");
-            fire(photoPanel.pressRead(), "PHOTO read");
-        });
-        steps.add(this::photoVerify);
-        steps.add(() -> {
-            photoPanel.fillStudentPin(wrongStudentPin);
-            java.util.Arrays.fill(wrongStudentPin, '\0');
-            log.accept("DEMO: đọc với student PIN sai — kỳ vọng 63Cx, preview thẻ phải bị xoá,"
-                    + " nhãn trạng thái không được giữ fingerprint cũ");
-            fire(photoPanel.pressRead(), "PHOTO read (PIN sai)");
-        });
-        steps.add(() -> {
-            photoState("MARK B", "sau read PIN sai");
-            photoPanel.fillStudentPin(studentPin);
-            log.accept("DEMO: đọc lại bằng PIN đúng — preview thẻ phải hiện lại");
-            fire(photoPanel.pressRead(), "PHOTO read");
-        });
-        steps.add(() -> {
-            log.accept("DEMO: SELECT lại khi panel đang hiện ảnh thẻ — preview thẻ phải bị xoá");
-            fire(app.pressIdentify(), "SELECT + GET_STATUS");
-        });
-        steps.add(() -> photoState("MARK C", "sau SELECT lại"));
-        return steps;
-    }
-
-    private void photoState(String mark, String moment) {
-        log.accept("DEMO " + mark + ": trạng thái ảnh " + moment + " — preview thẻ="
-                + (photoPanel.hasCardImage() ? "CÓ ẢNH" : "trống")
-                + ", ảnh nháp=" + (photoPanel.hasDraft() ? "còn" : "mất")
-                + " | nhãn: " + photoPanel.statusText());
-    }
-
-    private void photoAfterDisconnect() {
-        log.accept("DEMO MARK D: sau disconnect — preview thẻ="
-                + (photoPanel.hasCardImage() ? "CÓ ẢNH (sai)" : "trống")
-                + ", ảnh nháp=" + (photoPanel.hasDraft() ? "còn" : "mất")
-                + " | nhãn: " + photoPanel.statusText());
-    }
-
-    private void photoVerify() {
-        byte[] draft = photoPanel.draftBytes();
-        byte[] card = photoPanel.cardBytes();
-        if (draft == null || card == null) {
-            log.accept("DEMO: thiếu ảnh để so — draft=" + (draft != null) + " card=" + (card != null));
-            return;
-        }
-        String mismatch = PhotoImage.firstMismatch(draft, card);
-        log.accept("DEMO: so ảnh nháp với ảnh đọc từ thẻ — "
-                + (mismatch == null ? "khớp từng byte (4096 byte)" : mismatch));
-        log.accept("DEMO: hướng hàng/cột — góc trên-trái=" + grey(draft, 8, 8)
-                + " trên-phải=" + grey(draft, 55, 8)
-                + " dưới-trái=" + grey(draft, 8, 55)
-                + " dưới-phải=" + grey(draft, 55, 55));
-        log.accept("DEMO: kỳ vọng trái tối hơn phải ở hàng trên: "
-                + (grey(draft, 8, 8) < grey(draft, 55, 8))
-                + " | dưới sáng hơn trên ở cột phải: "
-                + (grey(draft, 55, 55) > grey(draft, 55, 8)));
-    }
-
-    private static int grey(byte[] photo, int column, int row) {
-        return photo[row * PhotoImage.WIDTH + column] & 0xFF;
-    }
-
-    private java.nio.file.Path photoSample() {
-        if (photoSampleFile != null) {
-            return photoSampleFile;
-        }
-        String given = System.getProperty("labaccess.demo.photo.file", "");
-        if (!given.isEmpty()) {
-            photoSampleFile = java.nio.file.Path.of(given);
-            return photoSampleFile;
-        }
-        java.awt.image.BufferedImage sample = new java.awt.image.BufferedImage(
-                256, 128, java.awt.image.BufferedImage.TYPE_INT_RGB);
-        for (int y = 0; y < 128; y++) {
-            for (int x = 0; x < 256; x++) {
-                int value = x < 128 ? (y < 64 ? 0 : 200) : (y < 64 ? 128 : 255);
-                sample.setRGB(x, y, (value << 16) | (value << 8) | value);
-            }
-        }
-        try {
-            photoSampleFile = java.nio.file.Files.createTempFile("labaccess-demo-photo", ".png");
-            javax.imageio.ImageIO.write(sample, "png", photoSampleFile.toFile());
-            log.accept("DEMO: tạo ảnh mẫu 256×128 bốn góc khác nhau tại " + photoSampleFile);
-            return photoSampleFile;
-        } catch (java.io.IOException exception) {
-            log.accept("DEMO: không tạo được ảnh mẫu: " + exception);
-            return null;
-        }
+        return photoScenario.steps(adminPin, studentPin, shiftDigits(studentPin, 5));
     }
 
     private static char[] shiftDigits(char[] pin, int delta) {
