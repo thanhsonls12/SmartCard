@@ -19,6 +19,7 @@
              bang JavaFX 27, co the goi API chua co trong 25. -->
         <atlantafx.version>2.1.0</atlantafx.version>
         <ikonli.version>12.4.0</ikonli.version>
+        <jackson.version>2.17.2</jackson.version>
         <!-- Chi dung cho kiem thu giao dien: bat che do tu bam nut de chup anh.
              Mac dinh false; chay that thi bo qua. -->
         <labaccess.demo>false</labaccess.demo>
@@ -26,8 +27,18 @@
         <labaccess.port>9025</labaccess.port>
         <!-- Chon kich ban demo nao chay khi bat labaccess.demo. -->
         <labaccess.demo.transactions>false</labaccess.demo.transactions>
+        <labaccess.demo.history>false</labaccess.demo.history>
+        <labaccess.demo.history.ready>false</labaccess.demo.history.ready>
+        <labaccess.demo.history.view>false</labaccess.demo.history.view>
         <labaccess.demo.personalize>false</labaccess.demo.personalize>
         <labaccess.demo.photo>false</labaccess.demo.photo>
+        <labaccess.demo.enroll>false</labaccess.demo.enroll>
+        <labaccess.demo.reconcile>false</labaccess.demo.reconcile>
+        <labaccess.demo.reconnect>false</labaccess.demo.reconnect>
+        <labaccess.demo.restore>false</labaccess.demo.restore>
+        <labaccess.demo.cardId>A1B2C3D41122EF08</labaccess.demo.cardId>
+        <labaccess.demo.studentId>SV2024-008</labaccess.demo.studentId>
+        <labaccess.backend>http://127.0.0.1:3100</labaccess.backend>
     </properties>
 
     <dependencies>
@@ -58,6 +69,14 @@
             <version>${ikonli.version}</version>
         </dependency>
 
+        <!-- Jackson: parse phan hoi Backend theo JSON that, khong doan bang regex.
+             Chi dung databind; core va annotations di kem. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
         <!-- JAR Oracle da cai vao local repo bang install:install-file.
              KHONG phai artifact tren Maven Central. -->
         <dependency>
@@ -80,8 +99,20 @@
                     <options>
                         <option>-Dlabaccess.demo=${labaccess.demo}</option>
                         <option>-Dlabaccess.demo.transactions=${labaccess.demo.transactions}</option>
+                        <option>-Dlabaccess.demo.history=${labaccess.demo.history}</option>
+                        <option>-Dlabaccess.demo.history.ready=${labaccess.demo.history.ready}</option>
+                        <option>-Dlabaccess.demo.history.view=${labaccess.demo.history.view}</option>
                         <option>-Dlabaccess.demo.personalize=${labaccess.demo.personalize}</option>
                         <option>-Dlabaccess.demo.photo=${labaccess.demo.photo}</option>
+                        <option>-Dlabaccess.demo.enroll=${labaccess.demo.enroll}</option>
+                        <option>-Dlabaccess.demo.reconcile=${labaccess.demo.reconcile}</option>
+                        <option>-Dlabaccess.demo.reconnect=${labaccess.demo.reconnect}</option>
+                        <option>-Dlabaccess.demo.restore=${labaccess.demo.restore}</option>
+                        <option>-Dlabaccess.demo.cardId=${labaccess.demo.cardId}</option>
+                        <option>-Dlabaccess.demo.studentId=${labaccess.demo.studentId}</option>
+                        <option>-Dlabaccess.backend=${labaccess.backend}</option>
+                        <option>-Dstdout.encoding=UTF-8</option>
+                        <option>-Dstderr.encoding=UTF-8</option>
                         <option>-Dlabaccess.port=${labaccess.port}</option>
                     </options>
                 </configuration>
