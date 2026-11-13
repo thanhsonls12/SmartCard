@@ -28,6 +28,10 @@ artifacts/tx-probe/txprobe.exp
 # Snapshot trung gian, không phải input của các script verify hiện tại.
 artifacts/tx-probe/snapshot-*.hex
 
+# Ảnh minh chứng UI: giữ trên máy, chưa đưa vào git (quyết định 12/11/2026).
+# Khi mốc sản phẩm hoàn thành mới chọn ảnh đại diện để commit (Q-61 "minh chứng được chọn").
+artifacts/desktop-ui/
+
 # --- Node / NestJS ---
 node_modules/
 coverage/
