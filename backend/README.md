@@ -160,4 +160,4 @@ Remove-Item Env:\DATABASE_URL
 
 ## Phạm vi
 
-Backend chỉ phục vụ demo local có kiểm soát, không mở API ra Internet và không thêm JWT/RBAC, CRUD phòng hay dashboard (BE-11, BE-12). Đã có enrollment (BE-04–BE-06); chưa có endpoint ghi receipt (BE-07/BE-08) và chưa có `GET /cards/:cardId/transactions` (BE-09).
+Backend chỉ phục vụ demo local có kiểm soát, không mở API ra Internet và không thêm JWT/RBAC, CRUD phòng hay dashboard (BE-11, BE-12). Đã có enrollment (BE-04–BE-06), ghi receipt (BE-07/BE-08) và `GET /cards/:cardId/transactions` (BE-09).
