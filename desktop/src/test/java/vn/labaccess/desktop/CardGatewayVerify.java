@@ -316,10 +316,13 @@ public final class CardGatewayVerify {
         Receipt notExecuted = receipt(1, 5, 1, 5, CARD_ID, NO_VISIT_ID);
         Reconciliation beforeCommit = new Reconciliation();
         beforeCommit.markUnknown("timeout truoc commit");
+        boolean e03Verdict = beforeCommit.resolve(notExecuted, expectation)
+                == Reconciliation.Verdict.NOT_EXECUTED;
+        // Hợp đồng mới: resolve() chỉ phân loại, không đổi state; caller chỉ chuyển KNOWN
+        // sau khi đủ bằng chứng và journal đã đóng.
+        beforeCommit.markKnown("receipt cũ xác nhận chưa thực thi");
         record("E03", "receipt cu (counter truoc do) -> NOT_EXECUTED, mo khoa KNOWN",
-                beforeCommit.resolve(notExecuted, expectation)
-                        == Reconciliation.Verdict.NOT_EXECUTED
-                        && beforeCommit.state() == Reconciliation.State.KNOWN,
+                e03Verdict && beforeCommit.state() == Reconciliation.State.KNOWN,
                 true);
         System.out.println("    quyet dinh: receipt counter=1, expected counter=2"
                 + " -> NOT_EXECUTED | state=" + beforeCommit.state());
@@ -327,10 +330,11 @@ public final class CardGatewayVerify {
         Receipt executed = receipt(1, 8888, 2, 8893, CARD_ID, NO_VISIT_ID);
         Reconciliation afterCommit = new Reconciliation();
         afterCommit.markUnknown("timeout sau commit");
+        boolean e04Verdict = afterCommit.resolve(executed, expectation)
+                == Reconciliation.Verdict.EXECUTED;
+        afterCommit.markKnown("receipt xác nhận đã thực thi");
         record("E04", "receipt moi (dung counter) -> EXECUTED, mo khoa KNOWN",
-                afterCommit.resolve(executed, expectation)
-                        == Reconciliation.Verdict.EXECUTED
-                        && afterCommit.state() == Reconciliation.State.KNOWN,
+                e04Verdict && afterCommit.state() == Reconciliation.State.KNOWN,
                 true);
         System.out.println("    quyet dinh: receipt counter=2, expected counter=2"
                 + " -> EXECUTED | state=" + afterCommit.state());
@@ -417,6 +421,33 @@ public final class CardGatewayVerify {
             }
             if (ins == 0x60) {
                 return responseWithData(receiptResponse, Sw.OK);
+            }
+            return new ResponseAPDU(new byte[] {0, 5, 0, 0, 0, 1, (byte) 0x90, 0});
+        });
+    }
+
+    /** Như signedCard nhưng GET_STATUS có state xác thực: dùng cho nhánh NOT_EXECUTED của đối soát.
+     * Không đi qua issuedChannel vì helper đó tự trả GET_STATUS thường, nuốt mất state xác thực. */
+    private static CardChannel signedCardWithState(TestKey key, byte[] receiptResponse,
+            long counter, int balance, boolean activeVisit) {
+        return scriptedChannel(command -> {
+            int ins = command.getINS() & 0xFF;
+            if (ins == 0xA4) {
+                return response(Sw.OK);
+            }
+            if (ins == 0x61) {
+                return responseWithData(key.encoded(), Sw.OK);
+            }
+            if (ins == 0x60) {
+                return responseWithData(receiptResponse, Sw.OK);
+            }
+            if (ins == 0x10) {
+                return authenticatedStatusApdu(balance, counter, activeVisit,
+                        "00000000000000000000000000000000");
+            }
+            if (ins == 0x11) {
+                // VERIFY student PIN: đúng 9000 cho fixture.
+                return response(Sw.OK);
             }
             return new ResponseAPDU(new byte[] {0, 5, 0, 0, 0, 1, (byte) 0x90, 0});
         });
@@ -522,24 +553,32 @@ public final class CardGatewayVerify {
             PendingJournal.Entry oldEntry = new PendingJournal.Entry(CARD_ID, 2,
                     Receipt.OPERATION_GRANT, 5, 10, null, System.currentTimeMillis());
             oldJournal.writePending(oldEntry);
-            CardGateway oldGateway = readyGateway(
-                    signedCard(oldKey, signedReceipt(oldKey, 1, 5, 1, 5, CARD_ID, NO_VISIT_ID)));
+            // NOT_EXECUTED đòi state xác thực (VERIFY + GET_STATUS) khớp mốc trước giao dịch
+            // và ledger Backend cùng mốc: counter=1, balance=5, không ca mở.
+            CardGateway oldGateway = readyGateway(signedCardWithState(oldKey,
+                    signedReceipt(oldKey, 1, 5, 1, 5, CARD_ID, NO_VISIT_ID), 1, 5, false));
+            // NOT_EXECUTED đòi ledger cùng mốc state thẻ: counter=1, balance=5, không ca mở.
+            oldGateway.setReceiptSink(fixtureSink(1, 5));
             char[] pin = {'1', '2', '3', '4', '5', '6'};
             CardGateway.Result oldResult = oldGateway.reconcilePending(oldJournal, pin);
             record("R04", "receipt cu verify PASS nhung counter lui -> NOT_EXECUTED, xoa journal",
                     oldResult.ok() && !oldJournal.load().present(), true);
+            System.out.println("    R04 text: " + oldResult.text());
 
             TestKey newKey = newTestKey();
             PendingJournal newJournal = new PendingJournal(dir.resolve("new-receipt.txt"));
             PendingJournal.Entry newEntry = new PendingJournal.Entry(CARD_ID, 2,
                     Receipt.OPERATION_GRANT, 5, 10, null, System.currentTimeMillis());
             newJournal.writePending(newEntry);
-            CardGateway newGateway = readyGateway(
-                    signedCard(newKey, signedReceipt(newKey, 1, 5, 2, 10, CARD_ID, NO_VISIT_ID)));
+            CardGateway newGateway = readyGateway(signedCard(newKey,
+                    signedReceipt(newKey, 1, 5, 2, 10, CARD_ID, NO_VISIT_ID)));
+            // EXECUTED phải đối chiếu ledger sau khi lưu: mốc fixture phải khớp receipt.
+            newGateway.setReceiptSink(fixtureSink(2, 10));
             char[] newPin = {'1', '2', '3', '4', '5', '6'};
             CardGateway.Result newResult = newGateway.reconcilePending(newJournal, newPin);
             record("R05", "receipt moi verify PASS + counter dung -> EXECUTED, xoa journal",
                     newResult.ok() && !newJournal.load().present(), true);
+            System.out.println("    R05 text: " + newResult.text());
 
             TestKey cardKey = newTestKey();
             TestKey foreignKey = newTestKey();
@@ -927,6 +966,81 @@ public final class CardGatewayVerify {
                     }, null);
             record("T07", "UNKNOWN/pending -> lan goi sau bi chan, khong retry",
                     !noRetry.ok() && lostCalls.get() == 1, true);
+
+            // UI-10: cổng enrollment vô điều kiện — thiếu sink, chưa kiểm đăng ký, Backend trả lỗi
+            // hay thẻ chưa enroll đều phải chặn trước khi ghi journal và trước khi gửi APDU.
+            PendingJournal noSinkJournal = new PendingJournal(dir.resolve("no-sink-journal.txt"));
+            CardGateway noSinkGateway = readyGateway(issuedChannel(command -> response(Sw.OK)));
+            noSinkGateway.setReceiptSink(null);
+            java.util.concurrent.atomic.AtomicInteger noSinkCalls =
+                    new java.util.concurrent.atomic.AtomicInteger();
+            CardGateway.Result noSink = noSinkGateway.runStateTransaction(noSinkJournal,
+                    new CardGateway.TransactionPlan(
+                            new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
+                    () -> {
+                        noSinkCalls.incrementAndGet();
+                        return response(Sw.OK);
+                    }, null);
+            record("T07a", "thieu sink -> chan truoc journal va APDU",
+                    !noSink.ok() && noSinkCalls.get() == 0 && !noSinkJournal.load().present()
+                            && noSinkGateway.reconciliation().state() == Reconciliation.State.KNOWN,
+                    true);
+
+            PendingJournal unknownEnrollmentJournal = new PendingJournal(dir.resolve("unknown-enroll-journal.txt"));
+            CardGateway unknownEnrollmentGateway = readyGateway(issuedChannel(command -> response(Sw.OK)));
+            unknownEnrollmentGateway.clearCardEnrollment("fixture chua kiem");
+            java.util.concurrent.atomic.AtomicInteger unknownEnrollmentCalls =
+                    new java.util.concurrent.atomic.AtomicInteger();
+            CardGateway.Result unknownEnrollment = unknownEnrollmentGateway.runStateTransaction(
+                    unknownEnrollmentJournal,
+                    new CardGateway.TransactionPlan(
+                            new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
+                    () -> {
+                        unknownEnrollmentCalls.incrementAndGet();
+                        return response(Sw.OK);
+                    }, null);
+            record("T07b", "chua kiem enrollment -> chan truoc journal va APDU",
+                    !unknownEnrollment.ok() && unknownEnrollmentCalls.get() == 0
+                            && !unknownEnrollmentJournal.load().present(),
+                    true);
+
+            PendingJournal failedEnrollmentJournal = new PendingJournal(dir.resolve("failed-enroll-journal.txt"));
+            CardGateway failedEnrollmentGateway = readyGateway(issuedChannel(command -> response(Sw.OK)));
+            failedEnrollmentGateway.applyCardEnrollment(
+                    new CardGateway.EnrollmentCheck(false, false, "Backend khong tra loi"));
+            java.util.concurrent.atomic.AtomicInteger failedEnrollmentCalls =
+                    new java.util.concurrent.atomic.AtomicInteger();
+            CardGateway.Result failedEnrollment = failedEnrollmentGateway.runStateTransaction(
+                    failedEnrollmentJournal,
+                    new CardGateway.TransactionPlan(
+                            new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
+                    () -> {
+                        failedEnrollmentCalls.incrementAndGet();
+                        return response(Sw.OK);
+                    }, null);
+            record("T07c", "Backend loi khi kiem enrollment -> chan truoc journal va APDU",
+                    !failedEnrollment.ok() && failedEnrollmentCalls.get() == 0
+                            && !failedEnrollmentJournal.load().present(),
+                    true);
+
+            PendingJournal notEnrolledJournal = new PendingJournal(dir.resolve("not-enrolled-journal.txt"));
+            CardGateway notEnrolledGateway = readyGateway(issuedChannel(command -> response(Sw.OK)));
+            notEnrolledGateway.applyCardEnrollment(
+                    new CardGateway.EnrollmentCheck(true, false, "thẻ chưa đăng ký trên Backend"));
+            java.util.concurrent.atomic.AtomicInteger notEnrolledCalls =
+                    new java.util.concurrent.atomic.AtomicInteger();
+            CardGateway.Result notEnrolled = notEnrolledGateway.runStateTransaction(
+                    notEnrolledJournal,
+                    new CardGateway.TransactionPlan(
+                            new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
+                    () -> {
+                        notEnrolledCalls.incrementAndGet();
+                        return response(Sw.OK);
+                    }, null);
+            record("T07d", "the chua enroll -> chan truoc journal va APDU",
+                    !notEnrolled.ok() && notEnrolledCalls.get() == 0
+                            && !notEnrolledJournal.load().present(),
+                    true);
 
             PendingJournal successJournal = new PendingJournal(dir.resolve("success-journal.txt"));
             java.util.concurrent.atomic.AtomicInteger successCalls =
@@ -3041,6 +3155,22 @@ public final class CardGatewayVerify {
         }
     }
 
+    /** Sink giả dùng chung: ledger trả mốc chỉ định để khớp kỳ vọng của từng nhóm ca. */
+    private static CardGateway.ReceiptSink fixtureSink(long lastCounter, int lastBalance) {
+        return new CardGateway.ReceiptSink() {
+            @Override
+            public CardGateway.ReceiptSave save(Receipt receipt) {
+                return new CardGateway.ReceiptSave(true, "fixture ledger=OK");
+            }
+
+            @Override
+            public CardGateway.LedgerCheck ledger(String cardIdHex) {
+                return new CardGateway.LedgerCheck(true, "fixture ledger đọc được",
+                        lastCounter, lastBalance, null);
+            }
+        };
+    }
+
     private static CardGateway readyGateway(CardChannel channel) {
         CardGateway gateway = new CardGateway(channel);
         try {
@@ -3048,6 +3178,10 @@ public final class CardGatewayVerify {
             if (!result.ok()) {
                 throw new IllegalStateException("fixture identify loi: " + result.text());
             }
+            // Cổng đăng ký vô điều kiện: mọi gateway fixture phải cấp sink giả và trạng thái
+            // enrollment tường minh, nếu không giao dịch bị chặn trước khi ghi journal.
+            gateway.setReceiptSink(fixtureSink(0, 0));
+            gateway.applyCardEnrollment(new CardGateway.EnrollmentCheck(true, true, "fixture đã đăng ký"));
             return gateway;
         } catch (CardException ex) {
             throw new IllegalStateException("fixture identify loi", ex);
