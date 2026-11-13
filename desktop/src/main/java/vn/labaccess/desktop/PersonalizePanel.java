@@ -2,6 +2,7 @@ package vn.labaccess.desktop;
 
 import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import javafx.geometry.Insets;
@@ -16,10 +17,14 @@ import javafx.scene.layout.VBox;
 
 final class PersonalizePanel {
 
+    /** Giá trị panel này truyền sang panel khác sau khi phát hành; không panel nào đọc control của panel kia. */
+    record IssuedCard(String cardId, String studentId) {
+    }
+
     private final CardGateway gateway;
     private final CardOpRunner runner;
     private final Consumer<String> log;
-    private final Consumer<Boolean> afterPersonalize;
+    private final BiConsumer<Boolean, IssuedCard> afterPersonalize;
 
     private final TextField fieldCardId = new TextField();
     private final TextField fieldStudentId = new TextField();
@@ -29,10 +34,11 @@ final class PersonalizePanel {
     private final Button btnPersonalize = new Button("Phát hành thẻ");
     private final Button btnPublicKey = new Button("Đọc khóa công khai");
     private final Label valuePublicKey = UiLabels.value();
+    private final Label whyNote = new Label();
     private final VBox node;
 
     PersonalizePanel(CardGateway gateway, CardOpRunner runner, Consumer<String> log,
-            Consumer<Boolean> afterPersonalize) {
+            BiConsumer<Boolean, IssuedCard> afterPersonalize) {
         this.gateway = gateway;
         this.runner = runner;
         this.log = log;
@@ -64,16 +70,27 @@ final class PersonalizePanel {
 
         VBox keyRow = UiRows.valueBlock("Khóa công khai", valuePublicKey);
 
-        node = UiSection.of("Phát hành thẻ", controls, keyRow);
+        whyNote.getStyleClass().add("la-note");
+        UiLabels.applyNoteTone(whyNote, UiLabels.Tone.NEUTRAL);
+        whyNote.setWrapText(true);
+        whyNote.setManaged(false);
+        whyNote.setVisible(false);
+
+        node = UiSection.of("Phát hành thẻ", controls, whyNote, keyRow);
     }
 
     VBox node() {
         return node;
     }
 
-    void updateAvailability(boolean personalizeEnabled, boolean publicKeyEnabled) {
+    void updateAvailability(boolean personalizeEnabled, boolean publicKeyEnabled,
+            String whyDisabled) {
         btnPersonalize.setDisable(!personalizeEnabled);
         btnPublicKey.setDisable(!publicKeyEnabled);
+        boolean show = whyDisabled != null && !whyDisabled.isBlank();
+        whyNote.setText(show ? whyDisabled : "");
+        whyNote.setVisible(show);
+        whyNote.setManaged(show);
     }
 
     void setIssuePrimary(boolean preferred) {
@@ -150,7 +167,9 @@ final class PersonalizePanel {
             }
         }, ok -> {
             fieldCardId.setText(cardId.strip().toUpperCase());
-            afterPersonalize.accept(ok);
+            afterPersonalize.accept(ok, ok
+                    ? new IssuedCard(cardId.strip().toUpperCase(), studentId)
+                    : null);
         });
     }
 

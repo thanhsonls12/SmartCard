@@ -48,6 +48,7 @@ final class CardGateway {
     private static final byte INS_END_VISIT = (byte) 0x52;
     private static final byte INS_GET_LAST_RECEIPT = (byte) 0x60;
     private static final byte INS_GET_CARD_PUBLIC_KEY = (byte) 0x61;
+    private static final byte INS_SIGN_REGISTRATION_CHALLENGE = (byte) 0x62;
     private static final byte INS_GET_PROFILE = (byte) 0x31;
     private static final byte INS_GET_PROFILE_CRYPTO_META = (byte) 0x40;
     private static final byte INS_PHOTO_BEGIN = (byte) 0x32;
@@ -55,6 +56,11 @@ final class CardGateway {
     private static final byte INS_PHOTO_READ_CHUNK = (byte) 0x34;
     private static final byte INS_PHOTO_FINISH = (byte) 0x35;
     private static final int PUBLIC_KEY_LE = 256;
+    private static final int SIGNATURE_LE = 256;
+    private static final int NONCE_LENGTH = 32;
+    private static final int PUBLIC_POINT_LENGTH = 65;
+    private static final int DER_SIGNATURE_MIN = 8;
+    private static final int DER_SIGNATURE_MAX = 72;
     private static final int PROFILE_LE = 256;
     private static final int RECEIPT_LE = 256;
     private static final int STATE_RESPONSE_LENGTH = 6;
@@ -80,10 +86,15 @@ final class CardGateway {
     private volatile Status status;
 
     private final Reconciliation reconciliation = new Reconciliation();
+    private EnrollmentCheck cardEnrollment;
+    private String enrollmentCardId;
+    private String enrollmentDetail = "chưa kiểm tra đăng ký thẻ trên Backend";
     private Receipt lastReceipt;
     private boolean lastReceiptSignatureOk;
     private boolean signatureChecked;
     private java.security.PublicKey cardPublicKey;
+    private byte[] cardPublicKeyBytes;
+    private byte[] enrollmentSignature;
     private Profile lastProfile;
     private ProfileCryptoMeta lastProfileMeta;
     private byte[] lastPhoto;
@@ -135,6 +146,7 @@ final class CardGateway {
         lastProfileMeta = null;
         lastPhoto = null;
         lastPinSw = -1;
+        clearCardEnrollment("vừa kết nối, chưa kiểm tra đăng ký thẻ");
         connectedFlag = true;
 
         ATR atr = card.getATR();
@@ -154,6 +166,7 @@ final class CardGateway {
         lastProfileMeta = null;
         lastPhoto = null;
         lastPinSw = -1;
+        clearCardEnrollment("vừa nhận diện lại thẻ, chưa kiểm tra đăng ký thẻ");
 
         ResponseAPDU selectResponse = channel.transmit(
                 new CommandAPDU(0x00, 0xA4, 0x04, 0x00, instanceAid, 256));
@@ -233,6 +246,7 @@ final class CardGateway {
         lastResponseSw = sw;
         if (sw != Sw.OK) {
             cardPublicKey = null;
+            cardPublicKeyBytes = null;
             return Result.fail(String.format(
                     "GET_CARD_PUBLIC_KEY INS=61 P1P2=0000 Le=%d SW=%04X | %s | kết luận: CHƯA SẴN SÀNG",
                     PUBLIC_KEY_LE, sw, publicKeyStatusText(sw)));
@@ -240,19 +254,90 @@ final class CardGateway {
         ReceiptVerifier.ParsedKey parsed = ReceiptVerifier.parsePublicKey(data);
         if (!parsed.ok()) {
             cardPublicKey = null;
+            cardPublicKeyBytes = null;
             return Result.fail(String.format(
                     "GET_CARD_PUBLIC_KEY INS=61 SW=9000 dataLen=%d | %s | kết luận: CHƯA SẴN SÀNG",
                     data.length, parsed.problem()));
         }
         cardPublicKey = parsed.key();
+        // Giữ nguyên 65 byte thẻ trả về: enrollment gửi Backend đúng chuỗi này, không dựng lại từ PublicKey.
+        cardPublicKeyBytes = data.clone();
         String cardId = status == null ? "chưa nhận diện" : status.cardId();
         return Result.ok(String.format(
                 "GET_CARD_PUBLIC_KEY INS=61 SW=9000 dataLen=%d | cardId=%s | P-256 point=%s",
                 data.length, cardId, hex(data)));
     }
 
-    private static String publicKeyStatusText(int sw) {
+    byte[] lastCardPublicKeyBytes() {
+        byte[] value = cardPublicKeyBytes;
+        return value == null ? null : value.clone();
+    }
+
+    byte[] lastEnrollmentSignature() {
+        byte[] value = enrollmentSignature;
+        return value == null ? null : value.clone();
+    }
+
+    /**
+     * SIGN_REGISTRATION_CHALLENGE: Case 4S, Lc=32, data là nonce, Le=00.
+     *
+     * <p>Client chỉ gửi nonce; thẻ tự lấy cardId và public key của chính nó theo contract.
+     */
+    Result signRegistrationChallenge(byte[] nonce) throws CardException {
+        requireConnected();
+        enrollmentSignature = null;
+        if (nonce == null || nonce.length != NONCE_LENGTH) {
+            return Result.fail("SIGN_REGISTRATION_CHALLENGE: nonce phải đúng 32 byte | không gửi APDU");
+        }
+        Status current = status;
+        if (current == null || current.lifecycle() != LIFECYCLE_ISSUED) {
+            return Result.fail("SIGN_REGISTRATION_CHALLENGE: thẻ chưa ISSUED | không gửi APDU");
+        }
+
+        ResponseAPDU response = channel.transmit(new CommandAPDU(
+                CLA_APPLICATION, INS_SIGN_REGISTRATION_CHALLENGE, 0x00, 0x00, nonce, SIGNATURE_LE));
+        int sw = response.getSW();
+        byte[] signature = response.getData();
+        lastResponseSw = sw;
+        String apdu = String.format(
+                "SIGN_REGISTRATION_CHALLENGE INS=62 P1P2=0000 case=4S Le=00 Lc=%d SW=%04X",
+                nonce.length, sw);
+        if (sw != Sw.OK) {
+            return Result.fail(apdu + " | " + signChallengeStatusText(sw)
+                    + " | kết luận: CHƯA SẴN SÀNG");
+        }
+        if (signature.length < DER_SIGNATURE_MIN || signature.length > DER_SIGNATURE_MAX
+                || signature[0] != 0x30) {
+            return Result.fail(String.format(
+                    "%s sigLen=%d | không phải DER SEQUENCE hợp lệ | kết luận: CHƯA SẴN SÀNG",
+                    apdu, signature.length));
+        }
+        enrollmentSignature = signature;
+        return Result.ok(String.format(
+                "%s sigLen=%d | DER SEQUENCE | nonce 32 byte đã ký (không ghi nội dung)",
+                apdu, signature.length));
+    }
+
+    private static String signChallengeStatusText(int sw) {
         if (sw == Sw.CONDITIONS_NOT_SATISFIED) {
+            return "thẻ chưa ISSUED — chỉ ký challenge sau PERSONALIZE";
+        }
+        if (sw == Sw.WRONG_LENGTH) {
+            return "Lc khác 32 hoặc Le khác 00 (Le tường minh 1..71 bị từ chối)";
+        }
+        if (sw == Sw.WRONG_P1P2) {
+            return "P1/P2 phải 0000";
+        }
+        if (sw == Sw.WRONG_DATA) {
+            return "nonce bị từ chối";
+        }
+        if (sw == Sw.INTERNAL_ERROR) {
+            return "lỗi nội bộ khi ký";
+        }
+        return "không xác định được kết quả ký";
+    }
+
+    private static String publicKeyStatusText(int sw) {        if (sw == Sw.CONDITIONS_NOT_SATISFIED) {
             return "thẻ chưa ISSUED — GET_CARD_PUBLIC_KEY chỉ đọc được sau PERSONALIZE";
         }
         if (sw == Sw.WRONG_LENGTH) {
@@ -701,6 +786,9 @@ final class CardGateway {
         }
 
         Reconciliation.Verdict verdict = reconciliation.resolve(receipt, expectation);
+        if (verdict == Reconciliation.Verdict.MISMATCH) {
+            reconciliation.markUnknown(reconciliation.detail());
+        }
         String text = String.format("%s | expected %s | kết luận=%s state=%s",
                 detail, expectationText(expectation), verdict, reconciliation.state());
         return verdict == Reconciliation.Verdict.MISMATCH ? Result.fail(text) : Result.ok(text);
@@ -740,6 +828,54 @@ final class CardGateway {
 
     void markTransactionUnknown(String cause) {
         reconciliation.markUnknown(cause);
+    }
+
+    record EnrollmentCheck(boolean ok, boolean enrolled, String detail) {
+    }
+
+    void applyCardEnrollment(EnrollmentCheck check) {
+        Status current = status;
+        enrollmentCardId = current == null ? null : current.cardId();
+        cardEnrollment = check;
+        enrollmentDetail = check == null ? "chưa kiểm tra" : check.detail();
+    }
+
+    void clearCardEnrollment(String detail) {
+        enrollmentCardId = null;
+        cardEnrollment = null;
+        enrollmentDetail = detail;
+    }
+
+    String enrollmentBlockReason() {
+        Status current = status;
+        if (!ready || current == null) {
+            return "chưa nhận diện thẻ";
+        }
+        if (cardEnrollment == null || enrollmentCardId == null
+                || !current.cardId().equalsIgnoreCase(enrollmentCardId)) {
+            return "chưa kiểm tra đăng ký thẻ cho cardId=" + current.cardId()
+                    + " (" + enrollmentDetail + ")";
+        }
+        if (!cardEnrollment.ok()) {
+            return "chưa xác nhận được đăng ký thẻ trên Backend: " + cardEnrollment.detail();
+        }
+        if (!cardEnrollment.enrolled()) {
+            return "thẻ chưa đăng ký trên Backend (cardId=" + current.cardId() + ")"
+                    + " — đăng ký thẻ trước khi cấp quota/mở ca/đóng ca";
+        }
+        return null;
+    }
+
+    String enrollmentText() {
+        Status current = status;
+        if (current == null || cardEnrollment == null || enrollmentCardId == null
+                || !current.cardId().equalsIgnoreCase(enrollmentCardId)) {
+            return "chua-kiem-tra";
+        }
+        if (!cardEnrollment.ok()) {
+            return "khong-xac-nhan-duoc";
+        }
+        return cardEnrollment.enrolled() ? "da-dang-ky" : "chua-dang-ky";
     }
 
     private record PinField(char[] value, int length, String name) {
@@ -861,6 +997,14 @@ final class CardGateway {
         if (journal.load().present()) {
             return Result.fail("đã có pending journal — phải đối soát trước giao dịch mới");
         }
+        if (receiptSink == null) {
+            return Result.fail("chưa cấu hình ledger Backend — không gửi APDU đổi state, không ghi journal");
+        }
+        String enrollmentBlock = enrollmentBlockReason();
+        if (enrollmentBlock != null) {
+            return Result.fail("giao dịch bị chặn vì đăng ký thẻ: " + enrollmentBlock
+                    + " | không ghi journal, không gửi APDU đổi state");
+        }
         PendingJournal.Entry entry = new PendingJournal.Entry(
                 gatewayCardId(), plan.expectation().counterAfter(),
                 plan.expectation().operation(), plan.delta(), plan.expectedBalance(),
@@ -925,11 +1069,51 @@ final class CardGateway {
                     + valueProblem + " | journal vẫn PENDING | đối soát="
                     + reconciliation.state());
         }
+        // UI-07: chưa lưu được vào ledger Backend thì journal ở lại PENDING, và journal PENDING
+        // chính là thứ chặn giao dịch kế tiếp ở đầu runStateTransaction.
+        ReceiptSave saved = saveReceiptToLedger(lastReceipt);
+        if (!saved.ok()) {
+            reconciliation.markUnknown("receipt đã xác minh trên thẻ nhưng chưa lưu được vào ledger");
+            return Result.fail(apdu + " | " + receiptRead.text() + " | lưu ledger=FAIL ("
+                    + saved.detail() + ") | journal vẫn PENDING | đối soát="
+                    + reconciliation.state());
+        }
         Result journalResult = finishJournal(journal, entry);
         if (!journalResult.ok()) {
-            return Result.fail(apdu + " | " + receiptRead.text() + " | " + journalResult.text());
+            return Result.fail(apdu + " | " + receiptRead.text() + " | " + saved.detail()
+                    + " | " + journalResult.text());
         }
-        return Result.ok(apdu + " | " + receiptRead.text() + " | " + journalResult.text());
+        reconciliation.markKnown("receipt khớp, ledger đã lưu, journal đã đóng");
+        return Result.ok(apdu + " | " + receiptRead.text() + " | " + saved.detail()
+                + " | " + journalResult.text());
+    }
+
+    private ReceiptSave saveReceiptToLedger(Receipt receipt) {
+        if (receiptSink == null) {
+            return new ReceiptSave(false, "chưa cấu hình ledger Backend");
+        }
+        return receiptSink.save(receipt);
+    }
+
+    /** Kết quả ghi ledger: thành công kèm mô tả, thất bại kèm lý do để journal ở lại PENDING. */
+    record ReceiptSave(boolean ok, String detail) {
+    }
+
+    /** Cửa duy nhất để gateway ghi receipt sang ledger Backend; App cài đặt bằng BackendClient. */
+    interface ReceiptSink {
+        ReceiptSave save(Receipt receipt);
+
+        LedgerCheck ledger(String cardIdHex);
+    }
+
+    /** Kết quả đọc mốc ledger Backend dùng cho đối soát nhánh chưa thực thi. */
+    record LedgerCheck(boolean ok, String detail, long lastCounter, int lastBalance, String activeVisitId) {
+    }
+
+    private ReceiptSink receiptSink;
+
+    void setReceiptSink(ReceiptSink sink) {
+        this.receiptSink = sink;
     }
 
     Result reconcilePending(PendingJournal journal, char[] studentPin) throws CardException {
@@ -965,8 +1149,19 @@ final class CardGateway {
         }
         if (!receiptRead.ok()) {
             if (lastResponseSw == Sw.CONDITIONS_NOT_SATISFIED && entry.expectedCounter() == 1) {
-                reconciliation.markKnown("chưa có receipt, giao dịch đầu tiên chưa thực thi");
-                return finishJournal(journal, entry);
+                Result stateRead = confirmStateUnchanged(entry, studentPin);
+                if (!stateRead.ok()) {
+                    reconciliation.markUnknown("chưa có receipt nhưng không xác nhận được state chưa đổi");
+                    return Result.fail(stateRead.text() + " | journal vẫn PENDING | đối soát="
+                            + reconciliation.state());
+                }
+                Result closed = finishJournal(journal, entry,
+                        Reconciliation.Verdict.NOT_EXECUTED, stateRead.text());
+                if (closed.ok()) {
+                    reconciliation.markKnown(
+                            "chưa có receipt; state xác thực xác nhận chưa thực thi (ledger chưa đối chiếu)");
+                }
+                return closed;
             }
             reconciliation.markUnknown("không chứng minh được giao dịch đã hoặc chưa thực thi");
             return Result.fail(receiptRead.text() + " | journal vẫn PENDING | đối soát="
@@ -989,11 +1184,114 @@ final class CardGateway {
                 return Result.fail("receipt cùng counter nhưng sai delta/balance: " + valueProblem
                         + " | journal vẫn PENDING");
             }
-        } else if (lastReceipt.balanceAfter() != entry.expectedBalance() - entry.delta()) {
+            // SIGN-08: ledger phải có receipt trước khi journal được đóng, nếu không thì đối soát
+            // xong sẽ mở giao dịch mới trong khi Backend vẫn thiếu giao dịch này.
+            ReceiptSave saved = saveReceiptToLedger(lastReceipt);
+            if (!saved.ok()) {
+                reconciliation.markUnknown("giao dịch đã thực thi trên thẻ nhưng chưa lưu được vào ledger");
+                return Result.fail(receiptRead.text() + " | lưu ledger=FAIL (" + saved.detail()
+                        + ") | journal vẫn PENDING | đối soát=" + reconciliation.state());
+            }
+            String ledgerProblem = ledgerMatchesReceipt(entry.cardId(), lastReceipt);
+            if (ledgerProblem != null) {
+                reconciliation.markUnknown(ledgerProblem);
+                return Result.fail(receiptRead.text() + " | " + saved.detail() + " | " + ledgerProblem
+                        + " | journal vẫn PENDING | đối soát=" + reconciliation.state());
+            }
+            Result closed = finishJournal(journal, entry, verdict,
+                    receiptRead.text() + " | " + saved.detail());
+            if (closed.ok()) {
+                reconciliation.markKnown("đã lưu ledger cho giao dịch đã thực thi");
+            }
+            return closed;
+        }
+
+        if (lastReceipt.balanceAfter() != entry.expectedBalance() - entry.delta()) {
             reconciliation.markUnknown("balance receipt trước giao dịch không khớp expected state cũ");
             return Result.fail("receipt cũ không chứng minh state chưa đổi — journal vẫn PENDING");
         }
-        return finishJournal(journal, entry, verdict, receiptRead.text());
+        Result stateRead = confirmStateUnchanged(entry, studentPin);
+        if (!stateRead.ok()) {
+            reconciliation.markUnknown("receipt cho thấy chưa thực thi nhưng state chưa được xác nhận");
+            return Result.fail(stateRead.text() + " | journal vẫn PENDING | đối soát="
+                    + reconciliation.state());
+        }
+        Result closed = finishJournal(journal, entry, verdict, receiptRead.text() + " | " + stateRead.text());
+        if (closed.ok()) {
+            reconciliation.markKnown(
+                    "state xác thực xác nhận giao dịch chưa thực thi (ledger chưa đối chiếu)");
+        }
+        return closed;
+    }
+
+    /**
+     * Xác nhận bằng state xác thực của thẻ (VERIFY + GET_STATUS) rằng giao dịch trong journal chưa
+     * đổi counter/balance. Chỉ khi đó mới được xóa pending, thay vì suy từ việc thiếu receipt.
+     */
+    private Result confirmStateUnchanged(PendingJournal.Entry entry, char[] studentPin)
+            throws CardException {
+        Result stateRead = readAuthenticatedStatus(studentPin);
+        if (!stateRead.ok()) {
+            return Result.fail("không đọc được state xác thực: " + stateRead.text());
+        }
+        Status current = status;
+        if (current == null || !current.studentStateAvailable()) {
+            return Result.fail("state xác thực không khả dụng sau GET_STATUS");
+        }
+        long wantCounter = entry.expectedCounter() - 1;
+        int wantBalance = entry.expectedBalance() - entry.delta();
+        if (current.counter() != wantCounter || current.balance() != wantBalance) {
+            return Result.fail(String.format(
+                    "state thẻ counter=%d balance=%d khác mốc trước giao dịch %d/%d",
+                    current.counter(), current.balance(), wantCounter, wantBalance));
+        }
+
+        // Chưa đối chiếu được ledger thì không được đóng pending: thiếu nguồn, lỗi HTTP, sai schema
+        // hoặc lệch mốc đều giữ journal lại.
+        if (receiptSink == null) {
+            return Result.fail("chưa cấu hình nguồn ledger Backend để đối chiếu");
+        }
+        LedgerCheck ledger = receiptSink.ledger(entry.cardId());
+        if (!ledger.ok()) {
+            return Result.fail("không đọc được ledger Backend: " + ledger.detail());
+        }
+        if (ledger.lastCounter() != current.counter() || ledger.lastBalance() != current.balance()) {
+            return Result.fail(String.format(
+                    "ledger Backend counter=%d balance=%d khác state thẻ counter=%d balance=%d",
+                    ledger.lastCounter(), ledger.lastBalance(), current.counter(), current.balance()));
+        }
+        String cardVisit = current.hasActiveVisit() ? current.activeVisitId() : null;
+        String ledgerVisit = ledger.activeVisitId();
+        boolean bothClosed = cardVisit == null && ledgerVisit == null;
+        boolean sameOpenVisit = cardVisit != null && ledgerVisit != null
+                && cardVisit.equalsIgnoreCase(ledgerVisit);
+        if (!bothClosed && !sameOpenVisit) {
+            return Result.fail(String.format("ledger Backend ca mở=%s khác state thẻ ca mở=%s",
+                    ledgerVisit == null ? "không" : ledgerVisit,
+                    cardVisit == null ? "không" : cardVisit));
+        }
+        return Result.ok(String.format("%s | ledger counter=%d balance=%d ca mở=%s"
+                + " | state thẻ và ledger cùng mốc trước giao dịch",
+                stateRead.text(), ledger.lastCounter(), ledger.lastBalance(),
+                ledgerVisit == null ? "không" : ledgerVisit));
+    }
+
+    private String ledgerMatchesReceipt(String cardIdHex, Receipt receipt) {
+        if (receiptSink == null) {
+            return "chưa cấu hình nguồn ledger Backend để đối chiếu";
+        }
+        LedgerCheck ledger = receiptSink.ledger(cardIdHex);
+        if (!ledger.ok()) {
+            return "không đọc được ledger Backend sau khi lưu: " + ledger.detail();
+        }
+        if (ledger.lastCounter() != receipt.counterAfter()
+                || ledger.lastBalance() != receipt.balanceAfter()) {
+            return String.format(
+                    "ledger Backend counter=%d balance=%d khác receipt counter=%d balance=%d",
+                    ledger.lastCounter(), ledger.lastBalance(),
+                    receipt.counterAfter(), receipt.balanceAfter());
+        }
+        return null;
     }
 
     private Result finishJournal(PendingJournal journal, PendingJournal.Entry entry) {
@@ -1015,9 +1313,11 @@ final class CardGateway {
         if (verdict == null) {
             return Result.ok("journal đã RESOLVED và bị xóa");
         }
+        // Không in trạng thái đối soát ở đây: bên gọi chỉ chuyển KNOWN sau khi hàm này trả về, nên
+        // in tại chỗ sẽ luôn là giá trị cũ và làm bằng chứng log đọc sai.
         return Result.ok(String.format(
-                "%s | kết luận=%s | đối soát=%s | journal đã RESOLVED và bị xóa",
-                evidence, verdict, reconciliation.state()));
+                "%s | kết luận=%s | journal đã RESOLVED và bị xóa",
+                evidence, verdict));
     }
 
     private static String transactionValueProblem(Receipt receipt, TransactionPlan plan) {
@@ -1143,6 +1443,7 @@ final class CardGateway {
         lastProfileMeta = null;
         lastPhoto = null;
         lastPinSw = -1;
+        clearCardEnrollment("đã ngắt kết nối");
         channel = null;
         terminal = null;
         factory = null;
