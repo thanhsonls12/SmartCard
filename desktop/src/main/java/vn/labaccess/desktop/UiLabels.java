@@ -64,6 +64,18 @@ final class UiLabels {
         }
     }
 
+    /** Dòng thông báo: nền và chữ đổi theo sắc thái, dùng cùng bộ màu với chip. */
+    static void applyNoteTone(Label label, Tone tone) {
+        label.getStyleClass().removeAll("la-note--neutral", "la-note--ok",
+                "la-note--pending", "la-note--error");
+        label.getStyleClass().add(switch (tone) {
+            case OK -> "la-note--ok";
+            case PENDING -> "la-note--pending";
+            case ERROR -> "la-note--error";
+            case NEUTRAL -> "la-note--neutral";
+        });
+    }
+
     /**
      * Mã APDU gắn vào control dưới dạng tooltip.
      *

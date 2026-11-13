@@ -175,6 +175,12 @@
     -fx-border-width: 1px 0 0 0;
 }
 
+/* Gợi ý bước kế tiếp: cùng cỡ chữ với thanh trạng thái, nhạt hơn để không tranh với kết quả thao tác. */
+.la-next-step {
+    -fx-font-size: 12px;
+    -fx-text-fill: -la-fg-subtle;
+}
+
 /* ---- Icon (Ikonli Feather) ---- */
 
 .la-icon {
@@ -338,13 +344,31 @@
     -fx-text-fill: -la-fg-subtle;
 }
 
-/* Một dòng cảnh báo nghiệp vụ: icon ngữ nghĩa + nền nhẹ, không phải banner lớn. */
+/* Một dòng thông báo nghiệp vụ: nền nhẹ theo sắc thái thật, không phải banner lớn. */
 .la-note {
-    -fx-background-color: -la-pending-soft;
     -fx-background-radius: 4px;
     -fx-padding: 4px 8px;
     -fx-font-size: 12px;
+}
+
+.la-note--neutral {
+    -fx-background-color: -la-surface-sunken;
+    -fx-text-fill: -la-fg-muted;
+}
+
+.la-note--ok {
+    -fx-background-color: -la-accent-soft;
+    -fx-text-fill: -la-accent-strong;
+}
+
+.la-note--pending {
+    -fx-background-color: -la-pending-soft;
     -fx-text-fill: -la-pending;
+}
+
+.la-note--error {
+    -fx-background-color: -la-danger-soft;
+    -fx-text-fill: -la-danger;
 }
 
 /* Kết quả biên nhận: giá trị chính là con số lớn. */
@@ -375,3 +399,32 @@
     -fx-background-color: -la-border-soft;
     -fx-padding: 0 1px 0 1px;
 }
+
+/* Tiến độ sáu bước của luồng đăng ký thẻ: dấu trạng thái nhỏ, tiêu đề đọc được. */
+.la-step-row {
+    -fx-alignment: center-left;
+}
+
+.la-step-mark {
+    -fx-min-width: 16px;
+    -fx-font-size: 13px;
+    -fx-text-fill: -la-fg-subtle;
+}
+
+.la-step-mark--running {
+    -fx-text-fill: -la-pending;
+}
+
+.la-step-mark--done {
+    -fx-text-fill: -la-accent;
+}
+
+.la-step-mark--failed {
+    -fx-text-fill: -la-danger;
+}
+
+.la-step-title {
+    -fx-font-size: 12px;
+    -fx-text-fill: -la-fg;
+}
+
