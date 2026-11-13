@@ -6,8 +6,10 @@ import java.util.function.Supplier;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.VBox;
 
 final class HistoryPanel {
@@ -34,9 +36,9 @@ final class HistoryPanel {
         table.setId("history-table");
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         table.setPlaceholder(new Label("Chưa có giao dịch trong sổ"));
-        table.getColumns().add(column("Mã giao dịch", entry -> entry.id()));
+        table.getColumns().add(idColumn());
         table.getColumns().add(column("Thao tác", entry -> operationLabel(entry.operation())));
-        table.getColumns().add(column("Thay đổi", entry -> String.format("%+d", entry.delta())));
+        table.getColumns().add(column("Thay đổi", entry -> deltaLabel(entry.delta())));
         table.getColumns().add(column("Số dư sau", entry -> String.valueOf(entry.balanceAfter())));
         table.getColumns().add(column("Xác minh", entry -> verifyLabel(entry.verifyStatus())));
         table.setMinHeight(UiScale.SPACE_5 * 8);
@@ -109,11 +111,14 @@ final class HistoryPanel {
     }
 
     void showFailure(Exception failure) {
-        table.getItems().clear();
         String message = failure.getMessage() == null ? "không đọc được lịch sử" : failure.getMessage();
-        verdict.setText(message);
+        int kept = table.getItems().size();
+        verdict.setText(kept == 0
+                ? message
+                : message + " — bảng vẫn là lần tải trước (" + kept + " dòng)");
         UiLabels.applyNoteTone(verdict, UiLabels.Tone.ERROR);
-        log.accept("[FAIL] LICH_SU: " + message);
+        log.accept("[FAIL] LICH_SU: " + message
+                + (kept == 0 ? " | bảng trống" : " | giữ " + kept + " dòng của lần tải trước"));
     }
 
     private static String matchedText(BackendClient.HistoryLoad load) {
@@ -165,6 +170,26 @@ final class HistoryPanel {
 
     private static String verifyLabel(String verifyStatus) {
         return "verified".equals(verifyStatus) ? "Đã xác minh" : verifyStatus;
+    }
+
+    private static String deltaLabel(int delta) {
+        return delta > 0 ? String.format("%+d", delta) : String.valueOf(delta);
+    }
+
+    private static TableColumn<BackendClient.HistoryEntry, String> idColumn() {
+        TableColumn<BackendClient.HistoryEntry, String> column =
+                column("Mã giao dịch", entry -> entry.id());
+        column.setPrefWidth(252);
+        column.setMinWidth(210);
+        column.setCellFactory(ignored -> new TableCell<>() {
+            @Override
+            protected void updateItem(String value, boolean empty) {
+                super.updateItem(value, empty);
+                setText(empty ? null : value);
+                setTooltip(empty || value == null ? null : new Tooltip(value));
+            }
+        });
+        return column;
     }
 
     private static TableColumn<BackendClient.HistoryEntry, String> column(
