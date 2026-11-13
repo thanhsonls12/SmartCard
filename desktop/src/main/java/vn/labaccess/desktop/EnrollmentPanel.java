@@ -25,7 +25,6 @@ final class EnrollmentPanel {
 
     private static final int PIN_LENGTH = 6;
     private static final int PUBLIC_POINT_LENGTH = 65;
-    private static final int LIFECYCLE_ISSUED = 0x01;
 
     private enum Step {
         CHECK_CARD("Kiểm tra thẻ và trạng thái ban đầu"),
@@ -315,14 +314,14 @@ final class EnrollmentPanel {
                     ? "Chưa sẵn sàng: chưa kết nối thẻ hoặc đang bận thao tác khác."
                     : enabledReason;
         }
-        CardGateway.Status current = gateway.status();
+        CardStatus current = gateway.status();
         if (current == null) {
             return "Chưa nhận diện thẻ.";
         }
         if (!gateway.isReady()) {
             return "Chưa đọc được applet trên thẻ — nhận diện lại thẻ.";
         }
-        if (current.lifecycle() != LIFECYCLE_ISSUED) {
+        if (current.lifecycle() != CardLifecycle.ISSUED) {
             return "Thẻ chưa phát hành — phát hành thẻ trước khi đăng ký.";
         }
         if (current.cardId() == null || current.cardId().isBlank()
@@ -346,7 +345,7 @@ final class EnrollmentPanel {
         return trimmed.length() >= 3 && trimmed.length() <= 32 && trimmed.matches("[A-Z0-9-]+");
     }
 
-    private static String stateProblem(CardGateway.Status current) {
+    private static String stateProblem(CardStatus current) {
         List<String> problems = new ArrayList<>();
         if (current.balance() != 0) {
             problems.add("số dư khác 0");
@@ -390,16 +389,16 @@ final class EnrollmentPanel {
     private Outcome flow(String studentId, char[] pin) throws Exception {
         try {
             mark(Step.CHECK_CARD, Mark.RUNNING);
-            CardGateway.Result identified = gateway.identify();
+            CardOperationResult identified = gateway.identify();
             if (!identified.ok()) {
                 throw new StepFailure(Step.CHECK_CARD, identified.text(), false);
             }
-            CardGateway.Result verified = gateway.readAuthenticatedStatus(pin);
+            CardOperationResult verified = gateway.readAuthenticatedStatus(pin);
             if (!verified.ok()) {
                 throw new StepFailure(Step.CHECK_CARD,
                         "VERIFY/GET_STATUS thất bại: " + verified.text(), false);
             }
-            CardGateway.Status current = gateway.status();
+            CardStatus current = gateway.status();
             if (current == null) {
                 throw new StepFailure(Step.CHECK_CARD, "không đọc lại được state thẻ", false);
             }
@@ -413,7 +412,7 @@ final class EnrollmentPanel {
                     + " | counter=0 balance=0 không có ca");
 
             mark(Step.PUBLIC_KEY, Mark.RUNNING);
-            CardGateway.Result keyRead = gateway.readCardPublicKey();
+            CardOperationResult keyRead = gateway.readCardPublicKey();
             if (!keyRead.ok()) {
                 throw new StepFailure(Step.PUBLIC_KEY, keyRead.text(), false);
             }
@@ -452,7 +451,7 @@ final class EnrollmentPanel {
                     + " | nonce 32 byte (không ghi nội dung) | hết hạn " + challenge.expiresAt());
 
             mark(Step.SIGN, Mark.RUNNING);
-            CardGateway.Result signed = gateway.signRegistrationChallenge(nonce);
+            CardOperationResult signed = gateway.signRegistrationChallenge(nonce);
             if (!signed.ok()) {
                 throw new StepFailure(Step.SIGN, signed.text(), false);
             }
@@ -500,7 +499,8 @@ final class EnrollmentPanel {
 
     private static String describeCompleteFailure(BackendClient.Failure failure) {
         if (failure.statusCode() == 409) {
-            return "Backend từ chối hoàn tất đăng ký (HTTP 409). Kiểm tra trạng thái đăng ký trên Backend trước khi thực hiện lại.";
+            return "Backend từ chối hoàn tất đăng ký (HTTP 409)."
+                    + " Kiểm tra trạng thái đăng ký trên Backend trước khi thực hiện lại.";
         }
         return failure.getMessage();
     }
@@ -604,6 +604,7 @@ final class EnrollmentPanel {
             case FAILED -> label.getStyleClass().add("la-step-mark--failed");
             case PENDING -> {
             }
+            default -> throw new IllegalStateException("Mark khong xac dinh: " + value);
         }
     }
 

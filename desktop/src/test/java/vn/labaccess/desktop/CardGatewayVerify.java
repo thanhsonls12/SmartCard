@@ -162,12 +162,12 @@ public final class CardGatewayVerify {
         }));
         try {
             gateway.identifyWith(AID);
-            CardGateway.Result first = gateway.prepareReceiptVerification();
+            CardOperationResult first = gateway.prepareReceiptVerification();
             boolean firstKeyLoaded = first.ok() && Arrays.equals(
                     ReceiptVerifier.encodePoint(firstKey.publicKey()),
                     ReceiptVerifier.encodePoint(gateway.cardPublicKey()));
             gateway.identifyWith(WRONG_AID);
-            CardGateway.Result second = gateway.prepareReceiptVerification();
+            CardOperationResult second = gateway.prepareReceiptVerification();
             record("V14", "public key cache duoc nap lai sau khi doi instance AID",
                     firstKeyLoaded && second.ok() && keyReads[0] == 2
                             && Arrays.equals(ReceiptVerifier.encodePoint(secondKey.publicKey()),
@@ -527,7 +527,7 @@ public final class CardGatewayVerify {
         byte[] goodReceipt = signedReceipt(card, 1, 5, 1, 5, CARD_ID, NO_VISIT_ID);
 
         CardGateway readGateway = readyGateway(signedCard(card, goodReceipt));
-        CardGateway.Result read = readGateway.readLastReceipt(null);
+        CardOperationResult read = readGateway.readLastReceipt(null);
         record("R01", "gateway doc public key INS 61 + verify -> ECDSA PASS",
                 read.ok() && read.text().contains("ECDSA=PASS"), true);
 
@@ -538,7 +538,7 @@ public final class CardGatewayVerify {
             brokenSignature[35] ^= 0xFF;
             PendingJournal badJournal = new PendingJournal(dir.resolve("bad-signature.txt"));
             CardGateway badGateway = readyGateway(signedCard(key, brokenSignature));
-            CardGateway.Result bad = badGateway.runStateTransaction(badJournal,
+            CardOperationResult bad = badGateway.runStateTransaction(badJournal,
                     new CardGateway.TransactionPlan(
                             new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
                     () -> new ResponseAPDU(new byte[] {0, 5, 0, 0, 0, 1, (byte) 0x90, 0}), null);
@@ -560,7 +560,7 @@ public final class CardGatewayVerify {
             // NOT_EXECUTED đòi ledger cùng mốc state thẻ: counter=1, balance=5, không ca mở.
             oldGateway.setReceiptSink(fixtureSink(1, 5));
             char[] pin = {'1', '2', '3', '4', '5', '6'};
-            CardGateway.Result oldResult = oldGateway.reconcilePending(oldJournal, pin);
+            CardOperationResult oldResult = oldGateway.reconcilePending(oldJournal, pin);
             record("R04", "receipt cu verify PASS nhung counter lui -> NOT_EXECUTED, xoa journal",
                     oldResult.ok() && !oldJournal.load().present(), true);
             System.out.println("    R04 text: " + oldResult.text());
@@ -575,7 +575,7 @@ public final class CardGatewayVerify {
             // EXECUTED phải đối chiếu ledger sau khi lưu: mốc fixture phải khớp receipt.
             newGateway.setReceiptSink(fixtureSink(2, 10));
             char[] newPin = {'1', '2', '3', '4', '5', '6'};
-            CardGateway.Result newResult = newGateway.reconcilePending(newJournal, newPin);
+            CardOperationResult newResult = newGateway.reconcilePending(newJournal, newPin);
             record("R05", "receipt moi verify PASS + counter dung -> EXECUTED, xoa journal",
                     newResult.ok() && !newJournal.load().present(), true);
             System.out.println("    R05 text: " + newResult.text());
@@ -588,7 +588,7 @@ public final class CardGatewayVerify {
             CardGateway foreignGateway = readyGateway(signedCard(cardKey,
                     signedReceipt(foreignKey, 1, 5, 2, 10, CARD_ID, NO_VISIT_ID)));
             char[] foreignPin = {'1', '2', '3', '4', '5', '6'};
-            CardGateway.Result foreign = foreignGateway.reconcilePending(foreignJournal, foreignPin);
+            CardOperationResult foreign = foreignGateway.reconcilePending(foreignJournal, foreignPin);
             record("R06", "cardId khop payload nhung key khong thuoc the -> giu journal",
                     !foreign.ok() && foreignJournal.load().present()
                             && foreignGateway.reconciliation().state() == Reconciliation.State.UNKNOWN,
@@ -613,11 +613,11 @@ public final class CardGatewayVerify {
             return;
         }
 
-        CardGateway.Result positive;
+        CardOperationResult positive;
         try {
             positive = gateway.identify();
         } catch (Exception ex) {
-            positive = CardGateway.Result.fail("identify() loi: " + ex);
+            positive = CardOperationResult.fail("identify() loi: " + ex);
         }
         System.out.println("    identify() -> " + positive.text());
         record("V01", "identify() thanh cong va dat ready",
@@ -632,11 +632,11 @@ public final class CardGatewayVerify {
                     gateway.status().cardId()));
         }
 
-        CardGateway.Result negative;
+        CardOperationResult negative;
         try {
             negative = gateway.identifyWith(WRONG_AID);
         } catch (Exception ex) {
-            negative = CardGateway.Result.fail("identifyWith() loi: " + ex);
+            negative = CardOperationResult.fail("identifyWith() loi: " + ex);
         }
         System.out.println("    identifyWith(AID sai) -> " + negative.text());
         record("V02", "AID sai: that bai, ready=false, status=null",
@@ -645,11 +645,11 @@ public final class CardGatewayVerify {
                 !negative.ok() && negative.text().contains("SW=")
                         && negative.text().contains("CHƯA SẴN SÀNG"), true);
 
-        CardGateway.Result again;
+        CardOperationResult again;
         try {
             again = gateway.identify();
         } catch (Exception ex) {
-            again = CardGateway.Result.fail("identify() loi: " + ex);
+            again = CardOperationResult.fail("identify() loi: " + ex);
         }
         System.out.println("    identify() lai -> " + again.text());
         record("V09", "nhan dien lai sau ca sai phuc hoi duoc", again.ok() && gateway.isReady(), true);
@@ -666,11 +666,11 @@ public final class CardGatewayVerify {
             return;
         }
 
-        CardGateway.Result read;
+        CardOperationResult read;
         try {
             read = gateway.readLastReceipt(null);
         } catch (Exception ex) {
-            read = CardGateway.Result.fail("readLastReceipt loi: " + ex);
+            read = CardOperationResult.fail("readLastReceipt loi: " + ex);
         }
         System.out.println("    readLastReceipt(null) -> " + read.text());
         int sw = gateway.lastResponseSw();
@@ -695,14 +695,14 @@ public final class CardGatewayVerify {
             skip("F03", "Le thieu tra 6700", "khong doc duoc student PIN");
             return;
         }
-        CardGateway.Result verify = gateway.verifyStudentPin(studentPin);
+        CardOperationResult verify = gateway.verifyStudentPin(studentPin);
         if (!verify.ok()) {
             skip("F02", "doc duoc receipt that tren the", "VERIFY that bai: " + verify.text());
             skip("F03", "Le thieu tra 6700", "VERIFY that bai");
             return;
         }
         try {
-            CardGateway.Result first = gateway.readLastReceipt(null, 256);
+            CardOperationResult first = gateway.readLastReceipt(null, 256);
             if (first.ok()) {
                 record("F02", "doc duoc receipt that tren the sau VERIFY", true, true);
             } else {
@@ -710,7 +710,7 @@ public final class CardGatewayVerify {
                         gateway.lastResponseSw() == Sw.CONDITIONS_NOT_SATISFIED, true);
             }
             gateway.verifyStudentPin(studentPin);
-            CardGateway.Result shortLe = gateway.readLastReceipt(null, 34);
+            CardOperationResult shortLe = gateway.readLastReceipt(null, 34);
             record("F03", "Le thieu tra 6700", shortLe.ok(), false);
             System.out.println("    Le=34 -> " + shortLe.text());
         } catch (CardException ex) {
@@ -836,7 +836,7 @@ public final class CardGatewayVerify {
                     && Arrays.equals(data, "654321".getBytes()));
             return response(Sw.OK);
         }));
-        CardGateway.Result verify = gateway.verifyStudentPin("654321".toCharArray());
+        CardOperationResult verify = gateway.verifyStudentPin("654321".toCharArray());
         record("P08", "VERIFY gui Case 3S 80 20 00 00 Lc=6 khong Le",
                 verify.ok() && shape.get(), true);
     }
@@ -899,7 +899,7 @@ public final class CardGatewayVerify {
             record("T01", "UNKNOWN -> khong cho giao dich",
                     !gate1.reconciliation().transactionAllowed(), true);
 
-            CardGateway.Result blockedByUnknown = gate1.runStateTransaction(journal,
+            CardOperationResult blockedByUnknown = gate1.runStateTransaction(journal,
                     new CardGateway.TransactionPlan(new ReceiptExpectation(null, 1, 1, null),
                             5, 5),
                     () -> {
@@ -912,7 +912,7 @@ public final class CardGatewayVerify {
                     CARD_ID, 2, 1, 5, 5, null, System.currentTimeMillis());
             journal.writePending(pending);
             CardGateway gate2 = readyGateway(issuedChannel(command -> response(Sw.OK)));
-            CardGateway.Result blockedByPending = gate2.runStateTransaction(journal,
+            CardOperationResult blockedByPending = gate2.runStateTransaction(journal,
                     new CardGateway.TransactionPlan(new ReceiptExpectation(null, 1, 1, null),
                             5, 5),
                     () -> {
@@ -930,7 +930,7 @@ public final class CardGatewayVerify {
             java.util.concurrent.atomic.AtomicInteger blockedCalls =
                     new java.util.concurrent.atomic.AtomicInteger();
             CardGateway blockedGateway = readyGateway(issuedChannel(command -> response(Sw.OK)));
-            CardGateway.Result blockedWrite = blockedGateway.runStateTransaction(blockedJournal,
+            CardOperationResult blockedWrite = blockedGateway.runStateTransaction(blockedJournal,
                     new CardGateway.TransactionPlan(
                             new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
                     () -> {
@@ -944,7 +944,7 @@ public final class CardGatewayVerify {
             java.util.concurrent.atomic.AtomicInteger lostCalls =
                     new java.util.concurrent.atomic.AtomicInteger();
             CardGateway lostGateway = readyGateway(issuedChannel(command -> response(Sw.OK)));
-            CardGateway.Result lost = lostGateway.runStateTransaction(lostJournal,
+            CardOperationResult lost = lostGateway.runStateTransaction(lostJournal,
                     new CardGateway.TransactionPlan(
                             new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
                     () -> {
@@ -957,7 +957,7 @@ public final class CardGatewayVerify {
                             && lostJournal.load().present() && lostJournal.load().valid()
                             && lostJournal.load().status() == PendingJournal.Status.PENDING,
                     true);
-            CardGateway.Result noRetry = lostGateway.runStateTransaction(lostJournal,
+            CardOperationResult noRetry = lostGateway.runStateTransaction(lostJournal,
                     new CardGateway.TransactionPlan(
                             new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
                     () -> {
@@ -974,7 +974,7 @@ public final class CardGatewayVerify {
             noSinkGateway.setReceiptSink(null);
             java.util.concurrent.atomic.AtomicInteger noSinkCalls =
                     new java.util.concurrent.atomic.AtomicInteger();
-            CardGateway.Result noSink = noSinkGateway.runStateTransaction(noSinkJournal,
+            CardOperationResult noSink = noSinkGateway.runStateTransaction(noSinkJournal,
                     new CardGateway.TransactionPlan(
                             new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
                     () -> {
@@ -991,7 +991,7 @@ public final class CardGatewayVerify {
             unknownEnrollmentGateway.clearCardEnrollment("fixture chua kiem");
             java.util.concurrent.atomic.AtomicInteger unknownEnrollmentCalls =
                     new java.util.concurrent.atomic.AtomicInteger();
-            CardGateway.Result unknownEnrollment = unknownEnrollmentGateway.runStateTransaction(
+            CardOperationResult unknownEnrollment = unknownEnrollmentGateway.runStateTransaction(
                     unknownEnrollmentJournal,
                     new CardGateway.TransactionPlan(
                             new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
@@ -1010,7 +1010,7 @@ public final class CardGatewayVerify {
                     new CardGateway.EnrollmentCheck(false, false, "Backend khong tra loi"));
             java.util.concurrent.atomic.AtomicInteger failedEnrollmentCalls =
                     new java.util.concurrent.atomic.AtomicInteger();
-            CardGateway.Result failedEnrollment = failedEnrollmentGateway.runStateTransaction(
+            CardOperationResult failedEnrollment = failedEnrollmentGateway.runStateTransaction(
                     failedEnrollmentJournal,
                     new CardGateway.TransactionPlan(
                             new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
@@ -1029,7 +1029,7 @@ public final class CardGatewayVerify {
                     new CardGateway.EnrollmentCheck(true, false, "thẻ chưa đăng ký trên Backend"));
             java.util.concurrent.atomic.AtomicInteger notEnrolledCalls =
                     new java.util.concurrent.atomic.AtomicInteger();
-            CardGateway.Result notEnrolled = notEnrolledGateway.runStateTransaction(
+            CardOperationResult notEnrolled = notEnrolledGateway.runStateTransaction(
                     notEnrolledJournal,
                     new CardGateway.TransactionPlan(
                             new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
@@ -1048,7 +1048,7 @@ public final class CardGatewayVerify {
             TestKey successKey = newTestKey();
             CardGateway successGateway = readyGateway(signedCard(successKey,
                     signedReceipt(successKey, 1, 5, 1, 5, CARD_ID, NO_VISIT_ID)));
-            CardGateway.Result successful = successGateway.runStateTransaction(successJournal,
+            CardOperationResult successful = successGateway.runStateTransaction(successJournal,
                     new CardGateway.TransactionPlan(
                             new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
                     () -> {
@@ -1065,7 +1065,7 @@ public final class CardGatewayVerify {
             TestKey mismatchKey = newTestKey();
             CardGateway mismatchGateway = readyGateway(signedCard(mismatchKey,
                     signedReceipt(mismatchKey, 1, 4, 1, 4, CARD_ID, NO_VISIT_ID)));
-            CardGateway.Result mismatch = mismatchGateway.runStateTransaction(mismatchJournal,
+            CardOperationResult mismatch = mismatchGateway.runStateTransaction(mismatchJournal,
                     new CardGateway.TransactionPlan(
                             new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
                     () -> new ResponseAPDU(new byte[] {0, 5, 0, 0, 0, 1,
@@ -1080,7 +1080,7 @@ public final class CardGatewayVerify {
             TestKey staleKey = newTestKey();
             CardGateway staleGateway = readyGateway(signedCard(staleKey,
                     signedReceipt(staleKey, 1, 0, 0, 0, CARD_ID, NO_VISIT_ID)));
-            CardGateway.Result stale = staleGateway.runStateTransaction(staleJournal,
+            CardOperationResult stale = staleGateway.runStateTransaction(staleJournal,
                     new CardGateway.TransactionPlan(
                             new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
                     () -> new ResponseAPDU(new byte[] {0, 5, 0, 0, 0, 1,
@@ -1094,7 +1094,7 @@ public final class CardGatewayVerify {
             CardGateway unknownGateway = new CardGateway(scriptedChannel(command -> response(Sw.OK)));
             java.util.concurrent.atomic.AtomicInteger unknownCalls =
                     new java.util.concurrent.atomic.AtomicInteger();
-            CardGateway.Result unknownResult = unknownGateway.runStateTransaction(
+            CardOperationResult unknownResult = unknownGateway.runStateTransaction(
                     new PendingJournal(dir.resolve("unknown-journal.txt")),
                     new CardGateway.TransactionPlan(
                             new ReceiptExpectation(null, 1, Receipt.OPERATION_GRANT, null), 5, 5),
@@ -1255,7 +1255,7 @@ public final class CardGatewayVerify {
                     }
                     return response(Sw.INS_NOT_SUPPORTED);
                 }));
-                CardGateway.Result result = gateway.personalize(
+                CardOperationResult result = gateway.personalize(
                         adminPin, CARD_ID, "SV2024-001", studentPin, "Nguyen Van A");
                 boolean okText = result.ok() == wantOk[index]
                         && result.text().contains(expects[index])
@@ -1325,7 +1325,7 @@ public final class CardGatewayVerify {
             }
             return response(Sw.INS_NOT_SUPPORTED);
         }));
-        CardGateway.Result notIssued = unissued.readCardPublicKey();
+        CardOperationResult notIssued = unissued.readCardPublicKey();
         record("N01", "the chua ISSUED -> 6985, khong giu key",
                 !notIssued.ok() && notIssued.text().contains("6985")
                 && notIssued.text().contains("chưa ISSUED")
@@ -1355,7 +1355,7 @@ public final class CardGatewayVerify {
                 (command.getINS() & 0xFF) == 0x61
                         ? dataApdu(validPoint)
                         : response(Sw.INS_NOT_SUPPORTED)));
-        CardGateway.Result first = issued.readCardPublicKey();
+        CardOperationResult first = issued.readCardPublicKey();
         String firstHex = hexPoint(issued);
         record("N07", "65 byte hop le -> 9000, giu PublicKey",
                 first.ok() && first.text().contains("SW=9000")
@@ -1365,7 +1365,7 @@ public final class CardGatewayVerify {
         record("N08", "encode lai dung 65 byte", firstHex.length() / 2, 65);
         record("N09", "byte dau la 04", firstHex.startsWith("04"), true);
 
-        CardGateway.Result second = issued.readCardPublicKey();
+        CardOperationResult second = issued.readCardPublicKey();
         record("N10", "doc lai cung the -> cung public key",
                 second.ok() && hexPoint(issued).equals(firstHex), true);
 
@@ -1391,7 +1391,7 @@ public final class CardGatewayVerify {
                         ? dataApdu(point)
                         : response(Sw.INS_NOT_SUPPORTED)));
         try {
-            CardGateway.Result result = gateway.readCardPublicKey();
+            CardOperationResult result = gateway.readCardPublicKey();
             return result.text() + " | " + (gateway.cardPublicKey() == null ? "key=null" : "key=GIU");
         } catch (CardException ex) {
             return "loi " + ex.getClass().getSimpleName();
@@ -1426,12 +1426,12 @@ public final class CardGatewayVerify {
         System.out.println();
         System.out.println("--- Nhom N: GET_CARD_PUBLIC_KEY tren the chua phat hanh ---");
 
-        CardGateway.Status current = gateway.status();
+        CardStatus current = gateway.status();
         if (current != null && current.lifecycle() == 0x01) {
             skip("N11", "the chua ISSUED -> 6985 tren the that", "the da ISSUED truoc phien chay");
             return;
         }
-        CardGateway.Result result = gateway.readCardPublicKey();
+        CardOperationResult result = gateway.readCardPublicKey();
         record("N11", "the chua ISSUED -> 6985 tren the that",
                 !result.ok() && result.text().contains("6985")
                 && result.text().contains("chưa ISSUED")
@@ -1446,7 +1446,7 @@ public final class CardGatewayVerify {
             skip("N12", "the ISSUED doc public key 65 byte", "the chua ISSUED");
             return;
         }
-        CardGateway.Result first = gateway.readCardPublicKey();
+        CardOperationResult first = gateway.readCardPublicKey();
         String firstHex = hexPoint(gateway);
         record("N12", "the ISSUED -> 9000 + 65 byte + PublicKey",
                 first.ok() && first.text().contains("SW=9000")
@@ -1457,7 +1457,7 @@ public final class CardGatewayVerify {
         record("N14", "diem uncompressed 04||X||Y dung 65 byte", firstHex.length() / 2, 65);
         record("N15", "header 04", firstHex.startsWith("04"), true);
 
-        CardGateway.Result second = gateway.readCardPublicKey();
+        CardOperationResult second = gateway.readCardPublicKey();
         record("N16", "doc lai cung the -> cung public key",
                 second.ok() && hexPoint(gateway).equals(firstHex), true);
     }
@@ -1719,7 +1719,7 @@ public final class CardGatewayVerify {
 
         CardGateway ok = readyGateway(issuedChannel(command -> responseWithData(
                 profileResponse("SV2024-001", "Nguyễn Văn Ánh"), Sw.OK)));
-        CardGateway.Result read = ok.readProfile(0x00, 0x00);
+        CardOperationResult read = ok.readProfile(0x00, 0x00);
         record("L23", "GET_PROFILE 9000 -> parser PASS + lastProfile co du lieu",
                 read.ok() && read.text().contains("parser=PASS")
                 && ok.lastProfile() != null, true);
@@ -1733,7 +1733,7 @@ public final class CardGatewayVerify {
                 ? responseWithData(profileResponse("SV2024-001", "Nguyễn Văn Ánh"), Sw.OK)
                 : responseWithData(profileResponse("SV2024-001", "Nguyễn Văn Ánh"), Sw.INTERNAL_ERROR)));
         flaky.readProfile(0x00, 0x00);
-        CardGateway.Result afterFailure = flaky.readProfile(0x00, 0x00);
+        CardOperationResult afterFailure = flaky.readProfile(0x00, 0x00);
         record("L26", "doc loi xoa ket qua cu khoi gateway",
                 !afterFailure.ok() && flaky.lastProfile() == null, true);
         record("L27", "doc thanh cong nap metadata rong khi chua doc meta",
@@ -1742,7 +1742,7 @@ public final class CardGatewayVerify {
         CardGateway noApdu = readyGateway(issuedChannel(command -> {
             throw new AssertionError("khong duoc gui APDU khi VERIFY sai dinh dang");
         }));
-        CardGateway.Result shortPin = noApdu.readProfileWithPin("12".toCharArray());
+        CardOperationResult shortPin = noApdu.readProfileWithPin("12".toCharArray());
         record("L28", "PIN sai dinh dang -> khong gui APDU doc ho so",
                 !shortPin.ok() && shortPin.text().contains("6 chữ số"), true);
     }
@@ -1834,7 +1834,7 @@ public final class CardGatewayVerify {
         try {
             String statusBefore = statusFingerprint(gateway);
 
-            CardGateway.Result read = gateway.readProfileWithPin(pin);
+            CardOperationResult read = gateway.readProfileWithPin(pin);
             Profile profile = gateway.lastProfile();
             record("L30", "VERIFY + GET_PROFILE -> 9000, parser PASS",
                     read.ok() && read.text().contains("parser=PASS") && profile != null, true);
@@ -1860,20 +1860,20 @@ public final class CardGatewayVerify {
             System.out.println("    " + read.text());
             String firstEvidence = profile == null ? "" : profile.evidence();
 
-            CardGateway.Result second = gateway.readProfile(0x00, 0x00);
+            CardOperationResult second = gateway.readProfile(0x00, 0x00);
             record("L36", "doc lai khong VERIFY -> 6982 (quyen da tieu thu)",
                     !second.ok() && gateway.lastResponseSw() == Sw.SECURITY_NOT_SATISFIED, true);
 
             gateway.verifyStudentPin(pin);
-            CardGateway.Result wrongP1 = gateway.readProfile(0x01, 0x00);
+            CardOperationResult wrongP1 = gateway.readProfile(0x01, 0x00);
             record("L37", "GET_PROFILE sai P1 -> 6A86",
                     !wrongP1.ok() && gateway.lastResponseSw() == Sw.WRONG_P1P2, true);
-            CardGateway.Result afterError = gateway.readProfile(0x00, 0x00);
+            CardOperationResult afterError = gateway.readProfile(0x00, 0x00);
             record("L38", "loi 6A86 xoa quyen -> doc dung tra 6982",
                     !afterError.ok() && gateway.lastResponseSw() == Sw.SECURITY_NOT_SATISFIED, true);
 
             gateway.verifyStudentPin(pin);
-            CardGateway.Result metaRead = gateway.readProfileCryptoMetaWithPin(pin);
+            CardOperationResult metaRead = gateway.readProfileCryptoMetaWithPin(pin);
             ProfileCryptoMeta meta = gateway.lastProfileMeta();
             record("L39", "VERIFY + GET_PROFILE_CRYPTO_META -> 9000, 65 byte",
                     metaRead.ok() && metaRead.text().contains("dataLen=65") && meta != null, true);
@@ -1887,19 +1887,19 @@ public final class CardGatewayVerify {
                     meta != null && !meta.ciphertextHashHex().matches("0+"), true);
             System.out.println("    " + metaRead.text());
 
-            CardGateway.Result metaAgain = gateway.readProfileCryptoMeta(0x00, 0x00);
+            CardOperationResult metaAgain = gateway.readProfileCryptoMeta(0x00, 0x00);
             record("L43", "doc lai metadata khong VERIFY -> 6982",
                     !metaAgain.ok() && gateway.lastResponseSw() == Sw.SECURITY_NOT_SATISFIED, true);
 
             gateway.verifyStudentPin(pin);
-            CardGateway.Result metaWrongP2 = gateway.readProfileCryptoMeta(0x00, 0x01);
+            CardOperationResult metaWrongP2 = gateway.readProfileCryptoMeta(0x00, 0x01);
             record("L44", "metadata sai P2 -> 6A86",
                     !metaWrongP2.ok() && gateway.lastResponseSw() == Sw.WRONG_P1P2, true);
-            CardGateway.Result metaAfterError = gateway.readProfileCryptoMeta(0x00, 0x00);
+            CardOperationResult metaAfterError = gateway.readProfileCryptoMeta(0x00, 0x00);
             record("L45", "loi 6A86 xoa quyen -> doc metadata tra 6982",
                     !metaAfterError.ok() && gateway.lastResponseSw() == Sw.SECURITY_NOT_SATISFIED, true);
 
-            CardGateway.Result profileAgain = gateway.readProfileWithPin(pin);
+            CardOperationResult profileAgain = gateway.readProfileWithPin(pin);
             record("L46", "doc lai ho so cho cung fingerprint",
                     profileAgain.ok() && gateway.lastProfile() != null
                     && gateway.lastProfile().evidence().equals(firstEvidence), true);
@@ -1931,10 +1931,10 @@ public final class CardGatewayVerify {
         char[] wrongPin = shiftDigits(pin, 5);
         char[] wrongAdmin = shiftDigits(admin, 1);
         try {
-            CardGateway.Result verify = gateway.verifyStudentPin(pin);
+            CardOperationResult verify = gateway.verifyStudentPin(pin);
             record("M30", "VERIFY PIN dung tren the that -> 9000", verify.ok(), true);
 
-            CardGateway.Result wrong = gateway.verifyStudentPin(wrongPin);
+            CardOperationResult wrong = gateway.verifyStudentPin(wrongPin);
             record("M31", "VERIFY PIN sai -> 63Cx", gateway.lastResponseSw() == 0x63C2, true);
             gateway.verifyStudentPin(pin);
 
@@ -1945,7 +1945,7 @@ public final class CardGatewayVerify {
             System.out.println("    fingerprint truoc CHANGE: status=" + statusBefore
                     + " | receipt=" + receiptBefore);
 
-            CardGateway.Result change = gateway.changeStudentPin(pin, changed);
+            CardOperationResult change = gateway.changeStudentPin(pin, changed);
             record("M32", "CHANGE PIN dung -> 9000", change.ok(), true);
 
             gateway.verifyStudentPin(pin);
@@ -1976,7 +1976,7 @@ public final class CardGatewayVerify {
                     gateway.lastResponseSw() == Sw.AUTH_BLOCKED, true);
 
             String lockedStatus = statusFingerprint(gateway);
-            CardGateway.Result wrongUnblock = gateway.unblockStudentPin(wrongAdmin, unblocked);
+            CardOperationResult wrongUnblock = gateway.unblockStudentPin(wrongAdmin, unblocked);
             record("M41", "UNBLOCK admin PIN sai bi tu choi",
                     !wrongUnblock.ok()
                     && ((gateway.lastResponseSw() & 0xFF00) == 0x6300
@@ -1987,7 +1987,7 @@ public final class CardGatewayVerify {
             record("M43", "admin PIN sai khong doi lifecycle/cardId",
                     statusFingerprint(gateway).equals(lockedStatus), true);
 
-            CardGateway.Result unblock = gateway.unblockStudentPin(admin, unblocked);
+            CardOperationResult unblock = gateway.unblockStudentPin(admin, unblocked);
             record("M44", "UNBLOCK admin PIN dung -> 9000", unblock.ok(), true);
             record("M45", "PIN moi dung duoc sau UNBLOCK",
                     gateway.verifyStudentPin(unblocked).ok(), true);
@@ -2011,18 +2011,18 @@ public final class CardGatewayVerify {
     }
 
     private static String statusFingerprint(CardGateway gateway) {
-        CardGateway.Status current = gateway.status();
+        CardStatus current = gateway.status();
         return current == null ? "no-status"
                 : current.lifecycle() + "/" + current.cardId();
     }
 
     private static String receiptFingerprint(CardGateway gateway, char[] pin)
             throws CardException {
-        CardGateway.Result verify = gateway.verifyStudentPin(pin);
+        CardOperationResult verify = gateway.verifyStudentPin(pin);
         if (!verify.ok()) {
             return "verify-loi:" + gateway.lastResponseSw();
         }
-        CardGateway.Result receipt = gateway.readLastReceipt(null);
+        CardOperationResult receipt = gateway.readLastReceipt(null);
         return receipt.ok() ? receipt.text() : "khong-receipt:" + gateway.lastResponseSw();
     }
 
@@ -2050,7 +2050,7 @@ public final class CardGatewayVerify {
         String displayName = "Nguyễn Văn Ánh";
         char[] wrongAdmin = shiftedDigits(adminPin);
         try {
-            CardGateway.Status before = gateway.status();
+            CardStatus before = gateway.status();
             boolean alreadyIssued = before != null && before.lifecycle() == 0x01;
             if (alreadyIssued) {
                 skip("W01", "PERSONALIZE the moi -> 9000 + ISSUED + cardId",
@@ -2063,7 +2063,7 @@ public final class CardGatewayVerify {
                 skip("W03", "admin PIN sai -> 63Cx khong lo PIN", "chua bat -Dlabaccess.personalize");
                 skip("W04", "admin PIN sai khong doi lifecycle", "chua bat -Dlabaccess.personalize");
             } else {
-                CardGateway.Result wrong = gateway.personalize(
+                CardOperationResult wrong = gateway.personalize(
                         wrongAdmin, CARD_ID, studentId, studentPin, displayName);
                 record("W03", "admin PIN sai -> 63Cx, khong lo PIN",
                         !wrong.ok() && wrong.text().contains("admin PIN sai")
@@ -2071,13 +2071,13 @@ public final class CardGatewayVerify {
                         && !mentionsDigits(wrong.text(), adminPin)
                         && !mentionsDigits(wrong.text(), wrongAdmin), true);
 
-                CardGateway.Result afterWrong = gateway.identify();
+                CardOperationResult afterWrong = gateway.identify();
                 record("W04", "admin PIN sai khong doi lifecycle va cardId",
                         afterWrong.ok() && gateway.status() != null
                         && gateway.status().lifecycle() == 0x00
                         && gateway.status().cardId().equals("0000000000000000"), true);
 
-                CardGateway.Result first = gateway.personalize(
+                CardOperationResult first = gateway.personalize(
                         adminPin, CARD_ID, studentId, studentPin, displayName);
                 System.out.println("    " + first.text());
                 record("W01", "PERSONALIZE the moi -> 9000 + ISSUED + cardId",
@@ -2091,7 +2091,7 @@ public final class CardGatewayVerify {
                         && CARD_ID.equalsIgnoreCase(gateway.status().cardId()), true);
             }
 
-            CardGateway.Result second = gateway.personalize(
+            CardOperationResult second = gateway.personalize(
                     adminPin, CARD_ID, studentId, studentPin, displayName);
             record("W05", "PERSONALIZE lan hai bi tu choi 6985",
                     !second.ok() && second.text().contains("6985")
@@ -2136,20 +2136,20 @@ public final class CardGatewayVerify {
             Path file = dir.resolve("pending-journal.txt");
             PendingJournal journal = new PendingJournal(file);
 
-            CardGateway.Result publicKey = gateway.readCardPublicKey();
+            CardOperationResult publicKey = gateway.readCardPublicKey();
             System.out.println("    GET_CARD_PUBLIC_KEY -> " + publicKey.text());
             record("X02", "doc public key that INS 61 tu the",
                     publicKey.ok() && gateway.cardPublicKey() != null
                             && ReceiptVerifier.encodePoint(gateway.cardPublicKey()) != null,
                     true);
 
-            CardGateway.Result verify = gateway.verifyStudentPin(studentPin);
+            CardOperationResult verify = gateway.verifyStudentPin(studentPin);
             System.out.println("    VERIFY -> " + verify.text());
             record("X01", "VERIFY dung PIN tren the ISSUED -> 9000", verify.ok(), true);
 
             long counterBefore = 0;
             int balanceBefore = 0;
-            CardGateway.Result baseline = gateway.readLastReceipt(null);
+            CardOperationResult baseline = gateway.readLastReceipt(null);
             System.out.println("    baseline receipt -> " + baseline.text());
             if (baseline.ok() && gateway.lastReceipt() != null) {
                 counterBefore = gateway.lastReceipt().counterAfter();
@@ -2161,7 +2161,7 @@ public final class CardGatewayVerify {
             ReceiptExpectation expectation = new ReceiptExpectation(
                     HexFormat.of().parseHex(gateway.status().cardId()), counterBefore + 1,
                     Receipt.OPERATION_GRANT, null);
-            CardGateway.Result grant = gateway.runStateTransaction(journal,
+            CardOperationResult grant = gateway.runStateTransaction(journal,
                     new CardGateway.TransactionPlan(expectation, 5, balanceBefore + 5),
                     gateway.grantCommand(adminPin, 5), studentPin);
             System.out.println("    GRANT+receipt -> " + grant.text());
@@ -2650,7 +2650,7 @@ public final class CardGatewayVerify {
         }));
 
         byte[] image = syntheticPhoto();
-        CardGateway.Result upload = gateway.uploadPhoto(image, ADMIN_PIN_TEXT.toCharArray());
+        CardOperationResult upload = gateway.uploadPhoto(image, ADMIN_PIN_TEXT.toCharArray());
         record("PH01", "uploadPhoto đủ 4096 byte trả 9000 và FINISH đúng một lần",
                 upload.ok() && card.finishCount() == 1, true);
         record("PH02", "số byte thẻ nhận đúng 4096", card.receivedBytes(), PHOTO_LENGTH);
@@ -2660,13 +2660,13 @@ public final class CardGatewayVerify {
 
         CardGateway lengthGateway = readyGateway(issuedChannel(command -> card.apply(command)));
         int before = card.chunksAccepted();
-        CardGateway.Result shortImage = lengthGateway.uploadPhoto(new byte[1024], ADMIN_PIN_TEXT.toCharArray());
+        CardOperationResult shortImage = lengthGateway.uploadPhoto(new byte[1024], ADMIN_PIN_TEXT.toCharArray());
         record("PH05", "uploadPhoto từ chối 1024 byte trước khi gửi APDU",
                 !shortImage.ok() && card.chunksAccepted() == before, true);
 
         PhotoCard fresh = new PhotoCard();
         CardGateway offline = readyGateway(issuedChannel(command -> fresh.apply(command)));
-        CardGateway.Result badPin = offline.uploadPhoto(image, "12ab5678".toCharArray());
+        CardOperationResult badPin = offline.uploadPhoto(image, "12ab5678".toCharArray());
         record("PH06", "admin PIN không phải ASCII số trả 6A80",
                 !badPin.ok() && badPin.text().contains("6A80"), true);
         record("PH07", "admin PIN sai định dạng không tiêu lượt thử", fresh.adminTries(), 5);
@@ -2679,7 +2679,7 @@ public final class CardGatewayVerify {
             return ready.apply(command);
         }));
         readyCard.uploadPhoto(image, ADMIN_PIN_TEXT.toCharArray());
-        CardGateway.Result second = readyCard.uploadPhoto(image, ADMIN_PIN_TEXT.toCharArray());
+        CardOperationResult second = readyCard.uploadPhoto(image, ADMIN_PIN_TEXT.toCharArray());
         record("PH08", "uploadPhoto lần hai khi photoReady=true trả 6985",
                 !second.ok() && second.text().contains("6985"), true);
 
@@ -2690,7 +2690,7 @@ public final class CardGatewayVerify {
             }
             return notReadyCard.apply(command);
         }));
-        CardGateway.Result notReady = notReadyGateway.readPhoto("654321".toCharArray());
+        CardOperationResult notReady = notReadyGateway.readPhoto("654321".toCharArray());
         record("PH09", "readPhoto khi photoReady=false trả 6985",
                 !notReady.ok() && notReady.text().contains("6985"), true);
 
@@ -2701,7 +2701,7 @@ public final class CardGatewayVerify {
             }
             return refusedCard.apply(command);
         }));
-        CardGateway.Result refused = refusedGateway.readPhoto("654321".toCharArray());
+        CardOperationResult refused = refusedGateway.readPhoto("654321".toCharArray());
         record("PH10", "VERIFY thất bại thì không gửi chunk đọc nào",
                 !refused.ok() && refusedCard.readAttempts() == 0, true);
 
@@ -2714,7 +2714,7 @@ public final class CardGatewayVerify {
         }));
         reader.uploadPhoto(image, ADMIN_PIN_TEXT.toCharArray());
 
-        CardGateway.Result readBack = reader.readPhoto("654321".toCharArray());
+        CardOperationResult readBack = reader.readPhoto("654321".toCharArray());
         record("PH11", "readPhoto đọc lại đủ 4096 byte", readBack.ok(), true);
         record("PH12", "ảnh đọc lại khớp từng byte với nguồn",
                 firstMismatch(image, reader.lastPhoto()) == null, true);
@@ -2888,7 +2888,7 @@ public final class CardGatewayVerify {
                 gateway.transmitPhotoBegin(beginData).getSW() == Sw.OK, true);
         record("PH39", "thẻ thật: chunk 0 sau khi mở lại trả 9000",
                 gateway.transmitPhotoWriteChunk(0, firstChunk).getSW() == Sw.OK, true);
-        CardGateway.Result interleavedVerify = gateway.verifyStudentPin(student);
+        CardOperationResult interleavedVerify = gateway.verifyStudentPin(student);
         record("PH40", "thẻ thật: VERIFY xen giữa upload vẫn trả 9000",
                 interleavedVerify.ok(), true);
         record("PH41", "thẻ thật: lệnh xen giữa đóng phiên upload (WRITE trả 6985)",
@@ -2911,21 +2911,21 @@ public final class CardGatewayVerify {
                 gateway.transmitPhotoWriteChunk(0, firstChunk).getSW()
                         == Sw.CONDITIONS_NOT_SATISFIED, true);
 
-        CardGateway.Result noPhoto = gateway.readPhoto(student);
+        CardOperationResult noPhoto = gateway.readPhoto(student);
         record("PH32", "thẻ thật: ảnh dở dang không đọc được (6985)",
                 !noPhoto.ok() && noPhoto.text().contains("6985"), true);
 
-        CardGateway.Result upload = gateway.uploadPhoto(image, admin);
+        CardOperationResult upload = gateway.uploadPhoto(image, admin);
         record("PH20", "thẻ thật: upload 4096 byte qua 32 chunk + FINISH trả 9000", upload.ok(), true);
         if (!upload.ok()) {
             System.out.println("      chi tiet: " + upload.text());
         }
 
-        CardGateway.Result secondBegin = gateway.uploadPhoto(image, admin);
+        CardOperationResult secondBegin = gateway.uploadPhoto(image, admin);
         record("PH21", "thẻ thật: upload lần hai bị từ chối vì photoReady=true",
                 !secondBegin.ok() && secondBegin.text().contains("6985"), true);
 
-        CardGateway.Result read = gateway.readPhoto(student);
+        CardOperationResult read = gateway.readPhoto(student);
         record("PH22", "thẻ thật: VERIFY một lần + 32 chunk đọc trả 9000", read.ok(), true);
         if (!read.ok()) {
             System.out.println("      chi tiet: " + read.text());
@@ -2933,7 +2933,7 @@ public final class CardGatewayVerify {
         record("PH23", "thẻ thật: ảnh đọc lại khớp từng byte với nguồn",
                 firstMismatch(image, gateway.lastPhoto()) == null, true);
 
-        CardGateway.Result again = gateway.readPhoto(student);
+        CardOperationResult again = gateway.readPhoto(student);
         record("PH24", "thẻ thật: đọc lại cần VERIFY mới (quyền đã tiêu thụ)",
                 again.ok(), true);
         record("PH25", "thẻ thật: sau khi hết chuỗi, READ_CHUNK offset 0 trả 6982",
@@ -2975,7 +2975,7 @@ public final class CardGatewayVerify {
                 gateway.transmitPhotoBegin(beginData).getSW() == Sw.OK, true);
         record("PH62", "deselect: khong FINISH nao xay ra (FINISH khi chua du byte tra 6985)",
                 gateway.transmitPhotoFinish().getSW() == Sw.CONDITIONS_NOT_SATISFIED, true);
-        CardGateway.Result deselectedRead = gateway.readPhoto(student);
+        CardOperationResult deselectedRead = gateway.readPhoto(student);
         record("PH63", "deselect: anh dở dang van khong doc duoc (6985)",
                 !deselectedRead.ok() && deselectedRead.text().contains("6985"), true);
 
@@ -2995,7 +2995,7 @@ public final class CardGatewayVerify {
                 gateway.transmitPhotoBegin(beginData).getSW() == Sw.OK, true);
         record("PH69", "reset: khong FINISH nao xay ra (FINISH khi chua du byte tra 6985)",
                 gateway.transmitPhotoFinish().getSW() == Sw.CONDITIONS_NOT_SATISFIED, true);
-        CardGateway.Result resetRead = gateway.readPhoto(student);
+        CardOperationResult resetRead = gateway.readPhoto(student);
         record("PH70", "reset: anh dở dang van khong doc duoc (6985)",
                 !resetRead.ok() && resetRead.text().contains("6985"), true);
 
@@ -3099,7 +3099,7 @@ public final class CardGatewayVerify {
             int finishSw = gateway.transmitPhotoFinish().getSW();
             record("PH75", "hai client: khong FINISH nao xay ra (FINISH tra 6985)",
                     finishSw == Sw.CONDITIONS_NOT_SATISFIED, true);
-            CardGateway.Result contendedRead = gateway.readPhoto(liveSecret(false));
+            CardOperationResult contendedRead = gateway.readPhoto(liveSecret(false));
             record("PH76", "hai client: anh dở dang van khong doc duoc (6985)",
                     !contendedRead.ok() && contendedRead.text().contains("6985"), true);
             record("PH77", "hai client: B ket thuc trong han (exited=" + exitedFinal + " exit=" + exitCode + ")",
@@ -3174,7 +3174,7 @@ public final class CardGatewayVerify {
     private static CardGateway readyGateway(CardChannel channel) {
         CardGateway gateway = new CardGateway(channel);
         try {
-            CardGateway.Result result = gateway.identify();
+            CardOperationResult result = gateway.identify();
             if (!result.ok()) {
                 throw new IllegalStateException("fixture identify loi: " + result.text());
             }
@@ -3330,7 +3330,7 @@ public final class CardGatewayVerify {
                 counterBefore = before.counterAfter();
                 balanceBefore = before.balanceAfter();
             } else {
-                CardGateway.Result read = gateway.readLastReceipt(null);
+                CardOperationResult read = gateway.readLastReceipt(null);
                 if (!read.ok() || gateway.lastReceipt() == null) {
                     record("Z00", "khong doc duoc receipt baseline truoc fault", false, true);
                     System.out.println("    baseline: " + read.text());
@@ -3352,7 +3352,7 @@ public final class CardGatewayVerify {
             ReceiptExpectation expectation = new ReceiptExpectation(
                     HexFormat.of().parseHex(gateway.status().cardId()), counterBefore + 1,
                     Receipt.OPERATION_GRANT, null);
-            CardGateway.Result fault = gateway.runStateTransaction(journal,
+            CardOperationResult fault = gateway.runStateTransaction(journal,
                     new CardGateway.TransactionPlan(expectation, faultDelta,
                             balanceBefore + faultDelta),
                     gateway.grantCommand(adminPin, faultDelta), studentPin);
@@ -3363,7 +3363,7 @@ public final class CardGatewayVerify {
                             && gateway.reconciliation().state() == Reconciliation.State.UNKNOWN,
                     true);
 
-            CardGateway.Result blocked = gateway.runStateTransaction(journal,
+            CardOperationResult blocked = gateway.runStateTransaction(journal,
                     new CardGateway.TransactionPlan(expectation, 1, balanceBefore + 1),
                     gateway.grantCommand(adminPin, 1), studentPin);
             record("Z02", "sau fault, giao dich moi bi chan truoc khi gui APDU",
@@ -3381,7 +3381,7 @@ public final class CardGatewayVerify {
                     reloaded.present() && reloaded.valid()
                             && reloaded.status() == PendingJournal.Status.PENDING, true);
 
-            CardGateway.Result reconciled = gateway.reconcilePending(journal, studentPin);
+            CardOperationResult reconciled = gateway.reconcilePending(journal, studentPin);
             System.out.println("    RECONCILE -> " + reconciled.text());
             record("Z05", "doi soat EXECUTED + ECDSA PASS + journal xoa",
                     reconciled.ok() && reconciled.text().contains("ECDSA=PASS")

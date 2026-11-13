@@ -5,14 +5,11 @@ import java.util.HexFormat;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
-import javafx.geometry.Insets;
-import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.FlowPane;
-import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
 final class PersonalizePanel {
@@ -107,7 +104,7 @@ final class PersonalizePanel {
             valuePublicKey.setText("Chưa đọc khóa công khai");
             return;
         }
-        CardGateway.Status current = gateway.status();
+        CardStatus current = gateway.status();
         String cardId = current == null ? "chưa nhận diện" : current.cardId();
         valuePublicKey.setText(String.format("%s | cardId=%s | %s",
                 key.getAlgorithm() + "/" + key.getFormat(),

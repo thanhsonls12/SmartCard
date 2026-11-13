@@ -6,7 +6,7 @@ import javax.smartcardio.ResponseAPDU;
 
 final class CardStatusCodec {
 
-    record Parsed(CardGateway.Status status, String problem) {
+    record Parsed(CardStatus status, String problem) {
         boolean ok() {
             return status != null;
         }
@@ -99,7 +99,7 @@ final class CardStatusCodec {
             activeVisit = activeFlag == 1;
             activeVisitId = CardGateway.hex(visitId);
         }
-        return new Parsed(new CardGateway.Status(version, lifecycle, CardGateway.hex(returnedAid),
+        return new Parsed(new CardStatus(version, lifecycle, CardGateway.hex(returnedAid),
                 CardGateway.hex(cardId), stateIncluded, balance, counter, activeVisit, activeVisitId), null);
     }
 
