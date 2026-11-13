@@ -37,6 +37,10 @@ final class Reconciliation {
         detail = cause == null ? "" : cause;
     }
 
+    /**
+     * Chỉ phân loại receipt so với kỳ vọng. Không đổi state: bên gọi chỉ được chuyển KNOWN sau khi
+     * đã đủ bằng chứng và journal đã đóng.
+     */
     Verdict resolve(Receipt receipt, ReceiptExpectation expectation) {
         String cardProblem = expectation.cardProblem(receipt);
         if (cardProblem != null) {
@@ -50,13 +54,11 @@ final class Reconciliation {
                 detail = String.join("; ", problems);
                 return Verdict.MISMATCH;
             }
-            state = State.KNOWN;
             detail = "";
             return Verdict.EXECUTED;
         }
 
         if (receipt.counterAfter() == expectation.counterAfter() - 1) {
-            state = State.KNOWN;
             detail = "";
             return Verdict.NOT_EXECUTED;
         }
