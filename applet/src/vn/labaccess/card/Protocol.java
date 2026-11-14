@@ -169,6 +169,9 @@ final class Protocol {
     static final short STATUS_AUTH_STATE_LENGTH =
             (short) (STATUS_AUTH_OFFSET_ACTIVE_VISIT_ID + VISIT_ID_LENGTH);
 
+    private Protocol() {
+    }
+
     static short statusResponseLength(byte instanceAidLength) {
         return (short) (OFFSET_INSTANCE_AID + instanceAidLength + 1 + CARD_ID_LENGTH);
     }
@@ -191,8 +194,5 @@ final class Protocol {
 
     static short profileResponseLength(short studentIdLength, short displayNameLength) {
         return (short) (profileDisplayNameLengthOffset(studentIdLength) + 1 + displayNameLength);
-    }
-
-    private Protocol() {
     }
 }
