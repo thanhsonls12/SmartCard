@@ -422,8 +422,8 @@ final class BackendClient {
             if (message != null && message.isTextual() && !message.asText().isBlank()) {
                 detail = message.asText();
             }
-        } catch (JsonProcessingException ignored) {
-            // Thân lỗi không phải JSON: giữ nguyên văn bản thô để người vận hành đọc được.
+        } catch (JsonProcessingException notJson) {
+            return String.format("HTTP %d | %s", status, detail);
         }
         return String.format("HTTP %d | %s", status, detail);
     }

@@ -16,8 +16,10 @@ final class ProfilePanel {
     private final Consumer<String> log;
 
     private final PasswordField fieldPin = new PasswordField();
+    private final Label pinError = UiLabels.fieldError();
     private final Button btnProfile = new Button("Đọc hồ sơ");
     private final Button btnMeta = new Button("Đọc thông tin mã hóa");
+    private final Label why = UiLabels.whyNote();
     private final Label valueStudentId = UiLabels.value();
     private final Label valueName = UiLabels.value();
     private final Label valueAlgorithm = UiLabels.value();
@@ -26,6 +28,7 @@ final class ProfilePanel {
     private final Label noteProfile = UiLabels.caption("Chưa đọc hồ sơ");
     private final Label noteMeta = UiLabels.caption("Chưa đọc thông tin mã hóa");
     private final VBox node;
+    private final VBox technical;
 
     ProfilePanel(CardGateway gateway, CardOpRunner runner, Consumer<String> log) {
         this.gateway = gateway;
@@ -33,6 +36,9 @@ final class ProfilePanel {
         this.log = log;
 
         fieldPin.setPrefColumnCount(8);
+        fieldPin.setPromptText(PersonalizeRequest.STUDENT_PIN_LENGTH + " chữ số");
+        fieldPin.textProperty().addListener(
+                (observable, was, now) -> UiLabels.clearFieldError(pinError));
         btnProfile.setOnAction(e -> readProfile());
         btnMeta.setOnAction(e -> readMeta());
         UiLabels.apduHint(btnProfile, "GET_PROFILE");
@@ -40,8 +46,8 @@ final class ProfilePanel {
         btnProfile.getStyleClass().add("la-action");
         btnMeta.getStyleClass().add("la-action");
 
-        FlowPane controls = UiRows.wrapping(
-                UiRows.field("PIN học viên", fieldPin), btnProfile, btnMeta);
+        VBox pinField = UiRows.field("PIN học viên", fieldPin, pinError);
+        FlowPane controls = UiRows.wrapping(pinField, btnProfile);
 
         VBox profileBlock = new VBox(UiScale.SPACE_2,
                 noteProfile,
@@ -54,7 +60,9 @@ final class ProfilePanel {
                 UiRows.pair(UiLabels.caption("Phiên bản bản ghi"), valueRecordVersion),
                 UiRows.pair(UiLabels.caption("Độ dài bản mã"), valueCiphertextLength));
 
-        node = UiSection.of("Đọc hồ sơ — PIN học viên", controls, profileBlock, metaBlock);
+        technical = new VBox(UiScale.SPACE_2, btnMeta, metaBlock);
+        UiLabels.show(technical, false);
+        node = UiSection.of("Hồ sơ học viên", controls, why, profileBlock, technical);
         clearView();
     }
 
@@ -62,13 +70,24 @@ final class ProfilePanel {
         return node;
     }
 
-    void setEnabled(boolean enabled) {
+    void showTechnical(boolean visible) {
+        UiLabels.show(technical, visible);
+    }
+
+    void setEnabled(boolean enabled, String whyDisabled) {
         fieldPin.setDisable(!enabled);
         btnProfile.setDisable(!enabled);
         btnMeta.setDisable(!enabled);
+        UiLabels.setWhy(why, whyDisabled);
+    }
+
+    void clearInputs() {
+        fieldPin.clear();
+        UiLabels.clearFieldError(pinError);
     }
 
     void clearView() {
+        clearInputs();
         valueStudentId.setText("-");
         valueName.setText("-");
         valueAlgorithm.setText("-");
@@ -108,9 +127,10 @@ final class ProfilePanel {
 
     private void readProfile() {
         char[] pin = fieldPin.getText().toCharArray();
-        if (!digits(pin, 6)) {
+        if (!digits(pin, PersonalizeRequest.STUDENT_PIN_LENGTH)) {
             Arrays.fill(pin, '\0');
-            log.accept("[FAIL] đọc hồ sơ: PIN học viên phải đúng 6 chữ số");
+            showPinError();
+            UiLabels.inputProblem(log, fieldPin, "Đọc hồ sơ: " + PersonalizeRequest.studentPinProblem());
             return;
         }
         fieldPin.clear();
@@ -125,9 +145,10 @@ final class ProfilePanel {
 
     private void readMeta() {
         char[] pin = fieldPin.getText().toCharArray();
-        if (!digits(pin, 6)) {
+        if (!digits(pin, PersonalizeRequest.STUDENT_PIN_LENGTH)) {
             Arrays.fill(pin, '\0');
-            log.accept("[FAIL] đọc thông tin mã hóa: PIN học viên phải đúng 6 chữ số");
+            showPinError();
+            UiLabels.inputProblem(log, fieldPin, "Đọc thông tin mã hóa: " + PersonalizeRequest.studentPinProblem());
             return;
         }
         fieldPin.clear();
@@ -138,6 +159,11 @@ final class ProfilePanel {
                 Arrays.fill(pin, '\0');
             }
         }, this::showMeta);
+    }
+
+    private void showPinError() {
+        UiLabels.setFieldError(pinError,
+                "PIN học viên phải đúng " + PersonalizeRequest.STUDENT_PIN_LENGTH + " chữ số.");
     }
 
     private static boolean digits(char[] pin, int length) {

@@ -5,9 +5,11 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import javafx.scene.Node;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TitledPane;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.VBox;
 
@@ -20,11 +22,12 @@ final class ReceiptPanel {
     }
 
     record Session(BooleanSupplier open, Supplier<PendingJournal.Loaded> pendingJournal,
+            java.nio.file.Path journalFile,
             Supplier<char[]> studentPin, Runnable studentPinCleared,
             PendingReconcile reconcilePending, Runnable historyInvalidated,
             Runnable historyRemembered, Runnable historyPublished, Runnable buttonsRefreshed,
             Runnable headerReconcile, Consumer<Boolean> receiptFinished,
-            Consumer<Boolean> reconcileFinished) {
+            Consumer<Boolean> reconcileFinished, Runnable pinRequired) {
     }
 
     private final CardGateway gateway;
@@ -34,9 +37,10 @@ final class ReceiptPanel {
 
     private final TextField fieldVisitId = new TextField();
     private final ReceiptView receiptView = new ReceiptView();
-    private final Button btnReadReceipt = new Button("Đọc biên nhận cuối", Icons.receipt());
+    private boolean canRead;
     private final Button btnReconcile = new Button("Đối soát giao dịch", Icons.reconcile());
-    private final Label why = App.whyNote();
+    private final Label why = UiLabels.whyNote();
+    private String pinNote;
     private final VBox node;
 
     ReceiptPanel(CardGateway gateway, CardOpRunner runner, Consumer<String> log,
@@ -47,20 +51,26 @@ final class ReceiptPanel {
         this.session = session;
 
         fieldVisitId.setPrefColumnCount(34);
-        fieldVisitId.setPromptText("32 ký tự hex của ca đang mở");
+        fieldVisitId.setPromptText("Chưa đọc trạng thái ca");
         fieldVisitId.setEditable(false);
 
-        btnReadReceipt.getStyleClass().add("la-action");
         btnReconcile.getStyleClass().add("la-action");
-        UiLabels.apduHint(btnReadReceipt,
-                "VERIFY_STUDENT_PIN + GET_LAST_RECEIPT\nCần nhận diện thẻ và không có biên nhận chờ đối soát");
-        UiLabels.apduHint(btnReconcile, "RECONCILE_PENDING\nCần có biên nhận chờ đối soát");
-        btnReadReceipt.setOnAction(e -> readReceipt());
-        btnReconcile.setOnAction(e -> reconcile());
+        btnReconcile.setOnAction(e -> {
+            PendingJournal.Loaded loaded = session.pendingJournal().get();
+            if (JournalRecoveryView.needed(loaded)) {
+                JournalRecoveryView.show(btnReconcile, loaded, session.journalFile());
+            } else {
+                reconcile();
+            }
+        });
 
-        FlowPane controls = UiRows.wrapping(
-                UiRows.field("Visit ID đang mở", fieldVisitId), btnReadReceipt);
-        node = UiSection.of("Biên nhận", controls, why, receiptView.node());
+        VBox visitIdField = UiRows.field("Mã ca đang mở", fieldVisitId);
+        FlowPane controls = UiRows.wrapping(visitIdField);
+        TitledPane details = new TitledPane("Chi tiết biên nhận",
+                new VBox(UiScale.SPACE_2, controls, receiptView.detailsNode()));
+        details.setExpanded(false);
+        details.getStyleClass().add("la-receipt-details");
+        node = UiSection.of("Biên nhận gần nhất", receiptView.node(), why, details);
     }
 
     VBox node() {
@@ -79,41 +89,82 @@ final class ReceiptPanel {
         return btnReconcile.isDisable() ? "khoa" : "mo";
     }
 
-    String reconcileLockReason(String whyReconcile) {
-        return whyReconcile != null && btnReconcile.isDisable()
-                ? btnReconcile.getText() + ": " + whyReconcile
-                : null;
+    void applyLock(boolean busy, String whyReadReceipt, String whyReconcile) {
+        canRead = whyReadReceipt == null;
+        boolean recovery = JournalRecoveryView.needed(session.pendingJournal().get());
+        btnReconcile.setText(recovery ? "Hướng dẫn khôi phục" : "Đối soát giao dịch");
+        btnReconcile.setTooltip(new javafx.scene.control.Tooltip(recovery
+                ? "Xem nguyên nhân và các bước xử lý nhật ký; không thay đổi dữ liệu"
+                : whyReconcile == null ? "Đọc biên nhận để đối soát giao dịch" : whyReconcile));
+        btnReconcile.setDisable(recovery ? busy : whyReconcile != null);
+        UiLabels.setWhy(why, pinNote != null ? pinNote
+                : busy ? App.BUSY_NOTE : null);
     }
 
-    void applyLock(boolean busy, String whyReadReceipt, String whyReconcile) {
-        btnReadReceipt.setDisable(whyReadReceipt != null);
-        btnReconcile.setDisable(whyReconcile != null);
-        App.setWhy(why, busy ? App.BUSY_NOTE
-                : App.whyLine(btnReadReceipt, whyReadReceipt));
+    boolean reconcileEnabled() {
+        return !btnReconcile.isDisable();
+    }
+
+    void setReconcilePrimary(boolean primary) {
+        UiLabels.markPrimary(btnReconcile, primary && !btnReconcile.isDisable());
     }
 
     void lockAll() {
-        btnReadReceipt.setDisable(true);
+        canRead = false;
         btnReconcile.setDisable(true);
     }
 
     void clear() {
         fieldVisitId.clear();
+        fieldVisitId.setPromptText("Chưa đọc trạng thái ca");
         receiptView.clear("Chưa đọc biên nhận từ thẻ");
+    }
+
+    private void showPinMissing() {
+        pinNote = "Nhập PIN học viên " + PersonalizeRequest.STUDENT_PIN_LENGTH
+                + " chữ số trong khối Vận hành thẻ.";
+        session.pinRequired().run();
+        UiLabels.setWhy(why, pinNote);
+    }
+
+    private void clearPinNote() {
+        if (pinNote == null) {
+            return;
+        }
+        pinNote = null;
+        session.buttonsRefreshed().run();
+    }
+
+    void studentPinChanged() {
+        clearPinNote();
+    }
+
+    private boolean pinEntered() {
+        char[] studentPin = session.studentPin().get();
+        boolean ok = App.validPin(studentPin, PersonalizeRequest.STUDENT_PIN_LENGTH);
+        App.clearBuffers(studentPin, null);
+        if (!ok) {
+            showPinMissing();
+        }
+        return ok;
     }
 
     void showReceipt() {
         Receipt receipt = gateway.lastReceipt();
         CardStatus status = gateway.status();
         boolean authenticated = status != null && status.studentStateAvailable();
+        PendingJournal.Loaded loaded = session.pendingJournal().get();
+        boolean ledgerPending = loaded.present()
+                && loaded.status() == PendingJournal.Status.PENDING;
         if (receipt == null) {
             receiptView.clear(authenticated ? "Chưa có biên nhận" : "Chưa đọc biên nhận từ thẻ");
         } else {
             receiptView.show(receipt, gateway.lastReceiptSignatureChecked(),
-                    gateway.lastReceiptSignatureOk());
+                    gateway.lastReceiptSignatureOk(), ledgerPending);
         }
         fieldVisitId.setText(authenticated && status.hasActiveVisit()
                 ? status.activeVisitId() : "");
+        fieldVisitId.setPromptText(authenticated ? "Không có ca đang mở" : "Chưa đọc trạng thái ca");
         session.headerReconcile().run();
         if (!gateway.reconciliation().detail().isEmpty()) {
             log.accept("Đối soát: " + gateway.reconciliation().detail());
@@ -121,7 +172,11 @@ final class ReceiptPanel {
     }
 
     boolean pressReadReceipt() {
-        return press(btnReadReceipt);
+        if (!canRead) {
+            return false;
+        }
+        readReceipt();
+        return true;
     }
 
     boolean pressReconcile() {
@@ -134,8 +189,8 @@ final class ReceiptPanel {
             return;
         }
         if (!loaded.valid() || loaded.status() != PendingJournal.Status.PENDING) {
-            gateway.markTransactionUnknown("pending journal cần xử lý thủ công: " + loaded.problem());
-            log.accept("[FAIL] Pending journal: " + loaded.problem() + " — khóa giao dịch");
+            gateway.markTransactionUnknown(JournalRecoveryView.summary(loaded));
+            log.accept("[FAIL] " + JournalRecoveryView.summary(loaded) + " Mở Hướng dẫn khôi phục.");
             session.buttonsRefreshed().run();
             return;
         }
@@ -175,12 +230,11 @@ final class ReceiptPanel {
             session.buttonsRefreshed().run();
             return;
         }
-        char[] studentPin = session.studentPin().get();
-        if (!App.validPin(studentPin, 6)) {
-            App.clearBuffers(studentPin, null);
-            log.accept("[FAIL] đọc biên nhận: PIN học viên phải đúng 6 chữ số");
+        if (!pinEntered()) {
             return;
         }
+        clearPinNote();
+        char[] studentPin = session.studentPin().get();
         session.studentPinCleared().run();
         runner.run("VERIFY + GET_LAST_RECEIPT + GET_STATUS state", () -> {
             try {
@@ -228,33 +282,21 @@ final class ReceiptPanel {
             session.buttonsRefreshed().run();
             return;
         }
-        PendingJournal.Entry cardEntry = loaded.entry();
+        PendingJournal.Entry entry = loaded.entry();
         String identifiedCard = identifiedCardId();
-        if (!cardEntry.cardId().equalsIgnoreCase(identifiedCard)) {
-            blockReconcileOnDifferentCard(cardEntry, identifiedCard);
+        if (!entry.cardId().equalsIgnoreCase(identifiedCard)) {
+            blockReconcileOnDifferentCard(entry, identifiedCard);
             return;
         }
-        PendingJournal.Entry entry = loaded.entry();
-        javafx.scene.control.Alert confirmation = new javafx.scene.control.Alert(
-                javafx.scene.control.Alert.AlertType.CONFIRMATION);
-        confirmation.setTitle("Xác nhận đối soát");
-        confirmation.setHeaderText("Đọc receipt để xử lý pending journal?");
-        confirmation.setContentText(String.format(
-                "cardId=%s, counter=%d, operation=%s%n"
-                        + "Hệ thống sẽ VERIFY student PIN và đọc GET_LAST_RECEIPT. Không gửi lại APDU đổi state.",
-                entry.cardId(), entry.expectedCounter(), Receipt.operationText(entry.operation())));
-        java.util.Optional<javafx.scene.control.ButtonType> choice = confirmation.showAndWait();
-        if (choice.isEmpty() || choice.get() != javafx.scene.control.ButtonType.OK) {
+        if (!pinEntered()) {
+            return;
+        }
+        if (!confirmReconcile(entry)) {
             log.accept("[INFO] RECONCILE_PENDING: operator chưa xác nhận, journal vẫn được giữ");
             return;
         }
-
+        clearPinNote();
         char[] studentPin = session.studentPin().get();
-        if (!App.validPin(studentPin, 6)) {
-            App.clearBuffers(studentPin, null);
-            log.accept("[FAIL] đối soát giao dịch: PIN học viên phải đúng 6 chữ số");
-            return;
-        }
         session.studentPinCleared().run();
         runner.run("RECONCILE_PENDING", () -> {
             session.historyInvalidated().run();
@@ -278,6 +320,18 @@ final class ReceiptPanel {
             showReceipt();
             session.historyPublished().run();
         });
+    }
+
+    private boolean confirmReconcile(PendingJournal.Entry entry) {
+        Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
+        confirmation.setTitle("Xác nhận đối soát");
+        confirmation.setHeaderText("Đọc biên nhận để xử lý nhật ký chờ gửi?");
+        confirmation.setContentText(String.format(
+                "Mã thẻ: %s%nSố giao dịch: %d%nThao tác: %s%n"
+                        + "Hệ thống xác thực PIN học viên và đọc biên nhận để đối chiếu."
+                        + " Không thực hiện lại giao dịch.",
+                entry.cardId(), entry.expectedCounter(), Receipt.operationText(entry.operation())));
+        return UiLabels.confirm(confirmation, node, "Đối soát giao dịch");
     }
 
     private static boolean press(Button button) {

@@ -26,16 +26,20 @@ final class HistoryPanel {
     private final TableView<BackendClient.HistoryEntry> table = new TableView<>();
     private final Button reload = new Button("Tải lịch sử");
     private final Label verdict = new Label("Chưa tải lịch sử");
+    private final Label placeholder = UiLabels.caption("Chưa tải lịch sử");
+    private final Label why = UiLabels.whyNote();
     private final VBox node;
+    private String currentCardId;
 
     HistoryPanel(BackendClient backend, Runner runner, Supplier<String> cardId, Consumer<String> log) {
         this.backend = backend;
         this.runner = runner;
         this.cardId = cardId;
         this.log = log;
+        currentCardId = normalizeCardId(cardId.get());
         table.setId("history-table");
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        table.setPlaceholder(new Label("Chưa có giao dịch trong sổ"));
+        table.setPlaceholder(placeholder);
         table.getColumns().add(idColumn());
         table.getColumns().add(column("Thao tác", entry -> operationLabel(entry.operation())));
         table.getColumns().add(column("Thay đổi", entry -> deltaLabel(entry.delta())));
@@ -47,15 +51,18 @@ final class HistoryPanel {
         reload.setOnAction(event -> request());
         verdict.setId("history-verdict");
         verdict.getStyleClass().add("la-note");
-        node = UiSection.of("Lịch sử giao dịch", reload, verdict, table);
+        verdict.setWrapText(true);
+        placeholder.setWrapText(true);
+        node = UiSection.of("Lịch sử giao dịch", UiRows.wrapping(reload, verdict), why, table);
     }
 
     VBox node() {
         return node;
     }
 
-    void setEnabled(boolean enabled) {
+    void setEnabled(boolean enabled, String whyDisabled) {
         reload.setDisable(!enabled);
+        UiLabels.setWhy(why, whyDisabled);
     }
 
     int rowCount() {
@@ -70,26 +77,58 @@ final class HistoryPanel {
         return true;
     }
 
+    void onCard(String cardId) {
+        String next = normalizeCardId(cardId);
+        if (!next.equals(currentCardId)) {
+            currentCardId = next;
+            clear();
+        }
+    }
+
+    private static String normalizeCardId(String cardId) {
+        return cardId == null || cardId.isBlank() || "-".equals(cardId)
+                ? "" : cardId.strip().toUpperCase(java.util.Locale.ROOT);
+    }
+
     void clear() {
         table.getItems().clear();
         verdict.setText("Chưa tải lịch sử");
+        placeholder.setText("Chưa tải lịch sử");
         UiLabels.applyNoteTone(verdict, UiLabels.Tone.NEUTRAL);
     }
 
     void request() {
-        String id = cardId.get();
-        if (id == null || id.isBlank() || id.equals("-")) {
+        onCard(cardId.get());
+        String id = currentCardId;
+        if (id.isEmpty()) {
             clear();
             verdict.setText("Chưa có mã thẻ để đọc lịch sử");
             UiLabels.applyNoteTone(verdict, UiLabels.Tone.NEUTRAL);
             return;
         }
-        runner.submit("LICH_SU", () -> backend.historyWithLedger(id), this::show, this::showFailure);
+        verdict.setText(table.getItems().isEmpty() ? "Đang tải lịch sử…"
+                : "Đang cập nhật; bảng vẫn là lần tải trước");
+        placeholder.setText("Đang tải lịch sử…");
+        UiLabels.applyNoteTone(verdict, UiLabels.Tone.NEUTRAL);
+        runner.submit("LICH_SU", () -> backend.historyWithLedger(id), load -> {
+            if (id.equals(currentCardId)) {
+                show(load);
+            }
+        }, failure -> {
+            if (id.equals(currentCardId)) {
+                showFailure(failure);
+            }
+        });
     }
 
     void show(BackendClient.HistoryLoad load) {
+        if (!currentCardId.equals(normalizeCardId(load.history().cardId()))) {
+            return;
+        }
         table.getItems().setAll(load.history().entries());
         String problem = mismatch(load);
+        placeholder.setText(problem == null ? "Sổ chưa có giao dịch"
+                : "Chưa thể xác nhận lịch sử — dữ liệu không khớp sổ");
         for (BackendClient.HistoryEntry entry : load.history().entries()) {
             log.accept(String.format(
                     "LICH SU counter=%d id=%s op=%s delta=%+d balanceAfter=%d verify=%s",
@@ -113,8 +152,9 @@ final class HistoryPanel {
     void showFailure(Exception failure) {
         String message = failure.getMessage() == null ? "không đọc được lịch sử" : failure.getMessage();
         int kept = table.getItems().size();
+        placeholder.setText("Không tải được lịch sử. Bấm Tải lịch sử để thử lại.");
         verdict.setText(kept == 0
-                ? message
+                ? "Không tải được lịch sử: " + message
                 : message + " — bảng vẫn là lần tải trước (" + kept + " dòng)");
         UiLabels.applyNoteTone(verdict, UiLabels.Tone.ERROR);
         log.accept("[FAIL] LICH_SU: " + message
@@ -124,24 +164,24 @@ final class HistoryPanel {
     private static String matchedText(BackendClient.HistoryLoad load) {
         int count = load.history().entries().size();
         if (count == 0) {
-            return "Sổ chưa có giao dịch. Ledger counter 0, số dư 0.";
+            return "Sổ chưa có giao dịch. Sổ Backend 0 giao dịch, số dư 0.";
         }
         BackendClient.HistoryEntry last = load.history().entries().get(count - 1);
         return String.format(
-                "Khớp sổ: %d giao dịch, counter %d, số dư %d",
-                count, last.counterAfter(), last.balanceAfter());
+                "Khớp sổ: %d giao dịch, số dư %d",
+                count, last.balanceAfter());
     }
 
     private static String mismatch(BackendClient.HistoryLoad load) {
         var entries = load.history().entries();
         BackendClient.LedgerSnapshot ledger = load.ledger();
         if (!ledger.cardId().equalsIgnoreCase(load.history().cardId())) {
-            return "cardId lịch sử khác cardId ledger";
+            return "Mã thẻ của lịch sử khác mã thẻ trong sổ Backend";
         }
         if (entries.isEmpty()) {
             if (ledger.lastCounter() != 0 || ledger.lastBalance() != 0) {
                 return String.format(
-                        "Sổ không có dòng nhưng ledger là counter %d số dư %d",
+                        "Sổ không có dòng nhưng sổ Backend ghi %d giao dịch, số dư %d",
                         ledger.lastCounter(), ledger.lastBalance());
             }
             return null;
@@ -149,19 +189,19 @@ final class HistoryPanel {
         BackendClient.HistoryEntry last = entries.get(entries.size() - 1);
         if (entries.size() != ledger.lastCounter() || last.counterAfter() != ledger.lastCounter()) {
             return String.format(
-                    "Số dòng %d, counter cuối %d, ledger counter %d",
+                    "Số dòng %d, giao dịch cuối %d, sổ Backend %d giao dịch",
                     entries.size(), last.counterAfter(), ledger.lastCounter());
         }
         if (last.balanceAfter() != ledger.lastBalance()) {
             return String.format(
-                    "Số dư cuối %d khác ledger %d", last.balanceAfter(), ledger.lastBalance());
+                    "Số dư cuối %d khác sổ Backend %d", last.balanceAfter(), ledger.lastBalance());
         }
         return null;
     }
 
     private static String operationLabel(String operation) {
         return switch (operation) {
-            case "GRANT" -> "Cấp quota";
+            case "GRANT" -> "Cấp hạn mức";
             case "START" -> "Mở ca";
             case "END" -> "Đóng ca";
             default -> operation;

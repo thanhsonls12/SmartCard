@@ -1590,9 +1590,9 @@ public final class CardGatewayVerify {
 
         record("H01", "VERIFY 9000 -> da xac thuc, quyen cho lenh ke tiep",
                 PinState.of(PinState.Operation.VERIFY, true, Sw.OK).text()
-                        .contains("Đã xác thực")
+                        .contains("PIN đúng ở lần kiểm tra vừa rồi")
                 && PinState.of(PinState.Operation.VERIFY, true, Sw.OK).text()
-                        .contains("lệnh nhạy cảm kế tiếp"), true);
+                        .contains("các thao tác khác vẫn cần nhập PIN"), true);
         record("H02", "VERIFY 63C2 -> con 2 luot",
                 PinState.of(PinState.Operation.VERIFY, false, 0x63C2).text()
                         .contains("còn 2 lượt thử"), true);
@@ -1606,7 +1606,7 @@ public final class CardGatewayVerify {
                 PinState.of(PinState.Operation.CHANGE, true, Sw.OK).text()
                         .contains("PIN đã đổi")
                 && PinState.of(PinState.Operation.CHANGE, true, Sw.OK).text()
-                        .contains("retry reset về 3"), true);
+                        .contains("còn 3 lượt thử"), true);
         record("H06", "CHANGE 63C2 -> sai PIN cu",
                 PinState.of(PinState.Operation.CHANGE, false, 0x63C2).text()
                         .contains("Sai PIN cũ"), true);
@@ -1614,27 +1614,27 @@ public final class CardGatewayVerify {
                 PinState.of(PinState.Operation.UNBLOCK, true, Sw.OK).text()
                         .contains("PIN đã mở khóa")
                 && PinState.of(PinState.Operation.UNBLOCK, true, Sw.OK).text()
-                        .contains("retry reset về 3"), true);
+                        .contains("còn 3 lượt thử"), true);
         record("H08", "UNBLOCK 63C4 -> sai admin PIN, con 4 luot",
                 PinState.of(PinState.Operation.UNBLOCK, false, 0x63C4).text()
-                        .contains("Sai admin PIN")
+                        .contains("Sai PIN quản trị")
                 && PinState.of(PinState.Operation.UNBLOCK, false, 0x63C4).text()
                         .contains("còn 4 lượt thử"), true);
         record("H09", "UNBLOCK 6983 -> admin PIN khoa, khong co duong mo",
                 PinState.of(PinState.Operation.UNBLOCK, false, Sw.AUTH_BLOCKED).text()
-                        .contains("admin PIN đang khóa"), true);
+                        .contains("PIN quản trị đang khóa"), true);
         record("H10", "6985 -> PIN chua dung duoc",
                 PinState.of(PinState.Operation.VERIFY, false, Sw.CONDITIONS_NOT_SATISFIED)
-                        .text().contains("chưa ISSUED"), true);
+                        .text().contains("thẻ chưa phát hành"), true);
         record("H11", "khong gui APDU -> chua gui lenh PIN",
                 PinState.of(PinState.Operation.VERIFY, false, -1).text()
                         .contains("Chưa gửi lệnh PIN"), true);
         record("H12", "trang thai chua biet -> huong dan doc lai",
                 PinState.unknown().text().contains("Chưa biết trạng thái PIN")
-                && PinState.unknown().text().contains("VERIFY"), true);
+                && PinState.unknown().text().contains("Xác thực PIN"), true);
         record("H13", "SW la khong suy ra duoc trang thai",
                 PinState.of(PinState.Operation.VERIFY, false, 0x6F00).text()
-                        .contains("6F00"), true);
+                        .contains("xem Nhật ký"), true);
 
         java.util.concurrent.atomic.AtomicInteger sent = new java.util.concurrent.atomic.AtomicInteger();
         CardGateway gateway = readyGateway(issuedChannel(command -> {
@@ -1810,7 +1810,7 @@ public final class CardGatewayVerify {
             gateway.verifyStudentPin(pin);
             record("H21", "VERIFY dung -> hien da xac thuc",
                     PinState.of(PinState.Operation.VERIFY, true, gateway.lastPinSw()).text()
-                            .contains("Đã xác thực"), true);
+                            .contains("PIN đúng ở lần kiểm tra vừa rồi"), true);
         } finally {
             Arrays.fill(pin, '\0');
             Arrays.fill(wrongPin, '\0');
