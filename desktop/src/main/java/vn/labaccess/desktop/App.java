@@ -3,8 +3,6 @@ package vn.labaccess.desktop;
 import java.nio.file.Path;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -24,12 +22,11 @@ import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TitledPane;
 import javafx.scene.control.ToggleButton;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.GridPane;
-import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
-import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
@@ -52,13 +49,13 @@ public class App extends Application {
     private static final int LOG_TRIM_CHARS = 20_000;
 
     private TextArea logArea;
-    private Label statusLabel;
+    private StatusBar statusBar;
     private Label valueConnection;
     private TabPane mainTabs;
 
-    static final int TAB_OPERATIONS = 0;
-    static final int TAB_CARD = 1;
-    static final int TAB_ENROLL = 2;
+    static final int TAB_CARD = 0;
+    static final int TAB_ENROLL = 1;
+    static final int TAB_OPERATIONS = 2;
     static final int TAB_RECORDS = 3;
 
     private Label valueAid;
@@ -73,25 +70,30 @@ public class App extends Application {
     private Button btnDisconnect;
 
     private ToggleButton techToggle;
+    private ToggleButton logToggle;
     private SplitPane workSplit;
     private TitledPane logPane;
+    private VBox logColumn;
     private HistoryPanel historyPanel;
     private BackendClient.HistoryLoad loadedHistory;
     private Exception historyError;
     private boolean historyReady;
     private String busyLabel;
     private String lastFeedback = "Chưa có thao tác";
+    private String lastFailure;
+    private final InputFeedback inputFeedback = new InputFeedback(this::updateButtons);
     private UiLabels.Tone lastTone = UiLabels.Tone.NEUTRAL;
-    private boolean logShowsFailure;
     private boolean logUiClosed;
 
     private static final double NARROW_WIDTH = 1000;
-    private static final double SPLIT_BUSINESS = 0.60;
-    private static final String BUSY_WHY = "đang xử lý thao tác khác";
+    private static final double SPLIT_BUSINESS = 0.65;
+    private double horizontalSplit = SPLIT_BUSINESS;
+    private double verticalSplit = 0.60;
+    static final String BUSY_WHY = "đang xử lý thao tác khác";
     static final String BUSY_NOTE = "Đang xử lý thao tác khác — chờ xong.";
+    private static final String CLOSING_NOTE = "Đang đóng cửa sổ.";
 
-    private Label actionWhy;
-    private Label nextStepLabel;
+    private ActionNote actionNote;
 
     private TransactionPanel transactionPanel;
     private ReceiptPanel receiptPanel;
@@ -137,9 +139,12 @@ public class App extends Application {
         UiLabels.apduHint(btnIdentify, "SELECT + GET_STATUS\nCần kết nối thẻ trước");
         UiLabels.apduHint(btnDisconnect, "DISCONNECT");
         techToggle = new ToggleButton("Chi tiết kỹ thuật");
-        techToggle.getStyleClass().add("la-technical-toggle");
+        techToggle.getStyleClass().add("la-header-toggle");
+        logToggle = new ToggleButton("Nhật ký");
+        logToggle.getStyleClass().add("la-header-toggle");
+        logToggle.setTooltip(new Tooltip("Bật/tắt khung nhật ký thao tác"));
 
-        actionWhy = whyNote();
+        actionNote = new ActionNote(() -> logToggle.setSelected(true));
 
         btnConnect.setOnAction(e -> doConnect());
         btnIdentify.setOnAction(e -> doIdentify());
@@ -162,13 +167,18 @@ public class App extends Application {
         transactionPanel = new TransactionPanel(gateway, this::runOp, this::log,
                 new TransactionPanel.Session(this::snapshotKnown, this::sessionOpen,
                         this::runCardStateTransaction, this::invalidateHistory,
-                        this::rememberHistory, this::transactionFinished));
+                        this::rememberHistory, this::transactionFinished, this::studentPinChanged,
+                        () -> receiptPanel.pressReadReceipt()));
         receiptPanel = new ReceiptPanel(gateway, this::runOp, this::log,
-                new ReceiptPanel.Session(this::sessionOpen, this::pendingJournal,
+                new ReceiptPanel.Session(this::sessionOpen, this::pendingJournal, journal.file(),
                         this::studentPinInput, this::clearStudentPinInput,
                         this::reconcileCardPending, this::invalidateHistory,
                         this::rememberHistory, this::publishHistory, this::refreshButtons,
-                        this::showReconcile, this::receiptFinished, this::reconcileFinished));
+                        this::showReconcile, this::receiptFinished, this::reconcileFinished,
+                        () -> {
+                            showTab(TAB_OPERATIONS);
+                            transactionPanel.requireStudentPin();
+                        }));
         pinPanel = new PinPanel(gateway, this::runOp, this::log);
         enrollmentPanel = new EnrollmentPanel(gateway, this::runEnrollmentOp, backendClient,
                 this::log, this::reportEnrollment);
@@ -178,6 +188,7 @@ public class App extends Application {
                     stateSnapshotKnown = false;
                     showStatus();
                     if (ok && issued != null) {
+                        photoPanel.onCard(issued.cardId());
                         enrollmentPanel.prefill(issued.cardId(), issued.studentId());
                     }
                 });
@@ -197,20 +208,21 @@ public class App extends Application {
 
         FlowPane summary = UiRows.wrapping(
                 UiRows.pair(UiLabels.caption("Kết nối"), valueConnection),
-                UiRows.pair(UiLabels.caption("Mã thẻ"), valueCardId),
+                UiRows.pair(UiLabels.caption("Mã thẻ"),
+                        UiRows.pair(valueCardId, UiLabels.copyButton(valueCardId, "mã thẻ"))),
                 UiRows.pair(UiLabels.caption("Vòng đời"), valueLifecycle),
                 UiRows.pair(UiLabels.caption("Nhận diện"), valueResult),
                 UiRows.pair(UiLabels.caption("Đối soát"), valueReconcile));
 
         FlowPane sessionActions = UiRows.wrapping(btnConnect, btnIdentify, btnDisconnect,
-                receiptPanel.reconcileAction(), techToggle);
+                receiptPanel.reconcileAction(), techToggle, logToggle);
 
         GridPane technical = new GridPane();
         technical.getStyleClass().add("la-info");
         technical.setHgap(UiScale.SPACE_3);
         technical.setVgap(UiScale.SPACE_1);
         technical.setPadding(UiScale.blockInsets());
-        technical.add(UiLabels.caption("Instance AID"), 0, 0);
+        technical.add(UiLabels.caption("Mã ứng dụng thẻ"), 0, 0);
         technical.add(valueAid, 1, 0);
         technical.add(UiLabels.caption("Protocol"), 0, 1);
         technical.add(valueProtocol, 1, 1);
@@ -219,9 +231,14 @@ public class App extends Application {
         techToggle.selectedProperty().addListener((observable, was, now) -> {
             technical.setManaged(now);
             technical.setVisible(now);
+            personalizePanel.showTechnical(now);
+            profilePanel.showTechnical(now);
+            photoPanel.showTechnical(now);
+            enrollmentPanel.showTechnical(now);
         });
 
-        VBox header = new VBox(UiScale.SPACE_2, summary, sessionActions, actionWhy, technical);
+        VBox header = new VBox(UiScale.SPACE_2, summary, sessionActions, actionNote.node(),
+                technical);
         header.getStyleClass().add("la-header");
         header.setPadding(UiScale.headerInsets());
 
@@ -240,61 +257,55 @@ public class App extends Application {
 
         Tab tabEnroll = tab("Đăng ký thẻ", enrollmentPanel.node());
 
-        mainTabs = new TabPane(tabOperations, tabCard, tabEnroll, tabRecords);
+        mainTabs = new TabPane(tabCard, tabEnroll, tabOperations, tabRecords);
         mainTabs.getStyleClass().add("la-tabs");
+        mainTabs.addEventHandler(InputFeedback.Problem.TYPE, inputFeedback::show);
         mainTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        mainTabs.getSelectionModel().selectFirst();
+        mainTabs.getSelectionModel().select(TAB_OPERATIONS);
         mainTabs.setMinHeight(0);
         VBox.setVgrow(mainTabs, Priority.ALWAYS);
 
-        statusLabel = new Label("Chưa kết nối");
-        statusLabel.setId("status");
-        statusLabel.getStyleClass().add("la-status");
-        nextStepLabel = new Label();
-        nextStepLabel.setId("next-step");
-        nextStepLabel.getStyleClass().add("la-next-step");
-        Region statusSpacer = new Region();
-        HBox.setHgrow(statusSpacer, Priority.ALWAYS);
-        HBox statusBar = new HBox(statusLabel, statusSpacer, nextStepLabel);
-        statusBar.getStyleClass().add("la-status-bar");
-        statusBar.setPadding(UiScale.statusBarInsets());
+        statusBar = new StatusBar(this::showTab);
 
         logArea = new TextArea();
         logArea.setEditable(false);
         logArea.setWrapText(true);
         logArea.getStyleClass().add("la-log");
         TitledPane logPane = new TitledPane("Nhật ký thao tác", logArea);
-        logPane.setExpanded(true);
-        logPane.setMinWidth(200);
         logPane.setMaxHeight(Double.MAX_VALUE);
         logPane.getStyleClass().add("la-log-pane");
         this.logPane = logPane;
+        logToggle.selectedProperty().bindBidirectional(logPane.expandedProperty());
+        logPane.setExpanded(false);
 
         VBox business = new VBox(mainTabs);
         business.setMinHeight(0);
         business.setPadding(UiScale.centerInsets());
 
-        VBox logColumn = new VBox(logPane);
-        logColumn.setMinWidth(200);
+        logColumn = new VBox(logPane);
+        logColumn.setMinWidth(320);
+        business.setMinWidth(0);
         logColumn.setPadding(UiScale.centerInsets());
         VBox.setVgrow(logPane, Priority.ALWAYS);
 
-        workSplit = new SplitPane(business, logColumn);
+        workSplit = new SplitPane(business);
         workSplit.getStyleClass().add("la-split");
-        workSplit.setDividerPositions(SPLIT_BUSINESS);
         SplitPane.setResizableWithParent(logColumn, false);
         VBox.setVgrow(workSplit, Priority.ALWAYS);
+        logPane.expandedProperty().addListener((observable, was, now) -> showLogColumn(now));
 
         BorderPane root = new BorderPane();
         root.setTop(header);
         root.setCenter(workSplit);
-        root.setBottom(statusBar);
+        root.setBottom(statusBar.node());
 
         Scene scene = new Scene(root, windowWidth(), windowHeight());
         UiTheme.apply(scene);
         scene.widthProperty().addListener((observable, was, now) -> layoutForWidth(now.doubleValue()));
-        mainTabs.getSelectionModel().selectedIndexProperty().addListener(
-                (observable, was, now) -> updateButtons());
+        mainTabs.getSelectionModel().selectedIndexProperty().addListener((observable, was, now) -> {
+            inputFeedback.clear();
+            updateButtons();
+        });
         layoutForWidth(windowWidth());
         stage.setTitle("LabAccess — nhận diện applet (PID " + pid + ")");
         stage.setMinWidth(900);
@@ -346,8 +357,12 @@ public class App extends Application {
     }
 
     void showTab(int index) {
-        if (mainTabs != null) {
-            mainTabs.getSelectionModel().select(index);
+        if (mainTabs == null || index < 0 || index >= mainTabs.getTabs().size()) {
+            return;
+        }
+        mainTabs.getSelectionModel().select(index);
+        if (mainTabs.getTabs().get(index).getContent() instanceof ScrollPane scroll) {
+            scroll.setVvalue(0);
         }
     }
 
@@ -355,12 +370,45 @@ public class App extends Application {
         if (workSplit == null) {
             return;
         }
-        boolean narrow = width < NARROW_WIDTH;
-        workSplit.setOrientation(narrow ? Orientation.VERTICAL : Orientation.HORIZONTAL);
-        workSplit.setDividerPositions(SPLIT_BUSINESS);
-        if (logPane != null) {
-            logPane.setExpanded(!narrow || logShowsFailure);
+        Orientation orientation = width < NARROW_WIDTH ? Orientation.VERTICAL : Orientation.HORIZONTAL;
+        if (orientation == workSplit.getOrientation()) {
+            return;
         }
+        rememberLogSplit();
+        workSplit.setOrientation(orientation);
+        restoreLogSplit();
+    }
+
+    private void showLogColumn(boolean expanded) {
+        boolean shown = workSplit.getItems().contains(logColumn);
+        if (expanded == shown) {
+            return;
+        }
+        if (expanded) {
+            workSplit.getItems().add(logColumn);
+            restoreLogSplit();
+            return;
+        }
+        rememberLogSplit();
+        workSplit.getItems().remove(logColumn);
+        workSplit.setDividerPositions(1);
+    }
+
+    private void rememberLogSplit() {
+        if (workSplit.getDividers().isEmpty()) {
+            return;
+        }
+        double position = workSplit.getDividerPositions()[0];
+        if (workSplit.getOrientation() == Orientation.HORIZONTAL) {
+            horizontalSplit = position;
+        } else {
+            verticalSplit = position;
+        }
+    }
+
+    private void restoreLogSplit() {
+        workSplit.setDividerPositions(workSplit.getOrientation() == Orientation.HORIZONTAL
+                ? horizontalSplit : verticalSplit);
     }
 
     private void blockOnStartupJournal() {
@@ -370,8 +418,7 @@ public class App extends Application {
             return;
         }
         if (!loaded.valid() || loaded.status() != PendingJournal.Status.PENDING) {
-            gateway.markTransactionUnknown("pending journal khi khởi động cần xử lý thủ công: "
-                    + loaded.problem());
+            gateway.markTransactionUnknown(JournalRecoveryView.summary(loaded));
             showReconcile();
             log("[FAIL] Khởi động: journal không dùng được ("
                     + (loaded.valid() ? loaded.status() : loaded.problem())
@@ -389,6 +436,7 @@ public class App extends Application {
     }
 
     private void doConnect() {
+        clearSessionInputs();
         runOp("CONNECT", gateway::connect, ok -> {
             uiConnected = ok;
             uiReady = false;
@@ -405,6 +453,12 @@ public class App extends Application {
     }
 
     private void doIdentify() {
+        uiReady = false;
+        stateSnapshotKnown = false;
+        clearSessionInputs();
+        invalidateHistory();
+        historyPanel.onCard(null);
+        receiptPanel.clear();
         profilePanel.resetView("bắt đầu SELECT lại, không giữ hồ sơ của lần đọc trước");
         pinPanel.resetState("bắt đầu SELECT lại, chưa thử PIN");
         photoPanel.clearCardImage("bắt đầu SELECT lại, không giữ ảnh của lần đọc trước");
@@ -419,6 +473,7 @@ public class App extends Application {
             uiReady = ok;
             stateSnapshotKnown = false;
             showStatus();
+            photoPanel.onCard(ok ? gateway.status().cardId() : null);
             if (ok) {
                 Platform.runLater(receiptPanel::offerPendingReconciliation);
             }
@@ -434,11 +489,11 @@ public class App extends Application {
         try {
             boolean enrolled = backendClient.cardEnrolled(current.cardId());
             gateway.applyCardEnrollment(new CardGateway.EnrollmentCheck(true, enrolled,
-                    enrolled ? "Backend có sổ ledger cho thẻ"
-                            : "Backend không có sổ ledger cho thẻ"));
+                    enrolled ? "sổ Backend có mã thẻ này"
+                            : "sổ Backend không có mã thẻ này"));
             return enrolled
-                    ? "đã đăng ký (ledger Backend có cardId này)"
-                    : "CHƯA đăng ký (Backend không có sổ ledger) — GRANT/START/END bị chặn";
+                    ? "đã đăng ký (sổ Backend có mã thẻ này)"
+                    : "CHƯA đăng ký (sổ Backend không có mã thẻ) — GRANT/START/END bị chặn";
         } catch (BackendClient.Failure failure) {
             gateway.applyCardEnrollment(new CardGateway.EnrollmentCheck(false, false,
                     failure.getMessage()));
@@ -448,6 +503,7 @@ public class App extends Application {
     }
 
     private void doDisconnect() {
+        clearSessionInputs();
         runOp("DISCONNECT", gateway::disconnect, ok -> {
             uiConnected = false;
             uiReady = false;
@@ -495,7 +551,7 @@ public class App extends Application {
             valueLifecycle.setText("Chưa rõ");
             UiLabels.applyChip(valueLifecycle, UiLabels.Tone.NEUTRAL);
             valueCardId.setText("-");
-            valueResult.setText("Chưa sẵn sàng");
+            valueResult.setText("Chưa nhận diện");
             UiLabels.applyChip(valueResult, UiLabels.Tone.PENDING);
             showReconcile();
             return;
@@ -516,26 +572,39 @@ public class App extends Application {
 
     private void showReconcile() {
         boolean known = gateway.reconciliation().transactionAllowed();
-        valueReconcile.setText(known ? "Không treo" : "Cần đối soát");
-        UiLabels.Tone tone = !known
+        boolean recovery = JournalRecoveryView.needed(journal.load());
+        valueReconcile.setText(recovery ? "Cần khôi phục" : known ? "Không có giao dịch chờ" : "Cần đối soát");
+        UiLabels.Tone tone = recovery || !known
                 ? UiLabels.Tone.ERROR
                 : (uiConnected ? UiLabels.Tone.OK : UiLabels.Tone.NEUTRAL);
         UiLabels.applyChip(valueReconcile, tone);
     }
 
+    private void clearSessionInputs() {
+        inputFeedback.clear();
+        transactionPanel.clearInputs();
+        personalizePanel.clearInputs();
+        pinPanel.clearInputs();
+        profilePanel.clearInputs();
+        photoPanel.clearInputs();
+        enrollmentPanel.clearInputs();
+    }
+
     private void clearInfo() {
-        valueConnection.setText("Chưa kết nối");
-        UiLabels.applyChip(valueConnection, UiLabels.Tone.NEUTRAL);
+        clearSessionInputs();
+        invalidateHistory();
+        valueConnection.setText(uiConnected ? "Đã kết nối" : "Chưa kết nối");
+        UiLabels.applyChip(valueConnection, uiConnected ? UiLabels.Tone.OK : UiLabels.Tone.NEUTRAL);
         valueLifecycle.setText("Chưa rõ");
         UiLabels.applyChip(valueLifecycle, UiLabels.Tone.NEUTRAL);
         valueAid.setText("-");
         valueProtocol.setText("-");
         valueCardId.setText("-");
-        valueResult.setText("Chưa sẵn sàng");
+        valueResult.setText("Chưa nhận diện");
         UiLabels.applyChip(valueResult, UiLabels.Tone.NEUTRAL);
         showReconcile();
         receiptPanel.clear();
-        historyPanel.clear();
+        historyPanel.onCard(null);
         personalizePanel.resetView();
         enrollmentPanel.resetView();
         pinPanel.clearState();
@@ -554,15 +623,20 @@ public class App extends Application {
             return;
         }
         busy = true;
+        lastFailure = null;
+        inputFeedback.clear();
         busyLabel = label;
         updateButtons();
         log("> " + label + " ...");
+        boolean technical = techToggle.isSelected();
 
         worker.submit(() -> {
             T value = null;
             Exception failure = null;
             try {
-                log("   " + label + " chạy trên thread=" + Thread.currentThread().getName());
+                if (technical) {
+                    log("   " + label + " chạy trên thread=" + Thread.currentThread().getName());
+                }
                 value = operation.call();
             } catch (Exception ex) {
                 failure = ex;
@@ -570,7 +644,10 @@ public class App extends Application {
             final T resultValue = value;
             final Exception resultFailure = failure;
             Platform.runLater(() -> {
-                log("   " + label + " cập nhật UI trên thread=" + Thread.currentThread().getName());
+                if (technical) {
+                    log("   " + label + " cập nhật UI trên thread="
+                            + Thread.currentThread().getName());
+                }
                 busy = false;
                 busyLabel = null;
                 try {
@@ -631,140 +708,63 @@ public class App extends Application {
             return;
         }
         busy = true;
+        lastFailure = null;
+        inputFeedback.clear();
         busyLabel = label;
         updateButtons();
         log("> " + label + " ...");
+        boolean technical = techToggle.isSelected();
 
         worker.submit(() -> {
             String line;
+            String problem = null;
             boolean ok = false;
             try {
-                log("   " + label + " chạy trên thread=" + Thread.currentThread().getName());
+                if (technical) {
+                    log("   " + label + " chạy trên thread=" + Thread.currentThread().getName());
+                }
                 CardOperationResult r = op.call();
                 ok = r.ok();
                 line = (ok ? "[OK]   " : "[FAIL] ") + label + ": " + r.text();
+                if (!ok) {
+                    problem = UiLabels.failureMessage(label, r.text(), null);
+                }
             } catch (Exception ex) {
                 line = "[ERROR] " + label + ": " + ex;
+                problem = UiLabels.failureMessage(label, "", ex);
             }
             final boolean okFinal = ok;
             final String lineFinal = line;
+            final String failureFinal = problem;
             Platform.runLater(() -> {
                 log(lineFinal);
-                log("   " + label + " cập nhật UI trên thread=" + Thread.currentThread().getName());
+                if (technical) {
+                    log("   " + label + " cập nhật UI trên thread="
+                            + Thread.currentThread().getName());
+                }
                 if (onResult != null) {
                     onResult.accept(okFinal);
                 }
                 busy = false;
                 busyLabel = null;
                 lastFeedback = UiLabels.outcome(okFinal, label);
+                lastFailure = failureFinal;
                 lastTone = okFinal ? UiLabels.Tone.OK : UiLabels.Tone.ERROR;
                 updateButtons();
             });
         });
     }
 
-    static Label whyNote() {
-        Label note = new Label();
-        note.getStyleClass().add("la-note");
-        UiLabels.applyNoteTone(note, UiLabels.Tone.NEUTRAL);
-        note.setWrapText(true);
-        note.setManaged(false);
-        note.setVisible(false);
-        return note;
-    }
-
-    static void setWhy(Label note, String text) {
-        boolean show = text != null && !text.isBlank();
-        note.setText(show ? text : "");
-        note.setVisible(show);
-        note.setManaged(show);
-    }
-
-    private void showReasons(String whyConnect, String whyIdentify, String whyDisconnect,
-            String whyReconcile) {
-        if (busy) {
-            setWhy(actionWhy, BUSY_NOTE);
-            return;
-        }
-        setWhy(actionWhy, joinReasons(
-                whyLine(btnConnect, whyConnect, btnIdentify, whyIdentify,
-                        btnDisconnect, whyDisconnect),
-                receiptPanel.reconcileLockReason(whyReconcile)));
-    }
-
-    private static String joinReasons(String first, String second) {
-        if (first == null) {
-            return second;
-        }
-        if (second == null) {
-            return first;
-        }
-        return first + " · " + second;
-    }
-
-    static String whyLine(Object... pairs) {
-        List<String> parts = new ArrayList<>();
-        for (int i = 0; i + 1 < pairs.length; i += 2) {
-            Button button = (Button) pairs[i];
-            String reason = (String) pairs[i + 1];
-            if (reason != null && button.isDisable()) {
-                parts.add(button.getText() + ": " + reason);
-            }
-        }
-        return parts.isEmpty() ? null : String.join(" · ", parts);
-    }
-
-    private String nextStep(boolean journalPresent, boolean issued, CardStatus current) {
-        if (closing) {
-            return "chờ cửa sổ đóng";
-        }
-        if (busy) {
-            return "chờ thao tác đang chạy xong";
-        }
-        if (!uiConnected) {
-            return "kết nối đầu đọc";
-        }
-        if (!uiReady) {
-            return "nhận diện thẻ";
-        }
-        if (journalPresent) {
-            return "đối soát giao dịch đang chờ";
-        }
-        if (!issued) {
-            return "phát hành thẻ (tab Cấp thẻ & bảo mật)";
-        }
-        if (!enrollmentPanel.enrolled()) {
-            return "đăng ký thẻ (tab Đăng ký thẻ)";
-        }
-        if (current == null || !current.hasActiveVisit()) {
-            return "cấp quota rồi mở ca (tab Vận hành)";
-        }
-        return "đóng ca khi kết thúc (tab Vận hành)";
-    }
-
     private void updateButtons() {
         PendingJournal.Loaded loaded = journal.load();
         boolean journalPresent = loaded.present();
-        boolean validPending = loaded.present() && loaded.valid()
+        boolean validPending = journalPresent && loaded.valid()
                 && loaded.status() == PendingJournal.Status.PENDING;
-        boolean issued = gateway.status() != null
-                && gateway.status().lifecycle() == CardLifecycle.ISSUED;
+        CardStatus current = gateway.status();
+        boolean issued = current != null && current.lifecycle() == CardLifecycle.ISSUED;
 
         if (closing) {
-            btnConnect.setDisable(true);
-            btnIdentify.setDisable(true);
-            btnDisconnect.setDisable(true);
-            receiptPanel.lockAll();
-            transactionPanel.lockAll();
-            pinPanel.setEnabled(false);
-            personalizePanel.updateAvailability(false, false, "Đang đóng cửa sổ.");
-            profilePanel.setEnabled(false);
-            photoPanel.setEnabled(false);
-            enrollmentPanel.setEnabled(false, "Đang đóng cửa sổ.");
-            historyPanel.setEnabled(false);
-            statusLabel.setText("Đang đóng cửa sổ");
-            UiLabels.applyTone(statusLabel, UiLabels.Tone.PENDING);
-            nextStepLabel.setText("Tiếp theo: chờ cửa sổ đóng");
+            lockForClosing();
             return;
         }
 
@@ -774,67 +774,53 @@ public class App extends Application {
             gateway.markTransactionUnknown("journal đã RESOLVED nhưng chưa xóa — cần xử lý thủ công");
         }
 
-        CardStatus currentStatus = gateway.status();
-        boolean authenticatedState = currentStatus != null && currentStatus.studentStateAvailable();
-        boolean txnAllowed = !busy && uiReady && stateSnapshotKnown
-                && gateway.reconciliation().transactionAllowed() && !journalPresent;
-
-        String whyConnect = busy ? BUSY_WHY : null;
-        String whyIdentify = busy ? BUSY_WHY : !uiConnected ? "chưa kết nối thẻ" : null;
-        String whyDisconnect = busy ? BUSY_WHY : !uiConnected ? "chưa kết nối thẻ" : null;
-        String whyReadReceipt = busy ? BUSY_WHY
-                : !uiReady ? "chưa nhận diện thẻ"
-                : journalPresent ? "đang có biên nhận chờ đối soát"
-                : !gateway.reconciliation().transactionAllowed() ? "cần đối soát giao dịch trước"
-                : null;
-        String enrollmentWhy = gateway.enrollmentBlockReason();
-        String whyTxn = busy ? BUSY_WHY
-                : !txnAllowed ? "đang bận hoặc chưa nhận diện thẻ"
-                : enrollmentWhy != null ? enrollmentWhy + " — chặn trước khi ghi journal và gửi APDU"
-                : !authenticatedState ? "cần PIN học viên đúng để đọc state thẻ"
-                : null;
-        String whyGrant = whyTxn;
-        String whyStart = whyTxn != null ? whyTxn
-                : currentStatus.hasActiveVisit() ? "thẻ đang có ca mở"
-                : currentStatus.balance() <= 0 ? "số dư bằng 0 — cấp quota trước"
-                : null;
-        String whyEnd = whyTxn != null ? whyTxn
-                : !currentStatus.hasActiveVisit() ? "thẻ không có ca đang mở"
-                : null;
-        String whyReconcile = busy ? BUSY_WHY
-                : !uiReady ? "chưa nhận diện thẻ"
-                : !validPending ? "không có giao dịch nào đang chờ đối soát"
-                : null;
+        SessionGates.State gates = new SessionGates.State(busy, uiConnected, uiReady,
+                stateSnapshotKnown, gateway.reconciliation().transactionAllowed(), journalPresent,
+                validPending, issued, gateway.enrollmentBlockReason(), current);
+        SessionGates.Reasons reasons = SessionGates.of(gates);
 
         btnConnect.setDisable(busy || uiConnected);
-        btnIdentify.setDisable(whyIdentify != null);
-        btnDisconnect.setDisable(whyDisconnect != null);
-        receiptPanel.applyLock(busy, whyReadReceipt, whyReconcile);
-        transactionPanel.applyLock(busy, whyGrant, whyStart, whyEnd);
+        btnIdentify.setDisable(reasons.identify() != null);
+        btnDisconnect.setDisable(reasons.disconnect() != null);
+        receiptPanel.applyLock(busy, reasons.readReceipt(), reasons.reconcile());
+        transactionPanel.applyLock(busy, reasons.grant(), reasons.start(), reasons.end(), reasons.readReceipt());
+        transactionPanel.showState(current, stateSnapshotKnown);
+        pinPanel.setEnabled(reasons.pin() == null, reasons.pin());
+        personalizePanel.updateAvailability(reasons.personalize() == null, !busy && uiConnected,
+                reasons.personalize());
+        profilePanel.setEnabled(reasons.profile() == null, reasons.profile());
+        photoPanel.setEnabled(reasons.photo() == null, reasons.photo());
+        enrollmentPanel.setEnabled(reasons.enroll() == null, reasons.enroll());
+        enrollmentPanel.onCard(current == null ? null : current.cardId());
+        historyPanel.onCard(uiReady && current != null ? current.cardId() : null);
+        historyPanel.setEnabled(reasons.history() == null, reasons.history());
 
-        showReasons(whyConnect, whyIdentify, whyDisconnect, whyReconcile);
+        if (busy) {
+            actionNote.show(BUSY_NOTE, UiLabels.Tone.NEUTRAL, false);
+        } else if (JournalRecoveryView.needed(loaded)) {
+            actionNote.show(JournalRecoveryView.summary(loaded) + " Mở Hướng dẫn khôi phục.",
+                    UiLabels.Tone.ERROR, false);
+        } else if (journalPresent || !gateway.reconciliation().transactionAllowed()) {
+            actionNote.show("Có giao dịch chưa rõ kết quả. Không thực hiện lại; kiểm tra và đối soát trước.",
+                    UiLabels.Tone.PENDING, true);
+        } else if (lastFailure != null) {
+            actionNote.show(lastFailure, UiLabels.Tone.ERROR, true);
+        } else if (!uiConnected) {
+            actionNote.show("Kết nối thẻ để bắt đầu.", UiLabels.Tone.NEUTRAL, false);
+        } else if (!uiReady) {
+            actionNote.show("Đã kết nối. Bấm Nhận diện thẻ để tiếp tục.", UiLabels.Tone.NEUTRAL, false);
+        } else {
+            actionNote.show(null, UiLabels.Tone.NEUTRAL, false);
+        }
 
-        nextStepLabel.setText("Tiếp theo: "
-                + nextStep(journalPresent, issued, currentStatus));
-
-        String whyPersonalize = busy ? "Đang xử lý thao tác khác — chờ xong."
-                : !uiConnected ? "Chưa kết nối thẻ."
-                : journalPresent ? "Đang có biên nhận chờ đối soát — đối soát trước."
-                : issued ? "Thẻ đã phát hành — không phát hành lại."
-                : null;
-        String whyEnroll = busy ? "Đang xử lý thao tác khác — chờ xong."
-                : !uiConnected ? "Chưa kết nối thẻ."
-                : !issued ? "Thẻ chưa phát hành — phát hành thẻ trước khi đăng ký."
-                : null;
-        pinPanel.setEnabled(!busy && uiConnected);
-        personalizePanel.updateAvailability(whyPersonalize == null, !busy && uiConnected,
-                whyPersonalize);
-        profilePanel.setEnabled(!busy && uiConnected && issued);
-        photoPanel.setEnabled(!busy && uiConnected && issued);
-        enrollmentPanel.setEnabled(whyEnroll == null, whyEnroll);
-        enrollmentPanel.onCard(currentStatus == null ? null : currentStatus.cardId());
-        historyPanel.setEnabled(!busy && uiReady && currentStatus != null
-                && currentStatus.cardId() != null && !currentStatus.cardId().isBlank());
+        int activeTab = mainTabs.getSelectionModel().getSelectedIndex();
+        SessionGates.NextStep next = SessionGates.nextStep(closing, gates, gateway.enrollmentText(),
+                inputFeedback.message() != null, activeTab);
+        if (!busy && !journalPresent && gateway.reconciliation().transactionAllowed() && lastFailure != null
+                && inputFeedback.message() == null) {
+            next = new SessionGates.NextStep("xem hướng dẫn lỗi ở đầu cửa sổ", -1);
+        }
+        statusBar.setNextStep(next.text(), next.tab());
 
         String feedback;
         UiLabels.Tone tone;
@@ -844,24 +830,47 @@ public class App extends Application {
         } else if (journalPresent) {
             feedback = validPending
                     ? "Có biên nhận chờ đối soát — đối soát trước khi giao dịch tiếp"
-                    : "Pending journal không hợp lệ — cần xử lý thủ công";
+                    : "Giao dịch đang khóa. Xem Hướng dẫn khôi phục.";
             tone = validPending ? UiLabels.Tone.PENDING : UiLabels.Tone.ERROR;
         } else if (!gateway.reconciliation().transactionAllowed()) {
             feedback = "Cần đối soát giao dịch trước khi tiếp tục";
+            tone = UiLabels.Tone.ERROR;
+        } else if (inputFeedback.message() != null) {
+            feedback = inputFeedback.message();
             tone = UiLabels.Tone.ERROR;
         } else {
             feedback = lastFeedback;
             tone = lastTone;
         }
-        statusLabel.setText(feedback);
-        UiLabels.applyTone(statusLabel, tone);
+        statusBar.setStatus(feedback, tone, busy);
 
+        boolean reconcilePrimary = !busy && validPending && receiptPanel.reconcileEnabled();
+        receiptPanel.setReconcilePrimary(reconcilePrimary);
         int tab = mainTabs.getSelectionModel().getSelectedIndex();
         boolean operations = uiReady && tab == TAB_OPERATIONS;
-        UiLabels.markPrimary(btnIdentify, !btnIdentify.isDisable() && !uiReady);
-        transactionPanel.markPrimary(operations);
-        personalizePanel.setIssuePrimary(uiReady && tab == TAB_CARD);
-        photoPanel.setUploadPrimary(uiReady && tab == TAB_RECORDS);
+        boolean connectPrimary = !reconcilePrimary && !uiConnected && !btnConnect.isDisable();
+        UiLabels.markPrimary(btnConnect, connectPrimary);
+        UiLabels.markPrimary(btnIdentify, !reconcilePrimary && !connectPrimary && uiConnected
+                && !uiReady && !btnIdentify.isDisable());
+        transactionPanel.markPrimary(!reconcilePrimary && operations);
+        personalizePanel.setIssuePrimary(!reconcilePrimary && uiReady && tab == TAB_CARD);
+        photoPanel.setUploadPrimary(!reconcilePrimary && uiReady && tab == TAB_RECORDS);
+    }
+
+    private void lockForClosing() {
+        btnConnect.setDisable(true);
+        btnIdentify.setDisable(true);
+        btnDisconnect.setDisable(true);
+        receiptPanel.lockAll();
+        transactionPanel.lockAll();
+        pinPanel.setEnabled(false, CLOSING_NOTE);
+        personalizePanel.updateAvailability(false, false, CLOSING_NOTE);
+        profilePanel.setEnabled(false, CLOSING_NOTE);
+        photoPanel.setEnabled(false, CLOSING_NOTE);
+        enrollmentPanel.setEnabled(false, CLOSING_NOTE);
+        historyPanel.setEnabled(false, CLOSING_NOTE);
+        statusBar.setStatus("Đang đóng cửa sổ", UiLabels.Tone.PENDING, false);
+        statusBar.setNextStep("chờ cửa sổ đóng", -1);
     }
 
     void fillTransactionInputs(char[] studentPin, char[] adminPin, int delta) {
@@ -929,7 +938,7 @@ public class App extends Application {
     }
 
     private javafx.scene.Parent root() {
-        return statusLabel.getScene().getRoot();
+        return statusBar.node().getScene().getRoot();
     }
 
     private void rememberHistory() {
@@ -979,7 +988,7 @@ public class App extends Application {
                 label, journalState, gateway.reconciliation().state(), cardState,
                 transactionPanel.grantState(), transactionPanel.startState(),
                 transactionPanel.endState(), receiptPanel.reconcileState(),
-                statusLabel == null ? "" : statusLabel.getText()));
+                statusBar.statusText()));
     }
 
     void logUi10Evidence(String label) {
@@ -1005,7 +1014,7 @@ public class App extends Application {
                 cardState, transactionPanel.grantState(), transactionPanel.startState(),
                 transactionPanel.endState(), receiptPanel.reconcileState(),
                 reconcileDialogVisible(), uiConnected, uiReady,
-                statusLabel == null ? "" : statusLabel.getText()));
+                statusBar.statusText()));
     }
 
     boolean reconcileDialogVisible() {
@@ -1044,6 +1053,8 @@ public class App extends Application {
     private char[] studentPinInput() { return transactionPanel.studentPinInput(); }
 
     private void clearStudentPinInput() { transactionPanel.clearStudentPin(); }
+
+    private void studentPinChanged() { receiptPanel.studentPinChanged(); }
 
     private void transactionFinished(boolean ok) {
         CardStatus refreshed = gateway.status();
@@ -1118,18 +1129,13 @@ public class App extends Application {
             logArea.setScrollTop(Double.MAX_VALUE);
         }
         boolean failure = message.startsWith("[FAIL]") || message.startsWith("[ERROR]");
-        boolean success = message.startsWith("[OK]");
-        if (!failure && !success) {
-            return;
-        }
-        logShowsFailure = failure;
-        if (logPane != null) {
-            boolean narrow = workSplit != null && workSplit.getOrientation() == Orientation.VERTICAL;
-            logPane.setExpanded(failure || !narrow);
+        if (failure && logPane != null) {
+            logPane.setExpanded(true);
         }
     }
 
     private void shutdown() {
+        clearSessionInputs();
         log("Đóng cửa sổ — dừng demo và ngắt kết nối trên luồng nền");
 
         demo.stop();
