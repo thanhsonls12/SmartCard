@@ -29,7 +29,7 @@ final class PersonalizeRequest {
     static String problem(char[] adminPin, String cardIdHex, String studentId,
             char[] studentPin, String displayName) {
         if (!isDigits(adminPin, ADMIN_PIN_LENGTH)) {
-            return "PIN quản trị phải đúng " + ADMIN_PIN_LENGTH + " chữ số";
+            return adminPinProblem();
         }
         String cardIdProblem = cardIdProblem(cardIdHex);
         if (cardIdProblem != null) {
@@ -40,9 +40,17 @@ final class PersonalizeRequest {
             return studentIdProblem;
         }
         if (!isDigits(studentPin, STUDENT_PIN_LENGTH)) {
-            return "PIN học viên phải đúng " + STUDENT_PIN_LENGTH + " chữ số";
+            return studentPinProblem();
         }
         return displayNameProblem(displayName);
+    }
+
+    static String studentPinProblem() {
+        return "PIN học viên phải đúng " + STUDENT_PIN_LENGTH + " chữ số";
+    }
+
+    static String adminPinProblem() {
+        return "PIN quản trị phải đúng " + ADMIN_PIN_LENGTH + " chữ số";
     }
 
     static String cardIdProblem(String cardIdHex) {

@@ -28,10 +28,10 @@ final class EnrollmentPanel {
 
     private enum Step {
         CHECK_CARD("Kiểm tra thẻ và trạng thái ban đầu"),
-        PUBLIC_KEY("Đọc khoá công khai"),
-        ADMIN_SESSION("Mở phiên quản trị Backend"),
+        PUBLIC_KEY("Kiểm tra khóa của thẻ"),
+        ADMIN_SESSION("Kết nối hệ thống quản lý"),
         CHALLENGE("Tạo yêu cầu đăng ký"),
-        SIGN("Ký nonce trên thẻ"),
+        SIGN("Xác nhận bằng chữ ký trên thẻ"),
         COMPLETE("Gửi chữ ký để hoàn tất");
 
         private final String title;
@@ -113,6 +113,7 @@ final class EnrollmentPanel {
     private final Label message = new Label();
     private final Label[] stepMarks = new Label[Step.values().length];
     private final VBox node;
+    private final FlowPane steps;
 
     private boolean enabled;
     private String enabledReason;
@@ -153,7 +154,7 @@ final class EnrollmentPanel {
                 btnEnroll);
 
         // Sáu bước xếp hai cột: đủ sáu bước trong tầm mắt, không phải cuộn giữa lúc đang chạy.
-        FlowPane steps = new FlowPane(UiScale.SPACE_3, UiScale.SPACE_1);
+        steps = new FlowPane(UiScale.SPACE_3, UiScale.SPACE_1);
         steps.setPrefWrapLength(560);
         for (Step step : Step.values()) {
             Label mark = new Label(Mark.PENDING.symbol);
@@ -173,7 +174,8 @@ final class EnrollmentPanel {
                 UiRows.field("Mã sinh viên", valueStudentId),
                 UiRows.field("Thời điểm đăng ký", valueEnrolledAt));
 
-        node = UiSection.of("Đăng ký thẻ", inputs, stateChip, message, steps, result);
+        UiLabels.show(steps, false);
+        node = UiSection.of("Đăng ký thẻ", inputs, stateChip, message, result, steps);
 
         resetView();
     }
@@ -187,11 +189,16 @@ final class EnrollmentPanel {
      *
      * @param whyDisabled lý do hiện cho người vận hành khi {@code enabled} là false
      */
+    void showTechnical(boolean visible) {
+        UiLabels.show(steps, visible);
+    }
+
     void setEnabled(boolean enabled, String whyDisabled) {
         this.enabled = enabled;
         this.enabledReason = whyDisabled;
-        fieldStudentId.setDisable(!enabled);
-        fieldStudentPin.setDisable(!enabled);
+        boolean locked = !enabled || "da-dang-ky".equals(gateway.enrollmentText());
+        fieldStudentId.setDisable(locked);
+        fieldStudentPin.setDisable(locked);
         refresh();
     }
 
@@ -200,7 +207,7 @@ final class EnrollmentPanel {
         String next = cardId == null ? "" : cardId.strip().toUpperCase();
         boolean changed = !next.equals(currentCardId);
         currentCardId = next;
-        if (changed && !next.isEmpty() && state != State.RUNNING) {
+        if (changed && state != State.RUNNING) {
             resetResult();
         }
         refresh();
@@ -215,6 +222,10 @@ final class EnrollmentPanel {
             fieldStudentId.setText(studentId.strip());
         }
         refresh();
+    }
+
+    void clearInputs() {
+        fieldStudentPin.clear();
     }
 
     void resetView() {
@@ -269,7 +280,14 @@ final class EnrollmentPanel {
             UiLabels.markPrimary(btnEnroll, false);
             return;
         }
-        // Kết quả chưa xác nhận: giữ nguyên cảnh báo và khoá nút cho tới khi đổi thẻ hoặc reset phiên.
+        if (enabled && gateway.isReady() && "da-dang-ky".equals(gateway.enrollmentText())) {
+            btnEnroll.setDisable(true);
+            UiLabels.markPrimary(btnEnroll, false);
+            valueCardId.setText(gateway.status().cardId());
+            applyState("Đã đăng ký", UiLabels.Tone.OK,
+                    "Thẻ đã đăng ký trên Backend. Chuyển sang tab Vận hành để sử dụng.");
+            return;
+        }
         if (state == State.UNKNOWN) {
             btnEnroll.setDisable(true);
             UiLabels.markPrimary(btnEnroll, false);
@@ -286,7 +304,7 @@ final class EnrollmentPanel {
         }
         if (ready) {
             applyState("Sẵn sàng", UiLabels.Tone.NEUTRAL,
-                    "Sẵn sàng: bấm Đăng ký thẻ để chạy sáu bước.");
+                    "Bấm Đăng ký thẻ để liên kết thẻ với học viên.");
         } else {
             applyState("Chưa sẵn sàng", UiLabels.Tone.PENDING, reason);
         }
@@ -328,10 +346,13 @@ final class EnrollmentPanel {
                 || current.cardId().matches("0+")) {
             return "Chưa nhận diện được mã thẻ.";
         }
+        if ("da-dang-ky".equals(gateway.enrollmentText())) {
+            return "Thẻ đã đăng ký — chuyển sang tab Vận hành để sử dụng.";
+        }
         if (!validStudentId(fieldStudentId.getText())) {
             return "Mã sinh viên phải 3–32 ký tự A-Z, 0-9 hoặc dấu -.";
         }
-        if (fieldStudentPin.getText().length() != PIN_LENGTH) {
+        if (!fieldStudentPin.getText().matches("[0-9]{" + PIN_LENGTH + "}")) {
             return "PIN học viên phải đúng 6 chữ số.";
         }
         if (current.studentStateAvailable()) {
@@ -581,7 +602,7 @@ final class EnrollmentPanel {
 
     private void applyState(String chip, UiLabels.Tone tone, String detail) {
         stateChip.setText(chip);
-        UiLabels.applyTone(stateChip, tone);
+        UiLabels.applyChip(stateChip, tone);
         message.setText(detail);
         UiLabels.applyNoteTone(message, tone);
     }
@@ -592,6 +613,10 @@ final class EnrollmentPanel {
 
     private void applyMark(Step step, Mark value) {
         setMark(stepMarks[step.ordinal()], value);
+        if (state == State.RUNNING && value == Mark.RUNNING) {
+            message.setText(String.format("Đang đăng ký: bước %d/%d — %s",
+                    step.ordinal() + 1, Step.values().length, step.title));
+        }
     }
 
     private static void setMark(Label label, Mark value) {

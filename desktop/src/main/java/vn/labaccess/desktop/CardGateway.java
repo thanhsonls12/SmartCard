@@ -594,7 +594,7 @@ final class CardGateway {
         }
         if (!cardEnrollment.enrolled()) {
             return "thẻ chưa đăng ký trên Backend (cardId=" + current.cardId() + ")"
-                    + " — đăng ký thẻ trước khi cấp quota/mở ca/đóng ca";
+                    + " — đăng ký thẻ trước khi cấp hạn mức/mở ca/đóng ca";
         }
         return null;
     }
