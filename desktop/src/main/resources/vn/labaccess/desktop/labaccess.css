@@ -7,7 +7,7 @@
  *
  * Thang dùng trong file (không dùng giá trị ngoài các thang này):
  *   bo góc: 4px · 8px · 12px · 999px (pill)
- *   cỡ chữ: 11px · 12px · 13px · 15px
+ *   cỡ chữ: 12px · 13px · 14px · 15px
  *   khoảng cách: xem UiScale (Java) vì Insets và gap không đặt được bằng CSS.
  */
 
@@ -18,7 +18,7 @@
     -la-surface-sunken: #e2eaec;
     -la-fg: #10242c;
     -la-fg-muted: #4a6371;
-    -la-fg-subtle: #6b828d;
+    -la-fg-subtle: #526b77;
 
     /* Accent xanh lục lạnh. */
     -la-accent: #0b7a6b;
@@ -63,19 +63,19 @@
     -color-border-subtle: -la-border-soft;
 
     -fx-background-color: -la-surface;
-    -fx-font-size: 13px;
+    -fx-font-size: 14px;
 }
 
 /* ---- Chữ ---- */
 
 .la-caption {
-    -fx-font-size: 11px;
+    -fx-font-size: 12px;
     -fx-text-fill: -la-fg-muted;
 }
 
 .la-value {
     -fx-font-family: 'Consolas', monospace;
-    -fx-font-size: 12px;
+    -fx-font-size: 13px;
     -fx-text-fill: -la-fg;
 }
 
@@ -89,7 +89,7 @@
 
 /* Chip: chỉ dùng cho trạng thái (kết nối, lifecycle, đối soát, chữ ký). */
 .la-chip {
-    -fx-font-size: 11px;
+    -fx-font-size: 12px;
     -fx-font-weight: bold;
     -fx-padding: 2px 8px;
     -fx-background-radius: 999px;
@@ -152,8 +152,7 @@
 /* ---- Trạng thái (đang xử lý / thành công / thất bại / cần đối soát) ---- */
 
 .la-status {
-    -fx-font-family: 'Consolas', monospace;
-    -fx-font-size: 12px;
+    -fx-font-size: 13px;
     -fx-text-fill: -la-fg-muted;
 }
 
@@ -177,8 +176,43 @@
 
 /* Gợi ý bước kế tiếp: cùng cỡ chữ với thanh trạng thái, nhạt hơn để không tranh với kết quả thao tác. */
 .la-next-step {
-    -fx-font-size: 12px;
+    -fx-font-size: 13px;
     -fx-text-fill: -la-fg-subtle;
+    -fx-padding: 0;
+    -fx-border-width: 0;
+    -fx-underline: false;
+    -fx-focus-color: -la-accent;
+}
+
+.la-next-step:hover {
+    -fx-underline: true;
+}
+
+.la-next-step:focused {
+    -fx-text-fill: -la-accent-strong;
+    -fx-underline: true;
+    -fx-border-color: -la-accent;
+    -fx-border-width: 0 0 1px 0;
+}
+
+.la-next-step--link {
+    -fx-cursor: hand;
+    -fx-underline: true;
+    -fx-text-fill: -la-fg-muted;
+}
+
+.la-copyable {
+    -fx-cursor: hand;
+}
+
+.la-spinner {
+    -fx-progress-color: -la-accent;
+}
+
+.la-field-error {
+    -fx-min-height: 16px;
+    -fx-font-size: 12px;
+    -fx-text-fill: -la-danger;
 }
 
 /* ---- Icon (Ikonli Feather) ---- */
@@ -203,7 +237,7 @@
 
 .la-log {
     -fx-font-family: 'Consolas', monospace;
-    -fx-font-size: 12px;
+    -fx-font-size: 13px;
     -fx-control-inner-background: -la-surface-raised;
 }
 
@@ -241,7 +275,7 @@
 }
 
 .la-section-title {
-    -fx-font-size: 13px;
+    -fx-font-size: 15px;
     -fx-font-weight: bold;
     -fx-text-fill: -la-fg;
 }
@@ -275,7 +309,7 @@
 
 .la-tabs > .tab-header-area > .headers-region > .tab .tab-label {
     -fx-text-fill: -la-fg-muted;
-    -fx-font-size: 13px;
+    -fx-font-size: 14px;
 }
 
 .la-tabs > .tab-header-area > .headers-region > .tab:selected .tab-label {
@@ -293,7 +327,7 @@
 .la-log-pane > .title {
     -fx-background-color: -la-surface-sunken;
     -fx-background-radius: 8px 8px 0 0;
-    -fx-font-size: 12px;
+    -fx-font-size: 13px;
     -fx-font-weight: bold;
     -fx-text-fill: -la-fg-muted;
 }
@@ -305,18 +339,17 @@
     -fx-padding: 4px;
 }
 
-/* Nút bật/tắt chi tiết kỹ thuật: phụ, không tranh vai với nút nghiệp vụ. */
-.la-technical-toggle {
+.la-header-toggle {
     -fx-background-color: transparent;
     -fx-border-color: -la-border;
     -fx-border-radius: 4px;
     -fx-background-radius: 4px;
     -fx-text-fill: -la-fg-muted;
-    -fx-font-size: 12px;
+    -fx-font-size: 13px;
     -fx-padding: 4px 10px;
 }
 
-.la-technical-toggle:selected {
+.la-header-toggle:selected {
     -fx-background-color: -la-accent-soft;
     -fx-text-fill: -la-accent-strong;
 }
@@ -348,7 +381,7 @@
 .la-note {
     -fx-background-radius: 4px;
     -fx-padding: 4px 8px;
-    -fx-font-size: 12px;
+    -fx-font-size: 13px;
 }
 
 .la-note--neutral {
@@ -371,12 +404,34 @@
     -fx-text-fill: -la-danger;
 }
 
-/* Kết quả biên nhận: giá trị chính là con số lớn. */
 .la-receipt-value {
     -fx-font-family: 'Consolas', monospace;
-    -fx-font-size: 24px;
+    -fx-font-size: 15px;
     -fx-font-weight: bold;
     -fx-text-fill: -la-fg;
+}
+
+.la-balance-value {
+    -fx-font-size: 24px;
+    -fx-font-weight: bold;
+}
+
+.la-balance-value.la-state-unknown {
+    -fx-font-size: 14px;
+    -fx-font-weight: normal;
+    -fx-text-fill: -la-fg-muted;
+}
+
+.la-receipt-details > .title {
+    -fx-background-color: transparent;
+    -fx-padding: 4px 0;
+    -fx-font-size: 13px;
+}
+
+.la-receipt-details > .content {
+    -fx-background-color: transparent;
+    -fx-border-width: 0;
+    -fx-padding: 8px 0 0 0;
 }
 
 /* Vùng panel cuộn: không viền, không nền riêng để không cắt tầm nhìn. */
@@ -407,7 +462,7 @@
 
 .la-step-mark {
     -fx-min-width: 16px;
-    -fx-font-size: 13px;
+    -fx-font-size: 14px;
     -fx-text-fill: -la-fg-subtle;
 }
 
@@ -424,7 +479,7 @@
 }
 
 .la-step-title {
-    -fx-font-size: 12px;
+    -fx-font-size: 13px;
     -fx-text-fill: -la-fg;
 }
 
