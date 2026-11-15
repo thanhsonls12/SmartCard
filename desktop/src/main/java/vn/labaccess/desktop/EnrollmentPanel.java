@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import javafx.application.Platform;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
@@ -105,15 +106,20 @@ final class EnrollmentPanel {
     private final TextField fieldStudentId = new TextField();
     private final PasswordField fieldStudentPin = new PasswordField();
     private final Button btnEnroll = new Button("Đăng ký thẻ");
+    private final Button btnRecheck = new Button("Kiểm tra lại đăng ký");
 
     private final Label valueCardId = UiLabels.value();
     private final Label valueStudentId = UiLabels.value();
     private final Label valueEnrolledAt = UiLabels.value();
     private final Label stateChip = UiLabels.chip();
     private final Label message = new Label();
+    private final Label detailNote = new Label();
     private final Label[] stepMarks = new Label[Step.values().length];
     private final VBox node;
     private final FlowPane steps;
+    private final VBox studentRow;
+    private final VBox enrolledAtRow;
+    private final FlowPane resultGroup;
 
     private boolean enabled;
     private String enabledReason;
@@ -142,6 +148,11 @@ final class EnrollmentPanel {
         btnEnroll.getStyleClass().add("la-action");
         UiLabels.apduHint(btnEnroll, "SIGN_REGISTRATION_CHALLENGE (INS=62)"
                 + " — một nút chạy sáu bước, không tách sáu nút");
+        btnRecheck.setOnAction(e -> recheck());
+        btnRecheck.getStyleClass().add("la-action");
+        btnRecheck.setTooltip(new Tooltip("Hỏi Backend trạng thái đăng ký của đúng thẻ này;"
+                + " không gửi lại chữ ký cũ"));
+        UiLabels.show(btnRecheck, false);
 
         message.setWrapText(true);
         message.getStyleClass().add("la-note");
@@ -151,13 +162,14 @@ final class EnrollmentPanel {
         FlowPane inputs = UiRows.wrapping(
                 UiRows.field("Mã sinh viên", fieldStudentId),
                 UiRows.field("PIN học viên", fieldStudentPin),
-                btnEnroll);
+                btnEnroll, btnRecheck);
 
         // Sáu bước xếp hai cột: đủ sáu bước trong tầm mắt, không phải cuộn giữa lúc đang chạy.
         steps = new FlowPane(UiScale.SPACE_3, UiScale.SPACE_1);
         steps.setPrefWrapLength(560);
         for (Step step : Step.values()) {
             Label mark = new Label(Mark.PENDING.symbol);
+            mark.getStyleClass().add("la-step-mark");
             Label title = new Label(step.title);
             title.setWrapText(true);
             title.getStyleClass().add("la-step-title");
@@ -169,13 +181,19 @@ final class EnrollmentPanel {
             steps.getChildren().add(row);
         }
 
-        FlowPane result = UiRows.wrapping(
-                UiRows.field("Mã thẻ", valueCardId),
-                UiRows.field("Mã sinh viên", valueStudentId),
-                UiRows.field("Thời điểm đăng ký", valueEnrolledAt));
+        studentRow = UiRows.field("Mã sinh viên", valueStudentId);
+        enrolledAtRow = UiRows.field("Thời điểm đăng ký", valueEnrolledAt);
+        detailNote.setText("Backend chỉ xác nhận thẻ đã có trong sổ;"
+                + " không trả mã sinh viên và thời điểm đăng ký.");
+        detailNote.getStyleClass().add("la-caption");
+        detailNote.setWrapText(true);
+        resultGroup = UiRows.wrapping(UiRows.field("Mã thẻ", valueCardId),
+                studentRow, enrolledAtRow, detailNote);
+        UiLabels.show(detailNote, false);
+        UiLabels.show(resultGroup, false);
 
         UiLabels.show(steps, false);
-        node = UiSection.of("Đăng ký thẻ", inputs, stateChip, message, result, steps);
+        node = UiSection.of("Đăng ký thẻ", inputs, stateChip, message, resultGroup, steps);
 
         resetView();
     }
@@ -198,6 +216,7 @@ final class EnrollmentPanel {
         this.enabledReason = whyDisabled;
         boolean locked = !enabled || "da-dang-ky".equals(gateway.enrollmentText());
         fieldStudentId.setDisable(locked);
+        fieldStudentId.setPromptText(locked ? null : "8–10 chữ/số");
         fieldStudentPin.setDisable(locked);
         refresh();
     }
@@ -221,7 +240,16 @@ final class EnrollmentPanel {
         if (studentId != null && !studentId.isBlank() && fieldStudentId.getText().isBlank()) {
             fieldStudentId.setText(studentId.strip());
         }
+        showDetails(!valueStudentId.getText().isBlank()
+                && !UiLabels.EMPTY_VALUE.equals(valueStudentId.getText()), false, false);
         refresh();
+    }
+
+    private void showDetails(boolean studentIdKnown, boolean enrolledAtKnown, boolean note) {
+        UiLabels.show(resultGroup, true);
+        UiLabels.show(studentRow, studentIdKnown);
+        UiLabels.show(enrolledAtRow, enrolledAtKnown);
+        UiLabels.show(detailNote, note);
     }
 
     void clearInputs() {
@@ -238,9 +266,10 @@ final class EnrollmentPanel {
         enrolled = false;
         failed = false;
         state = State.NOT_READY;
-        valueCardId.setText("—");
-        valueStudentId.setText("—");
-        valueEnrolledAt.setText("—");
+        valueCardId.setText(UiLabels.EMPTY_VALUE);
+        valueStudentId.setText(UiLabels.EMPTY_VALUE);
+        valueEnrolledAt.setText(UiLabels.EMPTY_VALUE);
+        UiLabels.show(resultGroup, false);
         fieldStudentId.clear();
         fieldStudentPin.clear();
         for (Label mark : stepMarks) {
@@ -270,6 +299,9 @@ final class EnrollmentPanel {
     }
 
     private void refresh() {
+        boolean unknown = state == State.UNKNOWN;
+        UiLabels.show(btnRecheck, unknown);
+        btnRecheck.setDisable(!enabled || !unknown);
         if (state == State.RUNNING) {
             btnEnroll.setDisable(true);
             return;
@@ -284,6 +316,7 @@ final class EnrollmentPanel {
             btnEnroll.setDisable(true);
             UiLabels.markPrimary(btnEnroll, false);
             valueCardId.setText(gateway.status().cardId());
+            showDetails(false, false, true);
             applyState("Đã đăng ký", UiLabels.Tone.OK,
                     "Thẻ đã đăng ký trên Backend. Chuyển sang tab Vận hành để sử dụng.");
             return;
@@ -365,7 +398,7 @@ final class EnrollmentPanel {
     private static String stateProblem(CardStatus current) {
         List<String> problems = new ArrayList<>();
         if (current.balance() != 0) {
-            problems.add("số dư khác 0");
+            problems.add("số lượt còn lại khác 0");
         }
         if (current.counter() != 0) {
             problems.add("số lượt thay đổi khác 0");
@@ -533,6 +566,7 @@ final class EnrollmentPanel {
         valueCardId.setText(cardId);
         valueStudentId.setText(studentId);
         valueEnrolledAt.setText(outcome.enrollment().enrolledAt());
+        showDetails(true, true, false);
         applyState("Đã đăng ký", UiLabels.Tone.OK,
                 "Đăng ký thẻ xong — thẻ sẵn sàng cho giao dịch.");
         stateChip.setTooltip(new Tooltip(String.format(
@@ -596,6 +630,79 @@ final class EnrollmentPanel {
                         ? "Chưa rõ kết quả đăng ký — kiểm tra Backend trước khi làm lại."
                         : "Đăng ký thẻ lỗi ở bước " + (step.ordinal() + 1) + " (" + step.title
                                 + ") — xem chi tiết trong tab Đăng ký thẻ.");
+    }
+
+    private void recheck() {
+        CardStatus current = gateway.status();
+        String cardId = currentCardId.isEmpty() && current != null ? current.cardId() : currentCardId;
+        if (cardId == null || cardId.isBlank()) {
+            applyState("Chưa kiểm tra được", UiLabels.Tone.PENDING,
+                    "Chưa có mã thẻ để kiểm tra đăng ký — nhận diện lại thẻ.");
+            return;
+        }
+        String cardIdHex = cardId.strip().toUpperCase();
+        applyState("Đang kiểm tra", UiLabels.Tone.NEUTRAL,
+                "Đang hỏi Backend trạng thái đăng ký của thẻ " + cardIdHex + " — chưa gửi lệnh thẻ.");
+        UiLabels.show(btnRecheck, false);
+        runner.run("ENROLLMENT_RECHECK", () -> backend.cardEnrolled(cardIdHex),
+                enrolled -> showRecheck(cardIdHex, enrolled), this::showRecheckFailure);
+    }
+
+    private void showRecheck(String cardIdHex, boolean backendEnrolled) {
+        if (backendEnrolled) {
+            enrolled = true;
+            failed = false;
+            state = State.ENROLLED;
+            valueCardId.setText(cardIdHex);
+            showDetails(false, false, true);
+            applyState("Đã đăng ký", UiLabels.Tone.OK,
+                    "Backend xác nhận thẻ đã đăng ký — chuyển sang tab Vận hành để sử dụng.");
+            logLine("[OK] kiểm tra lại đăng ký | cardId=" + cardIdHex
+                    + " | Backend: da-dang-ky, không gửi chữ ký");
+            btnEnroll.setDisable(true);
+            UiLabels.markPrimary(btnEnroll, false);
+            refresh();
+            reporter.report(OutcomeKind.SUCCESS,
+                    "Đăng ký thẻ xong — thẻ sẵn sàng cho giao dịch.");
+            return;
+        }
+        if (!confirmRestart(cardIdHex)) {
+            applyState("Cần kiểm tra", UiLabels.Tone.PENDING,
+                    "Backend xác nhận thẻ chưa đăng ký — giữ nguyên để kiểm tra lại khi cần;"
+                            + " chưa gửi chữ ký.");
+            logLine("[INFO] kiểm tra lại đăng ký: operator chưa xác nhận chạy lại");
+            refresh();
+            return;
+        }
+        resetResult();
+        applyState("Chưa đăng ký", UiLabels.Tone.NEUTRAL,
+                "Backend xác nhận thẻ chưa đăng ký — nhập Mã sinh viên và PIN học viên rồi"
+                        + " bấm Đăng ký thẻ để chạy lượt mới.");
+        logLine("[INFO] kiểm tra lại đăng ký: Backend chưa có thẻ, operator xác nhận chạy lại"
+                + " từ đầu | cardId=" + cardIdHex + " | không dùng lại chữ ký cũ");
+        refresh();
+        reporter.report(OutcomeKind.UNKNOWN,
+                "Thẻ chưa đăng ký — chạy lại lượt đăng ký mới.");
+    }
+
+    private void showRecheckFailure(Exception failure) {
+        String detail = failure.getMessage() == null ? failure.toString() : failure.getMessage();
+        applyState("Cần kiểm tra", UiLabels.Tone.PENDING,
+                "Chưa kiểm tra được trạng thái đăng ký trên Backend (" + detail
+                        + ") — không gửi lại chữ ký; kiểm tra Backend rồi bấm Kiểm tra lại đăng ký.");
+        logLine("[FAIL] kiểm tra lại đăng ký: " + detail);
+        refresh();
+        reporter.report(OutcomeKind.UNKNOWN,
+                "Chưa kiểm tra được trạng thái đăng ký trên Backend — thử lại sau khi Backend chạy.");
+    }
+
+    private boolean confirmRestart(String cardIdHex) {
+        Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
+        confirmation.setTitle("Xác nhận chạy lại đăng ký");
+        confirmation.setHeaderText("Backend xác nhận thẻ " + cardIdHex + " chưa đăng ký.");
+        confirmation.setContentText("Chạy lại từ đầu sẽ tạo yêu cầu đăng ký mới và cần nhập lại"
+                + " Mã sinh viên, PIN học viên. Chữ ký của lượt trước không được dùng lại.");
+        return UiLabels.confirm(confirmation, node, "Chạy lại");
     }
 
     private void applyState(String chip, UiLabels.Tone tone, String detail) {

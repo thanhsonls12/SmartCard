@@ -29,6 +29,8 @@ import javafx.util.Duration;
  */
 final class UiLabels {
 
+    static final String EMPTY_VALUE = "—";
+
     private UiLabels() {
     }
 
