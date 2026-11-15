@@ -1,0 +1,16 @@
+# Noi dung file pending journal cua Variant A, doc truc tiep tu dia trong luc chay.
+# Thoi diem doc: 2026-11-14T22:43:1x+07:00 (sau khi START_VISIT timeout, truoc khi doi soat).
+# Duong dan: D:\SmartCard\logs\q1\q1a-journal.jsonl  (tham so -Dlabaccess.journal=logs\q1\q1a-journal.jsonl)
+# File da bi app xoa sau khi doi soat xong (22:46:31), nen day la ban ghi lai nguyen van noi dung da doc.
+
+v1|PENDING|A1B2C3D4E5F60B01|2|2|-1|4|d026d9cff2bf88c983a10e733341ca04|1794670974042
+
+# Giai ma theo dinh dang v1|STATUS|cardId|counter|operation|delta|balance|visitId|createdAtEpochMillis:
+#   status     = PENDING
+#   cardId     = A1B2C3D4E5F60B01
+#   counter    = 2            (khop counterAfter=2 trong response bi bo)
+#   operation  = 2            (START_VISIT)
+#   delta      = -1
+#   balance    = 4            (khop balanceAfter=4 trong response bi bo)
+#   visitId    = d026d9cff2bf88c983a10e733341ca04 (trung visitId cua APDU 80 51 da gui va cua receipt doc lai khi doi soat)
+#   createdAt  = 1794670974042 (epoch ms = 2026-11-14T15:42:54.042Z)
