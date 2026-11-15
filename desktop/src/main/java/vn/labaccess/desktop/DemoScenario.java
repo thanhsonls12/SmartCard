@@ -86,10 +86,10 @@ final class DemoScenario {
         run(new Runnable[] {
                 () -> fire(app.pressConnect(), "Connect"),
                 () -> fire(app.pressIdentify(), "SELECT + GET_STATUS"),
-                () -> personalizeRejected("ZZZZ", "SV2024-001", "Nguyễn Văn Ánh",
+                () -> personalizeRejected("ZZZZ", "SV2024001", "Nguyễn Văn Ánh",
                         "cardId không phải hex"),
-                () -> personalizeRejected("0000000000000000", "sv2024", "",
-                        "cardId toàn 00, studentId chữ thường, tên rỗng"),
+                () -> personalizeRejected("0000000000000000", "SV2024@01", "",
+                        "cardId toàn 00, studentId có ký tự đặc biệt, tên rỗng"),
                 () -> fire(profilePanel.pressProfile(),
                         "GET_PROFILE (thẻ chưa ISSUED — kỳ vọng nút bị khoá)"),
                 () -> fire(app.pressReadReceipt(), "GET_LAST_RECEIPT"),
@@ -123,7 +123,7 @@ final class DemoScenario {
 
     private void buildHistoryDemo(char[] adminPin, char[] studentPin) {
         String cardId = System.getProperty("labaccess.demo.cardId", "A1B2C3D41122EF11");
-        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024-011");
+        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024011");
         String displayName = System.getProperty("labaccess.demo.displayName", "Nguyen Van UI08");
         java.util.List<Runnable> steps = new java.util.ArrayList<>();
         boolean ready = Boolean.getBoolean("labaccess.demo.history.ready");
@@ -211,7 +211,7 @@ final class DemoScenario {
 
     private void buildTransactionDemo(char[] adminPin, char[] studentPin) {
         String cardId = System.getProperty("labaccess.demo.cardId", "A1B2C3D41122EF06");
-        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024-006");
+        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024006");
         String displayName = System.getProperty("labaccess.demo.displayName", "Nguyen Van UI06");
         java.util.List<Runnable> steps = new java.util.ArrayList<>();
         steps.add(() -> fire(app.pressConnect(), "Connect"));
@@ -279,7 +279,7 @@ final class DemoScenario {
         boolean priorGrant = mode.equals("c4a") || mode.equals("c4b");
         boolean staysLocked = mode.equals("c3") || mode.equals("c4b");
         String cardId = System.getProperty("labaccess.demo.cardId", "A1B2C3D41122EF08");
-        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024-008");
+        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024008");
         String displayName = System.getProperty("labaccess.demo.displayName", "Nguyen Van Sign08");
 
         java.util.List<Object> steps = new java.util.ArrayList<>();
@@ -368,7 +368,7 @@ final class DemoScenario {
         demoAdminPin = adminPin;
         demoStudentPin = studentPin;
         String cardId = System.getProperty("labaccess.demo.cardId", "A1B2C3D41122EF10");
-        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024-010");
+        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024010");
         String displayName = System.getProperty("labaccess.demo.displayName", "Nguyen Van Ui10");
         java.util.List<Object> steps = new java.util.ArrayList<>();
 
@@ -529,7 +529,7 @@ final class DemoScenario {
         demoStudentPin = studentPin;
         boolean staysLocked = mode.equals("backenddown");
         String cardId = System.getProperty("labaccess.demo.cardId", "A1B2C3D41122EF08");
-        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024-008");
+        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024008");
         String displayName = System.getProperty("labaccess.demo.displayName", "Nguyen Van Sign08");
 
         java.util.List<Object> steps = new java.util.ArrayList<>();
@@ -818,7 +818,7 @@ final class DemoScenario {
         demoAdminPin = adminPin;
         demoStudentPin = studentPin;
         String cardId = System.getProperty("labaccess.demo.cardId", "A1B2C3D41122EF07");
-        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024-007");
+        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024007");
         String displayName = System.getProperty("labaccess.demo.displayName", "Nguyen Van UI03");
         java.util.List<Runnable> steps = new java.util.ArrayList<>();
         steps.add(() -> fire(app.pressConnect(), "Connect"));
@@ -840,7 +840,7 @@ final class DemoScenario {
             if (enrollmentPanel.enrolled()) {
                 return;
             }
-            enrollmentPanel.fillInputs(studentId + "-EDITED", studentPin);
+            enrollmentPanel.fillInputs("SVEDIT001", studentPin);
             log.accept("DEMO UI-03 EDIT-AFTER-FAIL sau khi sửa Mã sinh viên + nhập lại PIN: "
                     + enrollmentPanel.statusText());
         });
@@ -866,7 +866,7 @@ final class DemoScenario {
         demoStudentPin = studentPin;
         char[] wrongStudentPin = shiftDigits(studentPin, 5);
         String cardId = System.getProperty("labaccess.demo.cardId", "A1B2C3D41122EF21");
-        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024-021");
+        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024021");
         String displayName = System.getProperty("labaccess.demo.displayName", "Nguyen Van Refactor");
         java.util.List<Runnable> steps = new java.util.ArrayList<>();
         steps.add(() -> fire(app.pressConnect(), "Connect"));
@@ -936,7 +936,7 @@ final class DemoScenario {
         char[] wrongAdmin = shiftDigits(adminPin, 1);
 
         String cardId = System.getProperty("labaccess.demo.cardId", "A1B2C3D41122EE01");
-        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024-002");
+        String studentId = System.getProperty("labaccess.demo.studentId", "SV2024002");
         String displayName = System.getProperty("labaccess.demo.displayName", "Nguyễn Văn Bình");
         char[] changedPin = shiftDigits(studentPin, 1);
         char[] unblockedPin = shiftDigits(studentPin, 2);

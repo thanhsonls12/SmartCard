@@ -17,7 +17,6 @@ import javafx.scene.layout.VBox;
 
 final class PersonalizePanel {
 
-    /** Giá trị panel này truyền sang panel khác sau khi phát hành; không panel nào đọc control của panel kia. */
     record IssuedCard(String cardId, String studentId) {
     }
 
@@ -53,7 +52,7 @@ final class PersonalizePanel {
         fieldCardId.setPrefColumnCount(17);
         fieldCardId.setPromptText((PersonalizeRequest.CARD_ID_LENGTH * 2) + " ký tự hex");
         fieldStudentId.setPrefColumnCount(12);
-        fieldStudentId.setPromptText("A-Z, 0-9, dấu -");
+        fieldStudentId.setPromptText("8–10 chữ/số");
         fieldName.setPrefColumnCount(20);
         fieldName.setPromptText("Họ tên trên thẻ");
         fieldAdminPin.setPrefColumnCount(9);
@@ -183,11 +182,11 @@ final class PersonalizePanel {
         char[] adminPin = fieldAdminPin.getText().toCharArray();
         char[] studentPin = fieldStudentPin.getText().toCharArray();
         String cardId = fieldCardId.getText();
-        String studentId = fieldStudentId.getText().strip();
+        String enteredStudentId = fieldStudentId.getText();
         String displayName = fieldName.getText();
 
         String problem = PersonalizeRequest.problem(
-                adminPin, cardId, studentId, studentPin, displayName);
+                adminPin, cardId, enteredStudentId, studentPin, displayName);
         showFieldProblems(adminPin, cardId, studentPin);
         if (problem != null) {
             Arrays.fill(studentPin, '\0');
@@ -199,6 +198,8 @@ final class PersonalizePanel {
             UiLabels.inputProblem(log, first, "Phát hành thẻ: " + problem);
             return;
         }
+        String studentId = PersonalizeRequest.normalizeStudentId(enteredStudentId);
+        fieldStudentId.setText(studentId);
         if (!confirmIssue(cardId.strip().toUpperCase(), studentId, displayName)) {
             Arrays.fill(studentPin, '\0');
             Arrays.fill(adminPin, '\0');
@@ -230,7 +231,7 @@ final class PersonalizePanel {
                 : PersonalizeRequest.adminPinProblem() + ".");
         UiLabels.setFieldError(cardIdError, PersonalizeRequest.cardIdProblem(cardId));
         UiLabels.setFieldError(studentIdError,
-                PersonalizeRequest.studentIdProblem(fieldStudentId.getText().strip()));
+                PersonalizeRequest.studentIdProblem(fieldStudentId.getText()));
         UiLabels.setFieldError(nameError,
                 PersonalizeRequest.displayNameProblem(fieldName.getText()));
         UiLabels.setFieldError(studentPinError, App.validPin(studentPin,

@@ -37,7 +37,7 @@
         <labaccess.demo.reconnect>false</labaccess.demo.reconnect>
         <labaccess.demo.restore>false</labaccess.demo.restore>
         <labaccess.demo.cardId>A1B2C3D41122EF08</labaccess.demo.cardId>
-        <labaccess.demo.studentId>SV2024-008</labaccess.demo.studentId>
+        <labaccess.demo.studentId>SV2024008</labaccess.demo.studentId>
         <labaccess.backend>http://127.0.0.1:3100</labaccess.backend>
     </properties>
 

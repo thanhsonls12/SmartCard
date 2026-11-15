@@ -3,16 +3,18 @@ package vn.labaccess.desktop;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.Locale;
 
 final class PersonalizeRequest {
 
     static final int ADMIN_PIN_LENGTH = 8;
     static final int STUDENT_PIN_LENGTH = 6;
     static final int CARD_ID_LENGTH = 8;
-    static final int STUDENT_ID_MAX_LENGTH = 32;
+    static final int STUDENT_ID_MIN_LENGTH = 8;
+    static final int STUDENT_ID_MAX_LENGTH = 10;
     static final int DISPLAY_NAME_MAX_LENGTH = 96;
     static final int MIN_PAYLOAD_LENGTH = 25;
-    static final int MAX_PAYLOAD_LENGTH = 153;
+    static final int MAX_PAYLOAD_LENGTH = 131;
 
     private static final int OFFSET_ADMIN_PIN_LENGTH = 0;
     private static final int OFFSET_ADMIN_PIN = 1;
@@ -21,7 +23,8 @@ final class PersonalizeRequest {
     private static final int OFFSET_STUDENT_ID = 18;
     private static final byte ADMIN_PIN_LENGTH_FIELD = (byte) 8;
     private static final String CARD_ID_PATTERN = "[0-9A-Fa-f]{16}";
-    private static final String STUDENT_ID_PATTERN = "[A-Z0-9-]{1,32}";
+    private static final String STUDENT_ID_PATTERN = "[A-Za-z0-9]{"
+            + STUDENT_ID_MIN_LENGTH + "," + STUDENT_ID_MAX_LENGTH + "}";
 
     private PersonalizeRequest() {
     }
@@ -68,13 +71,19 @@ final class PersonalizeRequest {
     }
 
     static String studentIdProblem(String studentId) {
-        if (studentId == null || studentId.isEmpty()) {
-            return "mã sinh viên phải 1-" + STUDENT_ID_MAX_LENGTH + " ký tự A-Z, 0-9, -";
-        }
-        if (!studentId.matches(STUDENT_ID_PATTERN)) {
-            return "mã sinh viên chỉ nhận A-Z, 0-9 và -, tối đa " + STUDENT_ID_MAX_LENGTH + " ký tự";
+        if (studentId == null || !studentId.matches(STUDENT_ID_PATTERN)) {
+            return "Mã sinh viên phải " + STUDENT_ID_MIN_LENGTH + "–" + STUDENT_ID_MAX_LENGTH
+                    + " ký tự chữ A–Z hoặc số 0–9.";
         }
         return null;
+    }
+
+    static String normalizeStudentId(String studentId) {
+        String problem = studentIdProblem(studentId);
+        if (problem != null) {
+            throw new IllegalArgumentException(problem);
+        }
+        return studentId.toUpperCase(Locale.ROOT);
     }
 
     static String displayNameProblem(String displayName) {
@@ -91,7 +100,7 @@ final class PersonalizeRequest {
     static byte[] payload(char[] adminPin, String cardIdHex, String studentId,
             char[] studentPin, String displayName) {
         byte[] cardId = HexFormat.of().parseHex(cardIdHex.strip());
-        byte[] studentIdBytes = studentId.getBytes(StandardCharsets.US_ASCII);
+        byte[] studentIdBytes = normalizeStudentId(studentId).getBytes(StandardCharsets.US_ASCII);
         byte[] nameBytes = displayName.getBytes(StandardCharsets.UTF_8);
         byte[] out = new byte[MIN_PAYLOAD_LENGTH + studentIdBytes.length + nameBytes.length];
         try {

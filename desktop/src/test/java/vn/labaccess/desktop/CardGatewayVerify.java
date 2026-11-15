@@ -1153,7 +1153,7 @@ public final class CardGatewayVerify {
         char[] adminPin = sampleDigits(8);
         char[] studentPin = sampleDigits(6);
         String cardId = CARD_ID;
-        String studentId = "SV2024-001";
+        String studentId = "SV2024001";
         String name = "Nguyễn Văn Ánh";
         try {
             record("K01", "input hop le -> khong co loi dinh dang",
@@ -1175,12 +1175,27 @@ public final class CardGatewayVerify {
             record("K06", "studentId rong bi chan",
                     PersonalizeRequest.problem(
                             adminPin, cardId, "", studentPin, name) != null, true);
-            record("K07", "studentId 33 byte bi chan",
+            record("K07", "studentId 11 ky tu bi chan",
                     PersonalizeRequest.problem(
-                            adminPin, cardId, "A".repeat(33), studentPin, name) != null, true);
-            record("K08", "studentId chu thuong bi chan",
+                            adminPin, cardId, "A".repeat(11), studentPin, name) != null, true);
+            record("K08", "studentId chu thuong duoc chap nhan",
                     PersonalizeRequest.problem(
-                            adminPin, cardId, "sv2024", studentPin, name) != null, true);
+                            adminPin, cardId, "sv2024001", studentPin, name) == null, true);
+            for (String invalid : new String[] {"AB12345", "SV2024-01", "SV2024_01",
+                    " SV2024001", "SV2024001 ", "SV2024001\n", "ß1234567", "ＳＶ2024001"}) {
+                record("K08-INVALID", "studentId ngoai quy tac bi chan",
+                        PersonalizeRequest.studentIdProblem(invalid) != null, true);
+            }
+            record("K08-MIN", "studentId 8 ky tu hop le",
+                    PersonalizeRequest.studentIdProblem("AB123456") == null, true);
+            record("K08-MAX", "studentId 10 ky tu hop le",
+                    PersonalizeRequest.studentIdProblem("AB12345678") == null, true);
+            byte[] mixedCase = PersonalizeRequest.payload(
+                    adminPin, cardId, "sV2024001", studentPin, name);
+            record("K08-UPPER", "payload luu studentId in hoa",
+                    new String(Arrays.copyOfRange(mixedCase, 18, 27),
+                            java.nio.charset.StandardCharsets.US_ASCII).equals("SV2024001"), true);
+            Arrays.fill(mixedCase, (byte) 0);
             record("K09", "student PIN 5 chu so bi chan",
                     PersonalizeRequest.problem(
                             adminPin, cardId, studentId, sampleDigits(5), name) != null, true);
@@ -1219,9 +1234,8 @@ public final class CardGatewayVerify {
                     ascii[pinOffset + 6] & 0xFF, "Nguyen Van A".length());
 
             byte[] maxSized = PersonalizeRequest.payload(
-                    adminPin, cardId, "A".repeat(32), studentPin, "a".repeat(96));
-            record("K21", "Lc toi da 153 voi studentId 32 + ten 96", maxSized.length,
-                    PersonalizeRequest.MAX_PAYLOAD_LENGTH);
+                    adminPin, cardId, "A".repeat(10), studentPin, "a".repeat(96));
+            record("K21", "Lc toi da 131 voi studentId 10 + ten 96", maxSized.length, 131);
 
             Arrays.fill(ascii, (byte) 0);
             Arrays.fill(multibyte, (byte) 0);
@@ -1256,7 +1270,7 @@ public final class CardGatewayVerify {
                     return response(Sw.INS_NOT_SUPPORTED);
                 }));
                 CardOperationResult result = gateway.personalize(
-                        adminPin, CARD_ID, "SV2024-001", studentPin, "Nguyen Van A");
+                        adminPin, CARD_ID, "SV2024001", studentPin, "Nguyen Van A");
                 boolean okText = result.ok() == wantOk[index]
                         && result.text().contains(expects[index])
                         && !mentionsDigits(result.text(), adminPin)
@@ -1266,7 +1280,7 @@ public final class CardGatewayVerify {
                 if (index == 0) {
                     record("Q09", "gui Case 4S: Lc dung byte, Le=00",
                             captured[0] != null
-                            && captured[0].getNc() == 25 + "SV2024-001".length()
+                            && captured[0].getNc() == 25 + "SV2024001".length()
                                     + "Nguyen Van A".length()
                             && captured[0].getNe() == 256, true);
                     record("Q10", "P1/P2 = 0000",
@@ -2046,7 +2060,7 @@ public final class CardGatewayVerify {
         }
         char[] adminPin = adminSource.clone();
         char[] studentPin = studentSource.clone();
-        String studentId = "SV2024-001";
+        String studentId = "SV2024001";
         String displayName = "Nguyễn Văn Ánh";
         char[] wrongAdmin = shiftedDigits(adminPin);
         try {

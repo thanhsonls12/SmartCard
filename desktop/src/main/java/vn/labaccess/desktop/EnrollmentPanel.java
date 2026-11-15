@@ -133,7 +133,7 @@ final class EnrollmentPanel {
         this.reporter = reporter;
 
         fieldStudentId.setPrefColumnCount(14);
-        fieldStudentId.setPromptText("SV2024-001");
+        fieldStudentId.setPromptText("8–10 chữ/số");
         fieldStudentId.textProperty().addListener((observable, old, now) -> userEdited());
         fieldStudentPin.setPrefColumnCount(7);
         fieldStudentPin.textProperty().addListener((observable, old, now) -> userEdited());
@@ -349,8 +349,9 @@ final class EnrollmentPanel {
         if ("da-dang-ky".equals(gateway.enrollmentText())) {
             return "Thẻ đã đăng ký — chuyển sang tab Vận hành để sử dụng.";
         }
-        if (!validStudentId(fieldStudentId.getText())) {
-            return "Mã sinh viên phải 3–32 ký tự A-Z, 0-9 hoặc dấu -.";
+        String studentIdProblem = PersonalizeRequest.studentIdProblem(fieldStudentId.getText());
+        if (studentIdProblem != null) {
+            return studentIdProblem;
         }
         if (!fieldStudentPin.getText().matches("[0-9]{" + PIN_LENGTH + "}")) {
             return "PIN học viên phải đúng 6 chữ số.";
@@ -359,11 +360,6 @@ final class EnrollmentPanel {
             return stateProblem(current);
         }
         return null;
-    }
-
-    private static boolean validStudentId(String value) {
-        String trimmed = value == null ? "" : value.strip();
-        return trimmed.length() >= 3 && trimmed.length() <= 32 && trimmed.matches("[A-Z0-9-]+");
     }
 
     private static String stateProblem(CardStatus current) {
@@ -386,14 +382,16 @@ final class EnrollmentPanel {
         if (btnEnroll.isDisabled()) {
             return;
         }
-        String studentId = fieldStudentId.getText().strip();
+        String enteredStudentId = fieldStudentId.getText();
         char[] pin = fieldStudentPin.getText().toCharArray();
         fieldStudentPin.clear();
-        if (!validStudentId(studentId) || pin.length != PIN_LENGTH) {
+        if (PersonalizeRequest.studentIdProblem(enteredStudentId) != null || pin.length != PIN_LENGTH) {
             Arrays.fill(pin, '\0');
             logLine("[FAIL] đăng ký thẻ: Mã sinh viên hoặc PIN học viên không hợp lệ");
             return;
         }
+        String studentId = PersonalizeRequest.normalizeStudentId(enteredStudentId);
+        fieldStudentId.setText(studentId);
 
         state = State.RUNNING;
         for (Label mark : stepMarks) {

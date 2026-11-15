@@ -102,10 +102,10 @@ public final class PersonalizeSelfTest {
     private static final int META_OFFSET_CIPHERTEXT_HASH = 33;
     private static final int META_CIPHERTEXT_HASH_LENGTH = 32;
     private static final int PROFILE_PLAINTEXT_LENGTH =
-            1 + 1 + "SV2024-001".length() + 1 + "Nguyen Van A".length();
+            1 + 1 + "SV2024001".length() + 1 + "Nguyen Van A".length();
 
     private static final byte[] CARD_ID = hex("A1B2C3D411223344");
-    private static final byte[] STUDENT_ID = ascii("SV2024-001");
+    private static final byte[] STUDENT_ID = ascii("SV2024001");
     private static final byte[] DISPLAY_NAME = "Nguyen Van A".getBytes(java.nio.charset.StandardCharsets.UTF_8);
 
     private static int failed;
@@ -145,30 +145,35 @@ public final class PersonalizeSelfTest {
             }
             selectTestInstance(channel);
             runCases(channel, adminPin, studentPin, unblockedPin, changedPin);
-            runEnrollmentCases(channel, studentPin);
-            runProfileCases(channel, studentPin);
-            metadata = runMetadataCases(channel, studentPin);
-            runQuotaCases(channel, adminPin);
-            card = runAuthorizationResetCase(card, studentPin);
-            channel = card.getBasicChannel();
-            runTamperCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
-            runMetadataDifferential(propertiesPath, channel, adminPin, studentPin,
-                    testCapPath, metadata);
-            runQuotaVariantCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
-            card = runVisitCases(propertiesPath, channel, adminPin, studentPin, testCapPath);
-            channel = card.getBasicChannel();
-            card = runVisitVariantCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
-            channel = card.getBasicChannel();
-            card = runReceiptCases(propertiesPath, channel, adminPin, studentPin, testCapPath);
-            channel = card.getBasicChannel();
-            runReceiptFaultBeforeCommitCase(propertiesPath, channel, adminPin, studentPin,
-                    variantsRoot);
-            runReceiptFaultAfterCommitCase(propertiesPath, channel, adminPin, studentPin,
-                    variantsRoot);
-            runReceiptSignatureSizeCase(propertiesPath, channel, adminPin, studentPin,
-                    variantsRoot);
-            card = runPhotoFinishFaultCase(propertiesPath, card, adminPin, studentPin, variantsRoot);
-            channel = card.getBasicChannel();
+            if (Boolean.getBoolean("labaccess.personalizeOnly")) {
+                runProfileCases(channel, studentPin);
+            } else {
+                runEnrollmentCases(channel, studentPin);
+                runProfileCases(channel, studentPin);
+                metadata = runMetadataCases(channel, studentPin);
+                runQuotaCases(channel, adminPin);
+                card = runAuthorizationResetCase(card, studentPin);
+                channel = card.getBasicChannel();
+                runTamperCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
+                runMetadataDifferential(propertiesPath, channel, adminPin, studentPin,
+                        testCapPath, metadata);
+                runQuotaVariantCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
+                card = runVisitCases(propertiesPath, channel, adminPin, studentPin, testCapPath);
+                channel = card.getBasicChannel();
+                card = runVisitVariantCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
+                channel = card.getBasicChannel();
+                card = runReceiptCases(propertiesPath, channel, adminPin, studentPin, testCapPath);
+                channel = card.getBasicChannel();
+                runReceiptFaultBeforeCommitCase(propertiesPath, channel, adminPin, studentPin,
+                        variantsRoot);
+                runReceiptFaultAfterCommitCase(propertiesPath, channel, adminPin, studentPin,
+                        variantsRoot);
+                runReceiptSignatureSizeCase(propertiesPath, channel, adminPin, studentPin,
+                        variantsRoot);
+                card = runPhotoFinishFaultCase(propertiesPath, card, adminPin, studentPin, variantsRoot);
+                channel = card.getBasicChannel();
+            }
+            runStudentIdBoundaryCases(propertiesPath, channel, adminPin, studentPin);
         } catch (Exception exception) {
             failed++;
             log("SUITE FAILED: " + exception.getClass().getSimpleName());
@@ -1503,6 +1508,14 @@ public final class PersonalizeSelfTest {
                 transmit(channel, personalizeCommand(payload)).getSW());
         clear(payload);
 
+        for (String invalid : new String[] {"AB12345", "AB123456789", "SV2024-01",
+                "SV2024_01", " SV2024001", "SV2024001 "}) {
+            payload = validPayload(adminPin, studentPin, ascii(invalid));
+            record("T05-ID", "studentId ngoai quy tac", SW_WRONG_DATA,
+                    transmit(channel, personalizeCommand(payload)).getSW());
+            clear(payload);
+        }
+
         payload = validPayload(adminPin, studentPin);
         int studentPinOffset = 18 + (payload[17] & 0xFF);
         payload[studentPinOffset] = (byte) 'A';
@@ -1554,6 +1567,8 @@ public final class PersonalizeSelfTest {
         clear(photoChunk);
 
         payload = validPayload(adminPin, studentPin);
+        payload[18] = (byte) 's';
+        payload[19] = (byte) 'v';
         record("T13", "PERSONALIZE admin dung", SW_OK,
                 transmit(channel, personalizeCommand(payload)).getSW());
         clear(payload);
@@ -1887,21 +1902,54 @@ public final class PersonalizeSelfTest {
     }
 
     private static byte[] validPayload(byte[] adminPin, byte[] studentPin) {
-        byte[] payload = new byte[25 + STUDENT_ID.length + DISPLAY_NAME.length];
+        return validPayload(adminPin, studentPin, STUDENT_ID);
+    }
+
+    private static byte[] validPayload(byte[] adminPin, byte[] studentPin, byte[] studentId) {
+        byte[] payload = new byte[25 + studentId.length + DISPLAY_NAME.length];
         int offset = 0;
         payload[offset++] = 8;
         System.arraycopy(adminPin, 0, payload, offset, 8);
         offset += 8;
         System.arraycopy(CARD_ID, 0, payload, offset, CARD_ID.length);
         offset += CARD_ID.length;
-        payload[offset++] = (byte) STUDENT_ID.length;
-        System.arraycopy(STUDENT_ID, 0, payload, offset, STUDENT_ID.length);
-        offset += STUDENT_ID.length;
+        payload[offset++] = (byte) studentId.length;
+        System.arraycopy(studentId, 0, payload, offset, studentId.length);
+        offset += studentId.length;
         System.arraycopy(studentPin, 0, payload, offset, studentPin.length);
         offset += studentPin.length;
         payload[offset++] = (byte) DISPLAY_NAME.length;
         System.arraycopy(DISPLAY_NAME, 0, payload, offset, DISPLAY_NAME.length);
         return payload;
+    }
+
+    private static void runStudentIdBoundaryCases(String propertiesPath, CardChannel channel,
+            byte[] adminPin, byte[] studentPin) throws Exception {
+        for (String input : new String[] {"ab123456", "Ab12345678"}) {
+            if (!removeTestInstance(propertiesPath, channel)
+                    || !installTestInstance(propertiesPath, channel, adminPin)) {
+                throw new IllegalStateException("studentId boundary setup failed");
+            }
+            selectTestInstance(channel);
+            byte[] payload = validPayload(adminPin, studentPin, ascii(input));
+            try {
+                record("ID-ISSUE", "PERSONALIZE studentId length " + input.length(), SW_OK,
+                        transmit(channel, personalizeCommand(payload)).getSW());
+            } finally {
+                clear(payload);
+            }
+            record("ID-VERIFY", "VERIFY truoc doc studentId", SW_OK,
+                    transmit(channel, pinCommand(INS_VERIFY_STUDENT_PIN, studentPin)).getSW());
+            ResponseAPDU response = transmit(channel, profileCommand());
+            byte[] profile = response.getData();
+            String expected = input.length() == 8 ? "AB123456" : "AB12345678";
+            recordBoolean("ID-UPPER", "GET_PROFILE studentId in hoa dung bien",
+                    response.getSW() == SW_OK && profile.length >= 2 + expected.length()
+                            && profile[1] == expected.length()
+                            && Arrays.equals(Arrays.copyOfRange(profile, 2, 2 + expected.length()),
+                                    ascii(expected)));
+            clear(profile);
+        }
     }
 
     private static CommandAPDU personalizeCommand(byte[] data) {
@@ -1972,7 +2020,8 @@ public final class PersonalizeSelfTest {
     private static Card connect() throws Exception {
         CardTerminal terminal = TerminalFactory.getInstance(
                 "SocketCardTerminalFactoryType",
-                List.of(new InetSocketAddress("127.0.0.1", 9025)),
+                List.of(new InetSocketAddress("127.0.0.1",
+                        Integer.getInteger("labaccess.simulator.port", 9025))),
                 "SocketCardTerminalProvider").terminals().list().get(0);
         if (!terminal.isCardPresent() && !terminal.waitForCardPresent(10_000)) {
             throw new IllegalStateException("no card present");

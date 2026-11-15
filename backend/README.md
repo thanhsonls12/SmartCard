@@ -120,7 +120,9 @@ Hai bảng phục vụ enrollment: `admin_sessions` (phiên quản trị local d
 | `POST /enrollments/challenges` | header `x-admin-session`, body `{cardId hex16, studentId, publicKey hex130}` | `201 {challengeId, nonce hex64, expiresAt}` |
 | `POST /enrollments/complete` | header `x-admin-session`, body `{challengeId, signature hex}` | `201 {cardId, studentId, enrolledAt}` |
 
-Mã lỗi theo [quy ước Q-45](docs/dev/quy-uoc-code.md): `401` phiên thiếu/không phải uuid/không tồn tại/hết hạn/đã thu hồi, hoặc challenge thuộc phiên khác; `400` sai schema (hex sai độ dài, `studentId` rỗng hoặc > 64 byte, điểm không hợp lệ); `404` không thấy `challengeId`; `409` challenge đã dùng hoặc hết hạn, `cardId` đã enroll; `422` chữ ký không verify.
+`studentId` gồm 8–10 chữ cái ASCII hoặc chữ số, nhận chữ thường/in hoa và lưu thành chữ hoa. Không nhận khoảng trắng hay ký tự đặc biệt; không tự sửa dữ liệu đã đăng ký trước đó.
+
+Mã lỗi theo [quy ước Q-45](docs/dev/quy-uoc-code.md): `401` phiên thiếu/không phải uuid/không tồn tại/hết hạn/đã thu hồi, hoặc challenge thuộc phiên khác; `400` sai schema (hex sai độ dài, `studentId` sai quy tắc trên, điểm không hợp lệ); `404` không thấy `challengeId`; `409` challenge đã dùng hoặc hết hạn, `cardId` đã enroll; `422` chữ ký không verify.
 
 Chữ ký và thông điệp: xem [bảng APDU §1.13](docs/design/apdu-commands.md). Backend dựng lại đúng 95 byte từ **dữ liệu đã lưu của challenge**, không bao giờ từ `cardId`/`publicKey`/`nonce` client gửi lên; public key được kiểm là điểm P-256 hợp lệ (nằm trên đường cong, đúng tiền tố `04`, đúng 65 byte) ngay khi tạo challenge.
 

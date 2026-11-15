@@ -3,7 +3,9 @@ import { BadRequestException } from '@nestjs/common';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HEX_PATTERN = /^[0-9a-f]+$/i;
 
-export const STUDENT_ID_MAX_BYTES = 64;
+const STUDENT_ID_MIN_LENGTH = 8;
+const STUDENT_ID_MAX_LENGTH = 10;
+const STUDENT_ID_INVALID_CHARACTERS = /[^A-Za-z0-9]/;
 export const SIGNATURE_MIN_BYTES = 8;
 export const SIGNATURE_MAX_BYTES = 72;
 
@@ -43,11 +45,11 @@ export function parseStudentId(value: unknown): string {
     throw new BadRequestException('studentId is required');
   }
 
-  const byteLength = Buffer.byteLength(value, 'utf8');
-  if (byteLength < 1 || byteLength > STUDENT_ID_MAX_BYTES) {
-    throw new BadRequestException(`studentId must be 1..${STUDENT_ID_MAX_BYTES} bytes`);
+  if (value.length < STUDENT_ID_MIN_LENGTH || value.length > STUDENT_ID_MAX_LENGTH
+    || STUDENT_ID_INVALID_CHARACTERS.test(value)) {
+    throw new BadRequestException('studentId must be 8..10 ASCII letters or digits');
   }
-  return value;
+  return value.toUpperCase();
 }
 
 export function parseUuid(value: unknown, field: string): string {

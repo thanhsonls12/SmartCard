@@ -124,7 +124,7 @@ foreach ($pin in $testPins) {
     $hex = @($bytes | ForEach-Object { $_.ToString('x2') })
     $needles += $pin, ($hex -join ''), ($hex -join ' '), ($hex -join ':')
 }
-$profileStudentId = 'SV2024-001'
+$profileStudentId = 'SV2024001'
 $profileDisplayName = 'Nguyen Van A'
 $profilePlaintext = @(1, $profileStudentId.Length) +
     [System.Text.Encoding]::ASCII.GetBytes($profileStudentId) +

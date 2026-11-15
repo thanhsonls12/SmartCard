@@ -7,7 +7,7 @@ import { AppModule } from './../src/app.module.js';
 import { DatabaseService } from './../src/database/database.service.js';
 import { buildEnrollmentMessage } from './../src/enrollment/enrollment-message.js';
 
-const STUDENT_ID = 'SV-ENROLL-01';
+const STUDENT_ID = 'SVENROLL01';
 
 interface CardKey {
   pointHex: string;
@@ -79,7 +79,7 @@ describe('Enrollment (e2e)', () => {
     return request(app.getHttpServer())
       .post('/enrollments/challenges')
       .set('x-admin-session', sessionId)
-      .send({ cardId: cardIdHex, studentId: STUDENT_ID, publicKey: card.pointHex });
+      .send({ cardId: cardIdHex, studentId: STUDENT_ID.toLowerCase(), publicKey: card.pointHex });
   }
 
   function completeChallenge(sessionId: string, challengeId: string, signature: string) {
