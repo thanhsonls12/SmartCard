@@ -13,6 +13,7 @@ import javafx.scene.Parent;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TableView;
+import javafx.scene.layout.VBox;
 
 public final class UiPresentationVerify {
 
@@ -32,12 +33,14 @@ public final class UiPresentationVerify {
                 failureMessages();
                 receiptPresentation();
                 formErrorLayout();
+                photoDraftFeedback();
                 pinConfirmation();
                 recoveryGuidance();
                 nextStepAfterInputError();
                 copyControls();
                 inputFeedbackLifecycle();
                 sessionInputs();
+                uiReviewFixes();
                 System.out.println("UI PRESENTATION PASS: " + checks + " checks");
             } catch (Throwable error) {
                 failure.set(error);
@@ -235,8 +238,17 @@ public final class UiPresentationVerify {
         panel.pressChange();
         check("mismatched confirmation never submits PIN change", submissions[0] == 0);
         check("PIN mismatch is explained beside the field",
-                hasText(panel.node(), "PIN nhập lại chưa khớp. Nhập lại PIN mới."));
+                hasText(panel.node(), "PIN chưa khớp."));
         inputs.get(3).setText(different);
+        check("editing confirmation clears mismatch before submission",
+                !hasText(panel.node(), "PIN nhập lại chưa khớp. Nhập lại PIN mới.")
+                        && !hasText(panel.node(), "PIN chưa khớp."));
+        inputs.get(3).setText(pin);
+        panel.pressChange();
+        inputs.get(2).setText(pin);
+        check("editing new PIN clears mismatch before submission",
+                !hasText(panel.node(), "PIN nhập lại chưa khớp. Nhập lại PIN mới.")
+                        && !hasText(panel.node(), "PIN chưa khớp."));
         panel.pressChange();
         check("matching confirmation submits once and clears change inputs", submissions[0] == 1
                 && inputs.subList(1, 4).stream().allMatch(field -> field.getText().isEmpty()));
@@ -246,11 +258,61 @@ public final class UiPresentationVerify {
         panel.pressUnblock();
         check("mismatched confirmation never submits unblock", submissions[0] == 1);
         inputs.get(6).setText(pin);
+        check("editing unblock confirmation clears mismatch",
+                !hasText(panel.node(), "PIN nhập lại chưa khớp. Nhập lại PIN mới.")
+                        && !hasText(panel.node(), "PIN chưa khớp."));
+        inputs.get(6).setText(different);
+        panel.pressUnblock();
+        inputs.get(5).setText(different);
+        check("editing unblock PIN clears mismatch",
+                !hasText(panel.node(), "PIN nhập lại chưa khớp. Nhập lại PIN mới.")
+                        && !hasText(panel.node(), "PIN chưa khớp."));
         panel.pressUnblock();
         check("matching confirmation clears unblock inputs", submissions[0] == 2
                 && inputs.subList(4, 7).stream().allMatch(field -> field.getText().isEmpty()));
         for (int width : new int[] {420, 820}) {
             verifyFieldErrors(panel.node(), width, panel::pressChange);
+        }
+    }
+
+    private static void photoDraftFeedback() throws Exception {
+        java.nio.file.Path directory = java.nio.file.Files.createTempDirectory("labaccess-photo-");
+        java.nio.file.Path valid = directory.resolve("valid.png");
+        java.nio.file.Path invalid = directory.resolve("invalid.png");
+        try {
+            javax.imageio.ImageIO.write(new java.awt.image.BufferedImage(2, 2,
+                    java.awt.image.BufferedImage.TYPE_INT_RGB), "png", valid.toFile());
+            java.nio.file.Files.writeString(invalid, "not an image");
+            PhotoPanel panel = new PhotoPanel(new CardGateway("127.0.0.1", 1),
+                    (operation, work, callback) -> {
+                        throw new AssertionError("Selecting a photo must not start card I/O");
+                    }, ignored -> { });
+            panel.setEnabled(true, null);
+            check("invalid initial photo shows nearby error", !panel.loadDraft(invalid)
+                    && !panel.hasDraft()
+                    && hasText(panel.node(), "Không đọc được ảnh. Chọn tệp ảnh khác."));
+            check("valid photo clears selection error", panel.loadDraft(valid)
+                    && !hasText(panel.node(), "Không đọc được ảnh. Chọn tệp ảnh khác."));
+            byte[] previous = panel.draftBytes();
+            String status = panel.statusText();
+            check("invalid replacement preserves draft and its description", !panel.loadDraft(invalid)
+                    && java.util.Arrays.equals(previous, panel.draftBytes())
+                    && status.equals(panel.statusText())
+                    && hasText(panel.node(), "Không đọc được ảnh mới. Đang giữ ảnh nháp trước đó."));
+            for (int width : new int[] {420, 820}) {
+                verifyFieldErrors(panel.node(), width, () -> panel.loadDraft(invalid));
+            }
+            check("valid replacement clears its error", panel.loadDraft(valid)
+                    && !hasText(panel.node(), "Không đọc được ảnh mới. Đang giữ ảnh nháp trước đó."));
+            panel.loadDraft(invalid);
+            panel.resetView();
+            check("reset clears draft selection errors", !panel.hasDraft()
+                    && panel.node().lookupAll(".la-field-error").stream()
+                            .noneMatch(javafx.scene.Node::isVisible));
+        } finally {
+            java.nio.file.Files.deleteIfExists(valid);
+            java.nio.file.Files.deleteIfExists(invalid);
+            java.nio.file.Files.delete(directory);
         }
     }
 
@@ -304,7 +366,7 @@ public final class UiPresentationVerify {
     }
 
     private static void copyControls() {
-        Label value = new Label("-");
+        Label value = new Label(UiLabels.EMPTY_VALUE);
         Button copy = UiLabels.copyButton(value, "mã thẻ");
         check("unavailable value cannot be copied", copy.isDisabled());
         value.setText(CARD_ID);
@@ -362,6 +424,68 @@ public final class UiPresentationVerify {
         issuing.resetView();
         check("issuing reset clears PINs", fields(issuing.node()).stream()
                 .allMatch(field -> field.getText().isEmpty()));
+    }
+
+    private static void uiReviewFixes() {
+        VBox field = UiRows.field("Nhãn", new javafx.scene.control.TextField());
+        Label empty = (Label) field.getChildren().getLast();
+        check("empty field error reserves no space", !empty.isManaged() && !empty.isVisible());
+
+        Label longError = UiLabels.fieldError();
+        UiLabels.setFieldError(longError, "Mã sinh viên phải 8–10 ký tự chữ A–Z hoặc số 0–9.");
+        check("field error wraps inside the field instead of widening its column",
+                longError.isWrapText() && longError.getMinWidth() == 0
+                        && longError.getPrefWidth() == 0);
+        check("long field error moves to the panel note", UiLabels
+                .longFieldError("Mã sinh viên phải 8–10 ký tự chữ A–Z hoặc số 0–9.") != null
+                && UiLabels.longFieldError("mã thẻ không được để trống") == null);
+
+        Label value = UiLabels.value();
+        value.setText(CARD_ID);
+        Button copy = UiLabels.copyButton(value, "mã thẻ");
+        check("copy action is a compact icon", (copy.getText() == null || copy.getText().isEmpty())
+                && copy.getGraphic() != null);
+        check("copy icon keeps an accessible name",
+                "Sao chép mã thẻ".equals(copy.getAccessibleText()));
+
+        StatusBar bar = new StatusBar(index -> { });
+        javafx.scene.Node link = bar.node().lookup("#next-step");
+        check("next step is not stretched",
+                javafx.scene.layout.HBox.getHgrow(link) != javafx.scene.layout.Priority.ALWAYS);
+        check("status bar has no spacer", bar.node().getChildren().size() == 2);
+
+        check("session-level reason is not repeated on every panel",
+                SessionGates.panelNote("Chưa kết nối thẻ.") == null
+                        && SessionGates.panelNote("Chưa nhận diện thẻ.") == null
+                        && SessionGates.panelNote(App.BUSY_NOTE) == null);
+        check("panel-specific reason stays on the panel",
+                "Thẻ chưa phát hành — phát hành thẻ trước khi đăng ký."
+                        .equals(SessionGates.panelNote(
+                                "Thẻ chưa phát hành — phát hành thẻ trước khi đăng ký.")));
+
+        EnrollmentPanel enrollment = new EnrollmentPanel(new CardGateway("127.0.0.1", 1),
+                new EnrollmentRunner() {
+                    @Override
+                    public <T> void run(String label, Callable<T> operation,
+                            Consumer<T> onSuccess, Consumer<Exception> onFailure) {
+                        throw new AssertionError("Locked form must not start enrollment");
+                    }
+                }, new BackendClient("http://127.0.0.1:1"), ignored -> { }, (kind, message) -> { });
+        enrollment.setEnabled(false, null);
+        javafx.scene.control.TextField studentId = (javafx.scene.control.TextField)
+                enrollment.node().lookupAll(".text-field").iterator().next();
+        check("locked student id drops the example placeholder", studentId.getPromptText() == null);
+        Label details = (Label) enrollment.node().lookupAll(".la-caption").stream()
+                .filter(node -> "Thời điểm đăng ký".equals(((Label) node).getText()))
+                .findFirst().orElseThrow();
+        boolean hidden = false;
+        for (javafx.scene.Node node = details; node != null; node = node.getParent()) {
+            if (!node.isVisible()) {
+                hidden = true;
+                break;
+            }
+        }
+        check("unknown registration details stay hidden", hidden);
     }
 
     private static void check(String name, boolean passed) {

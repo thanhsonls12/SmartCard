@@ -1,6 +1,11 @@
 package vn.labaccess.desktop;
 
+import java.util.Locale;
+
 final class SessionGates {
+
+    private static final String[] SESSION_LEVEL_REASONS = {"chưa kết nối thẻ", "chưa nhận diện thẻ",
+        "cần đối soát giao dịch", "có giao dịch đang chờ đối soát", "nhật ký cần xử lý thủ công"};
 
     record State(boolean busy, boolean connected, boolean ready, boolean snapshotKnown,
             boolean transactionAllowed, boolean journalPresent, boolean validPending,
@@ -27,6 +32,26 @@ final class SessionGates {
                 access(state, "Thiếu quyền ảnh — thẻ chưa phát hành."),
                 access(state, "Thiếu quyền PIN — thẻ chưa phát hành."),
                 history(state));
+    }
+
+    static boolean sessionLevel(String reason) {
+        if (reason == null) {
+            return false;
+        }
+        String text = reason.toLowerCase(Locale.ROOT);
+        if (text.equals(App.BUSY_WHY) || text.equals(App.BUSY_NOTE.toLowerCase(Locale.ROOT))) {
+            return true;
+        }
+        for (String prefix : SESSION_LEVEL_REASONS) {
+            if (text.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static String panelNote(String reason) {
+        return sessionLevel(reason) ? null : reason;
     }
 
     static NextStep nextStep(boolean closing, State state, String enrollment,
@@ -141,7 +166,7 @@ final class SessionGates {
         if (state.card().hasActiveVisit()) {
             return "thẻ đang có ca mở";
         }
-        return state.card().balance() <= 0 ? "số dư bằng 0 — cấp hạn mức trước" : null;
+        return state.card().balance() <= 0 ? "hết lượt — cấp lượt trước" : null;
     }
 
     private static String end(State state, String base) {

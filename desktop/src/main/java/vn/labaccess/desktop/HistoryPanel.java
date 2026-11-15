@@ -43,11 +43,12 @@ final class HistoryPanel {
         table.getColumns().add(idColumn());
         table.getColumns().add(column("Thao tác", entry -> operationLabel(entry.operation())));
         table.getColumns().add(column("Thay đổi", entry -> deltaLabel(entry.delta())));
-        table.getColumns().add(column("Số dư sau", entry -> String.valueOf(entry.balanceAfter())));
+        table.getColumns().add(column("Lượt còn lại", entry -> String.valueOf(entry.balanceAfter())));
         table.getColumns().add(column("Xác minh", entry -> verifyLabel(entry.verifyStatus())));
         table.setMinHeight(UiScale.SPACE_5 * 8);
         table.setPrefHeight(UiScale.SPACE_5 * 8);
         reload.setId("history-reload");
+        reload.getStyleClass().add("la-action");
         reload.setOnAction(event -> request());
         verdict.setId("history-verdict");
         verdict.getStyleClass().add("la-note");
@@ -164,11 +165,11 @@ final class HistoryPanel {
     private static String matchedText(BackendClient.HistoryLoad load) {
         int count = load.history().entries().size();
         if (count == 0) {
-            return "Sổ chưa có giao dịch. Sổ Backend 0 giao dịch, số dư 0.";
+            return "Sổ chưa có giao dịch. Sổ Backend ghi 0 lượt còn lại.";
         }
         BackendClient.HistoryEntry last = load.history().entries().get(count - 1);
         return String.format(
-                "Khớp sổ: %d giao dịch, số dư %d",
+                "Khớp sổ: %d giao dịch, còn %d lượt",
                 count, last.balanceAfter());
     }
 
@@ -181,7 +182,7 @@ final class HistoryPanel {
         if (entries.isEmpty()) {
             if (ledger.lastCounter() != 0 || ledger.lastBalance() != 0) {
                 return String.format(
-                        "Sổ không có dòng nhưng sổ Backend ghi %d giao dịch, số dư %d",
+                        "Sổ không có dòng nhưng sổ Backend ghi %d giao dịch, còn %d lượt",
                         ledger.lastCounter(), ledger.lastBalance());
             }
             return null;
@@ -194,14 +195,14 @@ final class HistoryPanel {
         }
         if (last.balanceAfter() != ledger.lastBalance()) {
             return String.format(
-                    "Số dư cuối %d khác sổ Backend %d", last.balanceAfter(), ledger.lastBalance());
+                    "Số lượt còn lại %d khác sổ Backend %d", last.balanceAfter(), ledger.lastBalance());
         }
         return null;
     }
 
     private static String operationLabel(String operation) {
         return switch (operation) {
-            case "GRANT" -> "Cấp hạn mức";
+            case "GRANT" -> "Cấp lượt";
             case "START" -> "Mở ca";
             case "END" -> "Đóng ca";
             default -> operation;

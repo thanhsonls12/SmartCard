@@ -8,7 +8,6 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ProgressIndicator;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
-import javafx.scene.layout.Region;
 
 final class StatusBar {
 
@@ -41,16 +40,14 @@ final class StatusBar {
         nextStep.setFocusTraversable(true);
         nextStep.setOnAction(event -> tabOpener.accept(nextStepTab));
 
-        HBox left = new HBox(UiScale.SPACE_2, spinner, status);
-        left.setAlignment(Pos.CENTER_LEFT);
-        left.setMinWidth(0);
+        HBox feedback = new HBox(UiScale.SPACE_2, spinner, status);
+        feedback.setAlignment(Pos.CENTER_RIGHT);
+        feedback.setMinWidth(0);
         HBox.setHgrow(status, Priority.ALWAYS);
-        HBox.setHgrow(left, Priority.ALWAYS);
-        HBox.setHgrow(nextStep, Priority.ALWAYS);
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
+        HBox.setHgrow(feedback, Priority.ALWAYS);
 
-        node = new HBox(left, spacer, nextStep);
+        node = new HBox(UiScale.SPACE_3, nextStep, feedback);
+        node.setAlignment(Pos.CENTER_LEFT);
         node.getStyleClass().add("la-status-bar");
         node.setPadding(UiScale.statusBarInsets());
     }

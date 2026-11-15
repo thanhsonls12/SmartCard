@@ -1,5 +1,7 @@
 package vn.labaccess.desktop;
 
+import static vn.labaccess.desktop.UiSection.tab;
+
 import java.nio.file.Path;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -10,7 +12,6 @@ import java.util.function.Consumer;
 
 import javafx.application.Application;
 import javafx.application.Platform;
-import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.geometry.Orientation;
 import javafx.scene.control.Button;
@@ -85,10 +86,10 @@ public class App extends Application {
     private UiLabels.Tone lastTone = UiLabels.Tone.NEUTRAL;
     private boolean logUiClosed;
 
-    private static final double NARROW_WIDTH = 1000;
+    private static final double NARROW_WIDTH = 920;
     private static final double SPLIT_BUSINESS = 0.65;
     private double horizontalSplit = SPLIT_BUSINESS;
-    private double verticalSplit = 0.60;
+    private double verticalSplit = 0.68;
     static final String BUSY_WHY = "đang xử lý thao tác khác";
     static final String BUSY_NOTE = "Đang xử lý thao tác khác — chờ xong.";
     private static final String CLOSING_NOTE = "Đang đóng cửa sổ.";
@@ -206,7 +207,9 @@ public class App extends Application {
         valueResult = UiLabels.chip();
         valueReconcile = UiLabels.chip();
 
-        FlowPane summary = UiRows.wrapping(
+        Label brand = new Label("LabAccess");
+        brand.getStyleClass().add("la-brand");
+        FlowPane summary = UiRows.wrapping(brand,
                 UiRows.pair(UiLabels.caption("Kết nối"), valueConnection),
                 UiRows.pair(UiLabels.caption("Mã thẻ"),
                         UiRows.pair(valueCardId, UiLabels.copyButton(valueCardId, "mã thẻ"))),
@@ -216,6 +219,7 @@ public class App extends Application {
 
         FlowPane sessionActions = UiRows.wrapping(btnConnect, btnIdentify, btnDisconnect,
                 receiptPanel.reconcileAction(), techToggle, logToggle);
+        sessionActions.getStyleClass().add("la-header-actions");
 
         GridPane technical = new GridPane();
         technical.getStyleClass().add("la-info");
@@ -226,6 +230,10 @@ public class App extends Application {
         technical.add(valueAid, 1, 0);
         technical.add(UiLabels.caption("Protocol"), 0, 1);
         technical.add(valueProtocol, 1, 1);
+        Label valuePid = UiLabels.value();
+        valuePid.setText(String.valueOf(pid));
+        technical.add(UiLabels.caption("PID"), 0, 2);
+        technical.add(valuePid, 1, 2);
         technical.setManaged(false);
         technical.setVisible(false);
         techToggle.selectedProperty().addListener((observable, was, now) -> {
@@ -237,7 +245,7 @@ public class App extends Application {
             enrollmentPanel.showTechnical(now);
         });
 
-        VBox header = new VBox(UiScale.SPACE_2, summary, sessionActions, actionNote.node(),
+        VBox header = new VBox(UiScale.SPACE_3, summary, sessionActions, actionNote.node(),
                 technical);
         header.getStyleClass().add("la-header");
         header.setPadding(UiScale.headerInsets());
@@ -248,12 +256,16 @@ public class App extends Application {
                     return current == null ? "" : current.cardId();
                 },
                 this::log);
-        Tab tabOperations = tab("Vận hành", transactionPanel.node(), receiptPanel.node(),
+        Tab tabOperations = tab("Vận hành",
+                new UiColumns(UiScale.WORKSPACE_COLUMNS_WIDTH, 64,
+                        transactionPanel.node(), receiptPanel.node()),
                 historyPanel.node());
 
         Tab tabRecords = tab("Hồ sơ & ảnh", profilePanel.node(), photoPanel.node());
 
-        Tab tabCard = tab("Cấp thẻ & bảo mật", personalizePanel.node(), pinPanel.node());
+        Tab tabCard = tab("Cấp thẻ & bảo mật",
+                new UiColumns(UiScale.WORKSPACE_COLUMNS_WIDTH, 42,
+                        personalizePanel.node(), pinPanel.node()));
 
         Tab tabEnroll = tab("Đăng ký thẻ", enrollmentPanel.node());
 
@@ -279,7 +291,7 @@ public class App extends Application {
         logPane.setExpanded(false);
 
         VBox business = new VBox(mainTabs);
-        business.setMinHeight(0);
+        business.setMinHeight(260);
         business.setPadding(UiScale.centerInsets());
 
         logColumn = new VBox(logPane);
@@ -296,8 +308,7 @@ public class App extends Application {
 
         BorderPane root = new BorderPane();
         root.setTop(header);
-        root.setCenter(workSplit);
-        root.setBottom(statusBar.node());
+        root.setCenter(new VBox(statusBar.node(), workSplit));
 
         Scene scene = new Scene(root, windowWidth(), windowHeight());
         UiTheme.apply(scene);
@@ -307,7 +318,8 @@ public class App extends Application {
             updateButtons();
         });
         layoutForWidth(windowWidth());
-        stage.setTitle("LabAccess — nhận diện applet (PID " + pid + ")");
+        String title = "LabAccess — Quản lý & vận hành thẻ";
+        stage.setTitle(Boolean.getBoolean("labaccess.demo") ? title + " (PID " + pid + ")" : title);
         stage.setMinWidth(900);
         stage.setMinHeight(600);
         stage.setScene(scene);
@@ -330,19 +342,6 @@ public class App extends Application {
             stage.setAlwaysOnTop(true);
             demo.start();
         }
-    }
-
-    private static Tab tab(String title, Node... content) {
-        VBox body = new VBox(UiScale.SPACE_4, content);
-        ScrollPane scroll = new ScrollPane(body);
-        scroll.setFitToWidth(true);
-        scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        scroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
-        scroll.getStyleClass().add("la-scroll");
-        scroll.setMinHeight(0);
-        Tab tab = new Tab(title, scroll);
-        tab.setClosable(false);
-        return tab;
     }
 
     void revealHistory() {
@@ -376,6 +375,7 @@ public class App extends Application {
         }
         rememberLogSplit();
         workSplit.setOrientation(orientation);
+        logColumn.setMinHeight(orientation == Orientation.VERTICAL ? UiScale.LOG_MIN_HEIGHT : 0);
         restoreLogSplit();
     }
 
@@ -546,23 +546,23 @@ public class App extends Application {
             valueConnection.setText(uiConnected ? "Đã kết nối" : "Chưa kết nối");
             UiLabels.applyChip(valueConnection, uiConnected
                     ? UiLabels.Tone.PENDING : UiLabels.Tone.NEUTRAL);
-            valueAid.setText("-");
-            valueProtocol.setText("-");
+            valueAid.setText(UiLabels.EMPTY_VALUE);
+            valueProtocol.setText(UiLabels.EMPTY_VALUE);
             valueLifecycle.setText("Chưa rõ");
             UiLabels.applyChip(valueLifecycle, UiLabels.Tone.NEUTRAL);
-            valueCardId.setText("-");
+            valueCardId.setText(UiLabels.EMPTY_VALUE);
             valueResult.setText("Chưa nhận diện");
             UiLabels.applyChip(valueResult, UiLabels.Tone.PENDING);
             showReconcile();
             return;
         }
         valueConnection.setText("Đã kết nối");
-        UiLabels.applyChip(valueConnection, UiLabels.Tone.OK);
+        UiLabels.applyChip(valueConnection, UiLabels.Tone.NEUTRAL);
         valueAid.setText(status.instanceAid());
         valueProtocol.setText(String.format("%02X", status.protocolVersion()));
         valueLifecycle.setText(CardLifecycle.caption(status.lifecycle()));
         UiLabels.applyChip(valueLifecycle, status.lifecycle() == CardLifecycle.ISSUED
-                ? UiLabels.Tone.OK : UiLabels.Tone.PENDING);
+                ? UiLabels.Tone.NEUTRAL : UiLabels.Tone.PENDING);
         valueCardId.setText(status.cardId());
         valueResult.setText("Sẵn sàng");
         UiLabels.applyChip(valueResult, UiLabels.Tone.OK);
@@ -576,7 +576,7 @@ public class App extends Application {
         valueReconcile.setText(recovery ? "Cần khôi phục" : known ? "Không có giao dịch chờ" : "Cần đối soát");
         UiLabels.Tone tone = recovery || !known
                 ? UiLabels.Tone.ERROR
-                : (uiConnected ? UiLabels.Tone.OK : UiLabels.Tone.NEUTRAL);
+                : UiLabels.Tone.NEUTRAL;
         UiLabels.applyChip(valueReconcile, tone);
     }
 
@@ -594,12 +594,12 @@ public class App extends Application {
         clearSessionInputs();
         invalidateHistory();
         valueConnection.setText(uiConnected ? "Đã kết nối" : "Chưa kết nối");
-        UiLabels.applyChip(valueConnection, uiConnected ? UiLabels.Tone.OK : UiLabels.Tone.NEUTRAL);
+        UiLabels.applyChip(valueConnection, UiLabels.Tone.NEUTRAL);
         valueLifecycle.setText("Chưa rõ");
         UiLabels.applyChip(valueLifecycle, UiLabels.Tone.NEUTRAL);
-        valueAid.setText("-");
-        valueProtocol.setText("-");
-        valueCardId.setText("-");
+        valueAid.setText(UiLabels.EMPTY_VALUE);
+        valueProtocol.setText(UiLabels.EMPTY_VALUE);
+        valueCardId.setText(UiLabels.EMPTY_VALUE);
         valueResult.setText("Chưa nhận diện");
         UiLabels.applyChip(valueResult, UiLabels.Tone.NEUTRAL);
         showReconcile();
@@ -785,19 +785,17 @@ public class App extends Application {
         receiptPanel.applyLock(busy, reasons.readReceipt(), reasons.reconcile());
         transactionPanel.applyLock(busy, reasons.grant(), reasons.start(), reasons.end(), reasons.readReceipt());
         transactionPanel.showState(current, stateSnapshotKnown);
-        pinPanel.setEnabled(reasons.pin() == null, reasons.pin());
+        pinPanel.setEnabled(reasons.pin() == null, SessionGates.panelNote(reasons.pin()));
         personalizePanel.updateAvailability(reasons.personalize() == null, !busy && uiConnected,
-                reasons.personalize());
-        profilePanel.setEnabled(reasons.profile() == null, reasons.profile());
-        photoPanel.setEnabled(reasons.photo() == null, reasons.photo());
-        enrollmentPanel.setEnabled(reasons.enroll() == null, reasons.enroll());
+                SessionGates.panelNote(reasons.personalize()));
+        profilePanel.setEnabled(reasons.profile() == null, SessionGates.panelNote(reasons.profile()));
+        photoPanel.setEnabled(reasons.photo() == null, SessionGates.panelNote(reasons.photo()));
+        enrollmentPanel.setEnabled(reasons.enroll() == null, SessionGates.panelNote(reasons.enroll()));
         enrollmentPanel.onCard(current == null ? null : current.cardId());
         historyPanel.onCard(uiReady && current != null ? current.cardId() : null);
-        historyPanel.setEnabled(reasons.history() == null, reasons.history());
+        historyPanel.setEnabled(reasons.history() == null, SessionGates.panelNote(reasons.history()));
 
-        if (busy) {
-            actionNote.show(BUSY_NOTE, UiLabels.Tone.NEUTRAL, false);
-        } else if (JournalRecoveryView.needed(loaded)) {
+        if (JournalRecoveryView.needed(loaded)) {
             actionNote.show(JournalRecoveryView.summary(loaded) + " Mở Hướng dẫn khôi phục.",
                     UiLabels.Tone.ERROR, false);
         } else if (journalPresent || !gateway.reconciliation().transactionAllowed()) {
@@ -805,10 +803,6 @@ public class App extends Application {
                     UiLabels.Tone.PENDING, true);
         } else if (lastFailure != null) {
             actionNote.show(lastFailure, UiLabels.Tone.ERROR, true);
-        } else if (!uiConnected) {
-            actionNote.show("Kết nối thẻ để bắt đầu.", UiLabels.Tone.NEUTRAL, false);
-        } else if (!uiReady) {
-            actionNote.show("Đã kết nối. Bấm Nhận diện thẻ để tiếp tục.", UiLabels.Tone.NEUTRAL, false);
         } else {
             actionNote.show(null, UiLabels.Tone.NEUTRAL, false);
         }

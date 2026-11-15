@@ -35,7 +35,7 @@ final class UiRows {
         }
         FlowPane row = new FlowPane(UiScale.SPACE_2, UiScale.SPACE_2, nodes);
         row.setAlignment(Pos.CENTER_LEFT);
-        row.setRowValignment(VPos.BOTTOM);
+        row.setRowValignment(hasField ? VPos.TOP : VPos.CENTER);
         return row;
     }
 
@@ -84,8 +84,12 @@ final class UiRows {
     }
 
     private static VBox buttonColumn(Node control) {
-        VBox column = new VBox(UiScale.SPACE_1, control, UiLabels.fieldErrorSpacer());
-        column.setAlignment(Pos.BOTTOM_LEFT);
+        Label captionLine = UiLabels.caption("\u00A0");
+        captionLine.setMinWidth(0);
+        captionLine.setPrefWidth(0);
+        captionLine.setMaxWidth(0);
+        VBox column = new VBox(UiScale.SPACE_1, captionLine, control, UiLabels.fieldErrorSpacer());
+        column.setAlignment(Pos.TOP_LEFT);
         return column;
     }
 }

@@ -56,6 +56,10 @@ final class Icons {
         return icon(Feather.CHECK_CIRCLE, "la-icon--accent");
     }
 
+    static FontIcon copy() {
+        return icon(Feather.COPY);
+    }
+
     private static FontIcon icon(Feather feather, String... extraStyleClasses) {
         FontIcon node = new FontIcon(feather);
         node.setIconSize(SIZE);

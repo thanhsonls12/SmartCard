@@ -11,18 +11,20 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
+import javafx.scene.control.OverrunStyle;
+import javafx.scene.control.Tooltip;
 import javafx.scene.image.ImageView;
 import javafx.scene.image.PixelWriter;
 import javafx.scene.image.WritableImage;
-import javafx.scene.layout.FlowPane;
-import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 
 final class PhotoPanel {
 
-    static final int PREVIEW_SIZE = 192;
+    static final int PREVIEW_SIZE = 160;
+    private static final double ACTION_WIDTH = 192;
 
     private final CardGateway gateway;
     private final CardOpRunner runner;
@@ -35,6 +37,8 @@ final class PhotoPanel {
     private final PasswordField fieldStudentPin = new PasswordField();
     private final Label adminPinError = UiLabels.fieldError();
     private final Label studentPinError = UiLabels.fieldError();
+    private final Label draftError = UiLabels.fieldError();
+    private final Label draftName = UiLabels.caption("Chưa chọn tệp");
     private final Label valueStatus = UiLabels.value();
     private final Label summaryStatus = new Label();
     private final VBox technical;
@@ -48,6 +52,7 @@ final class PhotoPanel {
     private String currentCardId = "";
     private boolean cardHasPhoto;
     private String uploadFeedback = "";
+    private boolean uploadFailed;
     private boolean panelEnabled;
     private String lockReason;
     private String draftLabel = "Chưa chọn ảnh";
@@ -80,31 +85,35 @@ final class PhotoPanel {
             field.setMinWidth(0);
             field.setMaxWidth(Double.MAX_VALUE);
         }
-        VBox uploadActions = new VBox(UiScale.SPACE_2, btnChoose,
+        VBox uploadActions = new VBox(UiScale.SPACE_2, btnChoose, draftError,
                 UiRows.field("PIN quản trị", fieldAdminPin, adminPinError), btnUpload);
         VBox readActions = new VBox(UiScale.SPACE_2,
                 UiRows.field("PIN học viên", fieldStudentPin, studentPinError), btnRead);
         for (VBox actions : new VBox[] {uploadActions, readActions}) {
-            actions.setMinWidth(PREVIEW_SIZE);
-            actions.setPrefWidth(PREVIEW_SIZE);
-            actions.setMaxWidth(PREVIEW_SIZE);
+            actions.setMinWidth(ACTION_WIDTH);
+            actions.setPrefWidth(ACTION_WIDTH);
+            actions.setMaxWidth(ACTION_WIDTH);
         }
-        HBox upload = new HBox(UiScale.SPACE_3, previewColumn("Ảnh nháp", draftView), uploadActions);
-        HBox read = new HBox(UiScale.SPACE_3, previewColumn("Ảnh từ thẻ", cardView), readActions);
-        upload.setAlignment(Pos.TOP_LEFT);
-        read.setAlignment(Pos.TOP_LEFT);
+        HBox upload = new HBox(UiScale.SPACE_3,
+                previewColumn("Chọn ảnh để xem trước", draftView, draftName), uploadActions);
+        HBox read = new HBox(UiScale.SPACE_3,
+                previewColumn("Nhập PIN và đọc ảnh từ thẻ", cardView,
+                        UiLabels.caption(PhotoImage.WIDTH + " × " + PhotoImage.HEIGHT + " px · ảnh xám")),
+                readActions);
         Label uploadTitle = new Label("Ghi ảnh lên thẻ");
         Label readTitle = new Label("Đọc ảnh từ thẻ");
         uploadTitle.getStyleClass().add("la-title");
         readTitle.getStyleClass().add("la-title");
-        FlowPane body = new FlowPane(UiScale.SPACE_5, UiScale.SPACE_4,
+        var body = new UiColumns(2 * (PREVIEW_SIZE + ACTION_WIDTH + UiScale.SPACE_3) + UiScale.SPACE_4, 50,
                 new VBox(UiScale.SPACE_2, uploadTitle, upload),
                 new VBox(UiScale.SPACE_2, readTitle, read));
 
         technical = UiRows.valueBlock("Chi tiết ảnh", valueStatus);
         UiLabels.show(technical, false);
         summaryStatus.setId("photo-summary");
+        summaryStatus.getStyleClass().add("la-note");
         summaryStatus.setWrapText(true);
+        UiLabels.applyNoteTone(summaryStatus, UiLabels.Tone.NEUTRAL);
         VBox statusRow = new VBox(UiScale.SPACE_2, summaryStatus, technical);
 
         Label warning = new Label("Ảnh lưu trên thẻ chưa được mã hóa AES.");
@@ -118,18 +127,26 @@ final class PhotoPanel {
         clearCardImage("chưa đọc ảnh từ thẻ");
     }
 
-    /** Khung ảnh cố định: viền và nền đặt trên StackPane để khung không co giãn theo ảnh. */
-    private static VBox previewColumn(String caption, ImageView view) {
+    private static VBox previewColumn(String emptyText, ImageView view, Label caption) {
         view.setFitWidth(PREVIEW_SIZE);
         view.setFitHeight(PREVIEW_SIZE);
         view.setPreserveRatio(true);
         view.setSmooth(false);
-        StackPane frame = new StackPane(view);
+        Label placeholder = new Label(emptyText);
+        placeholder.getStyleClass().add("la-preview-empty");
+        placeholder.setWrapText(true);
+        placeholder.setMaxWidth(PREVIEW_SIZE - UiScale.SPACE_5 * 2);
+        placeholder.visibleProperty().bind(view.imageProperty().isNull());
+        placeholder.managedProperty().bind(placeholder.visibleProperty());
+        StackPane frame = new StackPane(placeholder, view);
         frame.getStyleClass().add("la-preview");
         frame.setMinSize(PREVIEW_SIZE, PREVIEW_SIZE);
         frame.setPrefSize(PREVIEW_SIZE, PREVIEW_SIZE);
         frame.setMaxSize(PREVIEW_SIZE, PREVIEW_SIZE);
-        VBox column = new VBox(UiScale.SPACE_1, UiLabels.caption(caption), frame);
+        caption.setMinWidth(0);
+        caption.setMaxWidth(PREVIEW_SIZE);
+        caption.setTextOverrun(OverrunStyle.CENTER_ELLIPSIS);
+        VBox column = new VBox(UiScale.SPACE_2, frame, caption);
         column.setAlignment(Pos.TOP_LEFT);
         return column;
     }
@@ -156,8 +173,10 @@ final class PhotoPanel {
         boolean uploadReady = panelEnabled && draft != null && !cardHasPhoto;
         btnUpload.setDisable(!uploadReady);
         fieldAdminPin.setDisable(!panelEnabled || cardHasPhoto);
+        btnChoose.setText(cardHasPhoto ? "Chọn ảnh đối chiếu…" : "Chọn ảnh…");
         String reason = lockReason != null ? lockReason
-                : cardHasPhoto ? "Thẻ đã có ảnh, không thể ghi thêm. Bấm Đọc ảnh để kiểm tra."
+                : cardHasPhoto ? "Thẻ đã có ảnh, không thể ghi thêm."
+                        + " Chọn ảnh gốc rồi bấm Đọc ảnh để đối chiếu."
                 : draft == null ? "Tải ảnh lên: chọn ảnh trước." : null;
         UiLabels.setWhy(why, reason);
     }
@@ -184,25 +203,29 @@ final class PhotoPanel {
             byte[] converted = PhotoDraft.fromFile(file);
             draft = converted;
             draftView.setImage(toImage(converted));
-            draftLabel = "Bản nháp: " + shortName(file) + " sha256 "
+            draftName.setText(String.valueOf(file.getFileName()));
+            draftName.setTooltip(new Tooltip(draftName.getText()));
+            draftLabel = "Bản nháp: " + draftName.getText() + " sha256 "
                     + PhotoImage.fingerprint(converted);
+            UiLabels.clearFieldError(draftError);
             refreshStatus();
             refreshActions();
             return true;
         } catch (IOException exception) {
-            draft = null;
-            draftView.setImage(null);
-            draftLabel = "Chưa chọn ảnh";
-            refreshStatus();
-            refreshActions();
+            UiLabels.setFieldError(draftError, draft == null
+                    ? "Không đọc được ảnh. Chọn tệp ảnh khác."
+                    : "Không đọc được ảnh mới. Đang giữ ảnh nháp trước đó.");
             log.accept("[FAIL] PHOTO chọn ảnh: " + exception.getMessage());
             return false;
         }
     }
 
     void clearDraft() {
+        UiLabels.clearFieldError(draftError);
         draft = null;
         draftView.setImage(null);
+        draftName.setText("Chưa chọn tệp");
+        draftName.setTooltip(null);
         draftLabel = "Chưa chọn ảnh";
         refreshStatus();
         refreshActions();
@@ -228,6 +251,7 @@ final class PhotoPanel {
         currentCardId = "";
         cardHasPhoto = false;
         uploadFeedback = "";
+        uploadFailed = false;
         clearDraft();
         clearCardImage("chưa đọc ảnh từ thẻ");
     }
@@ -333,6 +357,7 @@ final class PhotoPanel {
 
     private void showUpload(boolean ok, byte[] image) {
         cardHasPhoto = cardHasPhoto || ok;
+        uploadFailed = !ok;
         uploadFeedback = ok ? "Đã ghi ảnh lên thẻ."
                 : "Chưa xác nhận ghi ảnh thành công. Đọc ảnh để kiểm tra trước khi ghi lại.";
         draftLabel = (ok ? "Bản nháp: đã nạp sha256 " : "Bản nháp: đã chọn, nạp THẤT BẠI sha256 ")
@@ -369,6 +394,7 @@ final class PhotoPanel {
         }
         cardHasPhoto = true;
         uploadFeedback = "";
+        uploadFailed = false;
         cardImage = photo;
         cardView.setImage(toImage(photo));
         cardLabel = "Trên thẻ: sha256 " + PhotoImage.fingerprint(photo);
@@ -388,11 +414,20 @@ final class PhotoPanel {
                 + (draft != null && cardImage != null
                         ? Arrays.equals(draft, cardImage) ? " Hai ảnh khớp nhau." : " Hai ảnh khác nhau."
                         : ""));
+        UiLabels.applyNoteTone(summaryStatus, summaryTone());
     }
 
-    private static String shortName(Path file) {
-        String name = String.valueOf(file.getFileName());
-        return name.length() <= 24 ? name : name.substring(0, 21) + "...";
+    private UiLabels.Tone summaryTone() {
+        if (uploadFailed) {
+            return UiLabels.Tone.ERROR;
+        }
+        if (draft == null) {
+            return UiLabels.Tone.NEUTRAL;
+        }
+        if (cardImage == null) {
+            return cardHasPhoto ? UiLabels.Tone.PENDING : UiLabels.Tone.NEUTRAL;
+        }
+        return Arrays.equals(draft, cardImage) ? UiLabels.Tone.OK : UiLabels.Tone.ERROR;
     }
 
     private static boolean isDigits(char[] value, int length) {

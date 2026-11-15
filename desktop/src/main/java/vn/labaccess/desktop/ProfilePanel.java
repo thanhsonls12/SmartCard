@@ -49,10 +49,12 @@ final class ProfilePanel {
         VBox pinField = UiRows.field("PIN học viên", fieldPin, pinError);
         FlowPane controls = UiRows.wrapping(pinField, btnProfile);
 
+        valueName.getStyleClass().add("la-profile-name");
+        valueStudentId.getStyleClass().add("la-card-id");
         VBox profileBlock = new VBox(UiScale.SPACE_2,
                 noteProfile,
-                UiRows.pair(UiLabels.caption("Mã sinh viên"), valueStudentId),
-                UiRows.pair(UiLabels.caption("Họ tên"), valueName));
+                UiRows.valueBlock("Họ tên", valueName),
+                UiRows.valueBlock("Mã sinh viên", valueStudentId));
 
         VBox metaBlock = new VBox(UiScale.SPACE_2,
                 noteMeta,
@@ -62,7 +64,9 @@ final class ProfilePanel {
 
         technical = new VBox(UiScale.SPACE_2, btnMeta, metaBlock);
         UiLabels.show(technical, false);
-        node = UiSection.of("Hồ sơ học viên", controls, why, profileBlock, technical);
+        node = UiSection.of("Hồ sơ học viên",
+                new UiColumns(UiScale.PROFILE_COLUMNS_WIDTH, 38, controls, profileBlock),
+                why, technical);
         clearView();
     }
 
@@ -88,11 +92,11 @@ final class ProfilePanel {
 
     void clearView() {
         clearInputs();
-        valueStudentId.setText("-");
-        valueName.setText("-");
-        valueAlgorithm.setText("-");
-        valueRecordVersion.setText("-");
-        valueCiphertextLength.setText("-");
+        valueStudentId.setText(UiLabels.EMPTY_VALUE);
+        valueName.setText(UiLabels.EMPTY_VALUE);
+        valueAlgorithm.setText(UiLabels.EMPTY_VALUE);
+        valueRecordVersion.setText(UiLabels.EMPTY_VALUE);
+        valueCiphertextLength.setText(UiLabels.EMPTY_VALUE);
         showNote(noteProfile, true);
         showNote(noteMeta, true);
     }

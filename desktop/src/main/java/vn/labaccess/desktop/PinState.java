@@ -80,4 +80,14 @@ record PinState(String title, String detail) {
     String text() {
         return title + " — " + detail;
     }
+
+    static UiLabels.Tone tone(boolean ok, int sw) {
+        if (sw < 0) {
+            return UiLabels.Tone.NEUTRAL;
+        }
+        if (sw == Sw.OK) {
+            return ok ? UiLabels.Tone.OK : UiLabels.Tone.PENDING;
+        }
+        return UiLabels.Tone.ERROR;
+    }
 }

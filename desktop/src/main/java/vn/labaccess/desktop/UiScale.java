@@ -2,12 +2,6 @@ package vn.labaccess.desktop;
 
 import javafx.geometry.Insets;
 
-/**
- * Thang khoảng cách dùng cho layout.
- *
- * Insets và gap của HBox/VBox không đặt được bằng CSS nên thang này nằm ở Java;
- * LabAccess không dùng số lẻ ngoài các bước dưới đây.
- */
 final class UiScale {
 
     static final double SPACE_1 = 4;
@@ -15,32 +9,30 @@ final class UiScale {
     static final double SPACE_3 = 12;
     static final double SPACE_4 = 16;
     static final double SPACE_5 = 24;
+    static final double LOG_MIN_HEIGHT = 130;
+    static final double WORKSPACE_COLUMNS_WIDTH = 1000;
+    static final double PROFILE_COLUMNS_WIDTH = 640;
 
     private UiScale() {
     }
 
-    /** Lề ngoài của một khối nội dung. */
     static Insets blockInsets() {
         return new Insets(SPACE_3);
     }
 
-    /** Lề ngang của một hàng control, không có lề trên/dưới. */
     static Insets rowInsets() {
         return new Insets(0, SPACE_3, SPACE_2, SPACE_3);
     }
 
-    /** Lề của thanh trạng thái dưới cùng. */
     static Insets statusBarInsets() {
-        return new Insets(SPACE_2, SPACE_3, SPACE_2, SPACE_3);
+        return new Insets(SPACE_2, SPACE_5, SPACE_2, SPACE_5);
     }
 
-    /** Lề của vùng header cố định trên cùng. */
     static Insets headerInsets() {
-        return new Insets(SPACE_2, SPACE_3, SPACE_2, SPACE_3);
+        return new Insets(SPACE_2, SPACE_5, SPACE_2, SPACE_5);
     }
 
-    /** Lề quanh vùng nội dung tab và nhật ký. */
     static Insets centerInsets() {
-        return new Insets(SPACE_2, SPACE_3, SPACE_2, SPACE_3);
+        return new Insets(SPACE_3, SPACE_5, SPACE_4, SPACE_5);
     }
 }

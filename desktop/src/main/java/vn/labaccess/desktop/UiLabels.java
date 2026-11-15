@@ -31,6 +31,8 @@ final class UiLabels {
 
     static final String EMPTY_VALUE = "—";
 
+    private static final int FIELD_ERROR_MAX_CHARS = 28;
+
     private UiLabels() {
     }
 
@@ -41,15 +43,14 @@ final class UiLabels {
     }
 
     static Label value() {
-        Label label = new Label("-");
-        label.setId("value");
+        Label label = new Label(EMPTY_VALUE);
         label.getStyleClass().add("la-value");
         return label;
     }
 
     /** Chip trạng thái: chỉ dùng cho trạng thái, không dùng cho mọi giá trị. */
     static Label chip() {
-        Label label = new Label("-");
+        Label label = new Label(EMPTY_VALUE);
         label.getStyleClass().addAll("la-chip", "la-chip--neutral");
         return label;
     }
@@ -123,8 +124,9 @@ final class UiLabels {
     }
 
     static void reserveFieldError(Label label) {
-        label.setManaged(true);
-        label.setVisible(label.getText() != null && !label.getText().isEmpty());
+        boolean shown = label.getText() != null && !label.getText().isEmpty();
+        label.setManaged(shown);
+        label.setVisible(shown);
     }
 
     static void clearFieldError(Label label) {
@@ -133,7 +135,17 @@ final class UiLabels {
 
     static void setFieldError(Label label, String message) {
         label.setText(message == null ? "" : message);
-        label.setVisible(message != null);
+        reserveFieldError(label);
+    }
+
+    static String longFieldError(String message) {
+        return message != null && message.length() > FIELD_ERROR_MAX_CHARS ? message : null;
+    }
+
+    static void setFieldError(Label label, Label note, String message) {
+        String longMessage = longFieldError(message);
+        setFieldError(label, longMessage == null ? message : null);
+        setWhy(note, longMessage);
     }
 
     static void markPrimary(Button button, boolean primary) {
@@ -155,9 +167,16 @@ final class UiLabels {
 
     static void setWhy(Label note, String text) {
         boolean show = text != null && !text.isBlank();
-        note.setText(show ? text : "");
+        note.setText(show ? sentence(text) : "");
         note.setVisible(show);
         note.setManaged(show);
+    }
+
+    static String sentence(String text) {
+        String value = text.strip();
+        String capitalized = Character.toUpperCase(value.charAt(0)) + value.substring(1);
+        char last = capitalized.charAt(capitalized.length() - 1);
+        return last == '.' || last == '!' || last == '?' ? capitalized : capitalized + ".";
     }
 
     static String whyLine(Object... pairs) {
@@ -185,15 +204,16 @@ final class UiLabels {
     }
 
     static Button copyButton(Label label, String caption) {
-        Button button = new Button("Sao chép");
-        button.getStyleClass().add("la-action");
+        Button button = new Button();
+        button.setGraphic(Icons.copy());
+        button.getStyleClass().addAll("la-action", "la-copy");
         button.setAccessibleText("Sao chép " + caption);
         String hint = "Sao chép " + caption;
         Tooltip tooltip = new Tooltip(hint);
         button.setTooltip(tooltip);
         button.disableProperty().bind(javafx.beans.binding.Bindings.createBooleanBinding(() -> {
             String text = label.getText();
-            return text == null || text.isBlank() || "-".equals(text) || text.startsWith("Chưa ");
+            return text == null || text.isBlank() || EMPTY_VALUE.equals(text) || text.startsWith("Chưa ");
         }, label.textProperty()));
         PauseTransition restore = new PauseTransition(Duration.seconds(1.5));
         restore.setOnFinished(done -> {
@@ -316,7 +336,7 @@ final class UiLabels {
             case "SELECT + GET_STATUS" -> "nhận diện thẻ";
             case "VERIFY + GET_LAST_RECEIPT + GET_STATUS state" -> "đọc trạng thái thẻ";
             case "RECONCILE_PENDING" -> "đối soát giao dịch";
-            case "GRANT_QUOTA" -> "cấp hạn mức";
+            case "GRANT_QUOTA" -> "cấp lượt";
             case "START_VISIT" -> "mở ca";
             case "END_VISIT" -> "đóng ca";
             case "PERSONALIZE" -> "phát hành thẻ";

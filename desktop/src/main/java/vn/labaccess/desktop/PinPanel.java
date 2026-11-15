@@ -32,7 +32,7 @@ final class PinPanel {
     private final Button btnVerify = new Button("Xác thực PIN");
     private final Button btnChange = new Button("Đổi PIN");
     private final Button btnUnblock = new Button("Mở khóa PIN");
-    private final Label valueState = UiLabels.value();
+    private final Label valueState = new Label();
     private final Label why = UiLabels.whyNote();
     private final VBox node;
 
@@ -60,6 +60,9 @@ final class PinPanel {
         for (Button button : new Button[] {btnVerify, btnChange, btnUnblock}) {
             button.getStyleClass().add("la-action");
         }
+        valueState.getStyleClass().add("la-note");
+        valueState.setWrapText(true);
+        UiLabels.applyNoteTone(valueState, UiLabels.Tone.NEUTRAL);
 
         FlowPane verify = UiRows.wrapping(
                 UiRows.field("PIN học viên", fieldVerifyPin, verifyError), btnVerify);
@@ -120,14 +123,19 @@ final class PinPanel {
 
     void clearState() {
         clearInputs();
-        valueState.setText(PinState.unknown().text());
+        showValue(PinState.unknown().text(), UiLabels.Tone.NEUTRAL);
     }
 
     void resetState(String reason) {
         clearInputs();
         PinState state = PinState.unknown();
-        valueState.setText(state.text());
+        showValue(state.text(), UiLabels.Tone.NEUTRAL);
         log.accept("GUI hiển thị PIN = " + state.text() + " | " + reason);
+    }
+
+    private void showValue(String text, UiLabels.Tone tone) {
+        valueState.setText(text);
+        UiLabels.applyNoteTone(valueState, tone);
     }
 
     boolean pressVerify() {
@@ -247,16 +255,18 @@ final class PinPanel {
             Arrays.fill(repeated, '\0');
         }
         String problem = matches ? null : "PIN nhập lại chưa khớp. Nhập lại PIN mới.";
-        UiLabels.setFieldError(error, problem);
+        UiLabels.setFieldError(error, matches ? null : "PIN chưa khớp.");
         if (!matches) {
-            UiLabels.inputProblem(log, confirmation, problem);
+            confirmation.requestFocus();
+            log.accept("[FAIL] " + problem);
         }
         return matches;
     }
 
     private void showState(PinState.Operation operation, boolean ok) {
-        PinState state = PinState.of(operation, ok, gateway.lastPinSw());
-        valueState.setText(state.text());
+        int sw = gateway.lastPinSw();
+        PinState state = PinState.of(operation, ok, sw);
+        showValue(state.text(), PinState.tone(ok, sw));
         log.accept("GUI hiển thị PIN = " + state.text());
     }
 }

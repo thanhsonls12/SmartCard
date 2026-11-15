@@ -10,6 +10,7 @@ import javafx.scene.control.PasswordField;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.TextFormatter;
 import javafx.scene.layout.FlowPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
 final class TransactionPanel {
@@ -17,7 +18,7 @@ final class TransactionPanel {
     private static final int DELTA_MIN = 1;
     private static final int DELTA_MAX = Receipt.MAX_BALANCE;
     private static final int DELTA_DEFAULT = 5;
-    private static final String DELTA_PROBLEM = "Số lượt thay đổi phải từ "
+    private static final String DELTA_PROBLEM = "Số lượt cần cấp phải từ "
             + DELTA_MIN + " đến " + DELTA_MAX + ".";
 
     record Session(BooleanSupplier snapshotKnown, BooleanSupplier open,
@@ -49,8 +50,9 @@ final class TransactionPanel {
     private final Button btnReadState = new Button("Đọc trạng thái thẻ");
     private final Label balance = UiLabels.value();
     private final Label visit = UiLabels.chip();
-    private final Label stateNote = UiLabels.caption("Mỗi lần đọc hoặc giao dịch cần nhập lại PIN học viên.");
-    private final Button btnGrant = new Button("Cấp hạn mức");
+    private final Label stateNote = UiLabels.caption(
+            "Mỗi thao tác cần nhập lại PIN học viên; cấp lượt cần thêm PIN quản trị.");
+    private final Button btnGrant = new Button("Cấp lượt");
     private final Button btnStart = new Button("Mở ca");
     private final Button btnEnd = new Button("Đóng ca");
     private final Label why = UiLabels.whyNote();
@@ -91,7 +93,7 @@ final class TransactionPanel {
         UiLabels.apduHint(btnGrant,
                 "GRANT_QUOTA\nCần nhận diện thẻ, không có biên nhận chờ đối soát");
         UiLabels.apduHint(btnStart,
-                "START_VISIT\nCần nhận diện thẻ, chưa mở ca, số dư lớn hơn 0");
+                "START_VISIT\nCần nhận diện thẻ, chưa mở ca và còn lượt");
         UiLabels.apduHint(btnEnd, "END_VISIT\nCần nhận diện thẻ và đang có ca mở");
 
         btnReadState.setOnAction(e -> {
@@ -103,26 +105,20 @@ final class TransactionPanel {
         btnStart.setOnAction(e -> start());
         btnEnd.setOnAction(e -> end());
 
-        VBox studentField = UiRows.field("PIN học viên", fieldStudentPin, studentPinError);
-        VBox adminField = UiRows.field("PIN quản trị", fieldAdminPin, adminPinError);
+        VBox studentField = UiRows.field("PIN học viên · mọi thao tác", fieldStudentPin, studentPinError);
+        VBox adminField = UiRows.field("PIN quản trị · cấp lượt", fieldAdminPin, adminPinError);
 
         balance.getStyleClass().add("la-balance-value");
         balance.setId("transaction-balance");
         visit.setId("transaction-visit");
         stateNote.setWrapText(true);
-        FlowPane state = new FlowPane(UiScale.SPACE_5, UiScale.SPACE_2,
+        FlowPane state = UiRows.wrapping(
                 UiRows.valueBlock("Số lượt còn lại", balance),
-                UiRows.valueBlock("Ca hiện tại", visit));
-        FlowPane studentActions = UiRows.wrapping(studentField, btnReadState, btnStart, btnEnd);
-        FlowPane grantActions = UiRows.wrapping(adminField,
+                UiRows.valueBlock("Ca hiện tại", visit), studentField, btnReadState);
+        HBox visitActions = new HBox(UiScale.SPACE_2, btnStart, btnEnd);
+        FlowPane actions = UiRows.wrapping(UiRows.field("Ca sử dụng", visitActions), adminField,
                 UiRows.field("Số lượt cần cấp", fieldDelta, deltaError), btnGrant);
-        VBox studentGroup = new VBox(UiScale.SPACE_2, UiLabels.caption("Sử dụng thẻ"),
-                studentActions, stateNote);
-        VBox grantGroup = new VBox(UiScale.SPACE_2, UiLabels.caption("Cấp lượt · quản trị"), grantActions);
-        studentGroup.setPrefWidth(450);
-        grantGroup.setPrefWidth(480);
-        FlowPane actions = new FlowPane(UiScale.SPACE_5, UiScale.SPACE_4, studentGroup, grantGroup);
-        node = UiSection.of("Vận hành thẻ", state, actions, why);
+        node = UiSection.of("Vận hành thẻ", state, stateNote, actions, why);
     }
 
     VBox node() {
@@ -181,8 +177,11 @@ final class TransactionPanel {
         btnGrant.setDisable(whyGrant != null);
         btnStart.setDisable(whyStart != null);
         btnEnd.setDisable(whyEnd != null);
-        UiLabels.setWhy(why, busy ? App.BUSY_NOTE
-                : UiLabels.whyLine(btnReadState, whyRead, btnGrant, whyGrant, btnStart, whyStart, btnEnd, whyEnd));
+        UiLabels.setWhy(why, busy ? null : UiLabels.whyLine(
+                btnReadState, SessionGates.panelNote(whyRead),
+                btnGrant, SessionGates.panelNote(whyGrant),
+                btnStart, SessionGates.panelNote(whyStart),
+                btnEnd, SessionGates.panelNote(whyEnd)));
     }
 
     private boolean commitDelta() {

@@ -8,7 +8,6 @@ import javafx.scene.Node;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
-import javafx.scene.control.TextField;
 import javafx.scene.control.TitledPane;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.VBox;
@@ -35,7 +34,7 @@ final class ReceiptPanel {
     private final Consumer<String> log;
     private final Session session;
 
-    private final TextField fieldVisitId = new TextField();
+    private final Label valueVisitId = UiLabels.value();
     private final ReceiptView receiptView = new ReceiptView();
     private boolean canRead;
     private final Button btnReconcile = new Button("Đối soát giao dịch", Icons.reconcile());
@@ -50,9 +49,7 @@ final class ReceiptPanel {
         this.log = log;
         this.session = session;
 
-        fieldVisitId.setPrefColumnCount(34);
-        fieldVisitId.setPromptText("Chưa đọc trạng thái ca");
-        fieldVisitId.setEditable(false);
+        valueVisitId.setText("Chưa đọc trạng thái ca");
 
         btnReconcile.getStyleClass().add("la-action");
         btnReconcile.setOnAction(e -> {
@@ -64,8 +61,9 @@ final class ReceiptPanel {
             }
         });
 
-        VBox visitIdField = UiRows.field("Mã ca đang mở", fieldVisitId);
-        FlowPane controls = UiRows.wrapping(visitIdField);
+        VBox visitIdField = UiRows.field("Mã ca đang mở", valueVisitId);
+        FlowPane controls = UiRows.wrapping(visitIdField,
+                UiLabels.copyButton(valueVisitId, "mã ca"));
         TitledPane details = new TitledPane("Chi tiết biên nhận",
                 new VBox(UiScale.SPACE_2, controls, receiptView.detailsNode()));
         details.setExpanded(false);
@@ -82,7 +80,7 @@ final class ReceiptPanel {
     }
 
     String displayedVisitId() {
-        return fieldVisitId.getText();
+        return valueVisitId.getText();
     }
 
     String reconcileState() {
@@ -97,8 +95,7 @@ final class ReceiptPanel {
                 ? "Xem nguyên nhân và các bước xử lý nhật ký; không thay đổi dữ liệu"
                 : whyReconcile == null ? "Đọc biên nhận để đối soát giao dịch" : whyReconcile));
         btnReconcile.setDisable(recovery ? busy : whyReconcile != null);
-        UiLabels.setWhy(why, pinNote != null ? pinNote
-                : busy ? App.BUSY_NOTE : null);
+        UiLabels.setWhy(why, pinNote);
     }
 
     boolean reconcileEnabled() {
@@ -115,8 +112,7 @@ final class ReceiptPanel {
     }
 
     void clear() {
-        fieldVisitId.clear();
-        fieldVisitId.setPromptText("Chưa đọc trạng thái ca");
+        valueVisitId.setText("Chưa đọc trạng thái ca");
         receiptView.clear("Chưa đọc biên nhận từ thẻ");
     }
 
@@ -162,9 +158,9 @@ final class ReceiptPanel {
             receiptView.show(receipt, gateway.lastReceiptSignatureChecked(),
                     gateway.lastReceiptSignatureOk(), ledgerPending);
         }
-        fieldVisitId.setText(authenticated && status.hasActiveVisit()
-                ? status.activeVisitId() : "");
-        fieldVisitId.setPromptText(authenticated ? "Không có ca đang mở" : "Chưa đọc trạng thái ca");
+        valueVisitId.setText(authenticated && status.hasActiveVisit()
+                ? status.activeVisitId()
+                : authenticated ? "Không có ca đang mở" : "Chưa đọc trạng thái ca");
         session.headerReconcile().run();
         if (!gateway.reconciliation().detail().isEmpty()) {
             log.accept("Đối soát: " + gateway.reconciliation().detail());

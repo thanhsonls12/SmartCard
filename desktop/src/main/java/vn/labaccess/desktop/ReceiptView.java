@@ -7,7 +7,7 @@ import javafx.scene.layout.VBox;
 
 final class ReceiptView {
 
-    private final Label valueBalance = new Label("-");
+    private final Label valueBalance = new Label(UiLabels.EMPTY_VALUE);
     private final Label captionBalance = UiLabels.caption("Chưa có biên nhận");
     private final Label chipOperation = UiLabels.chip();
     private final Label chipSignature = UiLabels.chip();
@@ -48,15 +48,15 @@ final class ReceiptView {
         UiLabels.show(chipOperation, false);
         UiLabels.show(chipSignature, false);
         captionBalance.setText(reason);
-        valueBalance.setText("-");
+        valueBalance.setText(UiLabels.EMPTY_VALUE);
         chipOperation.setText("Chưa có giao dịch");
         UiLabels.applyChip(chipOperation, UiLabels.Tone.NEUTRAL);
         chipSignature.setText("Chưa kiểm tra chữ ký");
         UiLabels.applyChip(chipSignature, UiLabels.Tone.NEUTRAL);
         showLedger(false);
-        valueCounter.setText("-");
-        valueDelta.setText("-");
-        valueVisit.setText("-");
+        valueCounter.setText(UiLabels.EMPTY_VALUE);
+        valueDelta.setText(UiLabels.EMPTY_VALUE);
+        valueVisit.setText(UiLabels.EMPTY_VALUE);
     }
 
     private void showLedger(boolean pending) {
@@ -106,7 +106,7 @@ final class ReceiptView {
 
     private static String operationLabel(int operation) {
         return switch (operation) {
-            case Receipt.OPERATION_GRANT -> "Cấp hạn mức";
+            case Receipt.OPERATION_GRANT -> "Cấp lượt";
             case Receipt.OPERATION_START -> "Mở ca";
             case Receipt.OPERATION_END -> "Đóng ca";
             default -> String.format("Không rõ (%02X)", operation);

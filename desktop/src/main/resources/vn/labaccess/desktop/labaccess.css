@@ -1,31 +1,15 @@
-/*
- * LabAccess — giao diện vận hành thẻ.
- *
- * File này nạp SAU theme AtlantaFX (PrimerLight) và chỉ làm hai việc: khai báo
- * bảng màu LabAccess một lần, rồi phủ lên các token ngữ nghĩa của AtlantaFX để
- * control có sẵn nhận bảng màu đó. Không dựng lại style của control.
- *
- * Thang dùng trong file (không dùng giá trị ngoài các thang này):
- *   bo góc: 4px · 8px · 12px · 999px (pill)
- *   cỡ chữ: 12px · 13px · 14px · 15px
- *   khoảng cách: xem UiScale (Java) vì Insets và gap không đặt được bằng CSS.
- */
-
 .root {
-    /* Bảng màu LabAccess: nền xanh xám rất nhạt, chữ xanh đen. */
-    -la-surface: #eef3f4;
+    -la-surface: #f4f7f8;
     -la-surface-raised: #ffffff;
-    -la-surface-sunken: #e2eaec;
+    -la-surface-sunken: #edf2f3;
     -la-fg: #10242c;
     -la-fg-muted: #4a6371;
     -la-fg-subtle: #526b77;
 
-    /* Accent xanh lục lạnh. */
     -la-accent: #0b7a6b;
     -la-accent-strong: #095f53;
     -la-accent-soft: #d9ede8;
 
-    /* Amber chỉ cho pending/UNKNOWN; đỏ chỉ cho lỗi hoặc thao tác bị từ chối. */
     -la-pending: #8a5a0c;
     -la-pending-soft: #fbf1dc;
     -la-danger: #b3261e;
@@ -34,8 +18,6 @@
     -la-border: #c6d3d7;
     -la-border-soft: #d8e2e5;
 
-    /* Phủ token ngữ nghĩa của AtlantaFX. Control mặc định đọc các token này,
-       nên chỉ cần đổi ở đây là cả cửa sổ theo bảng màu LabAccess. */
     -color-bg-default: -la-surface;
     -color-bg-subtle: -la-surface-raised;
     -color-bg-inset: -la-surface-sunken;
@@ -63,10 +45,22 @@
     -color-border-subtle: -la-border-soft;
 
     -fx-background-color: -la-surface;
+    -fx-font-family: 'Segoe UI';
     -fx-font-size: 14px;
 }
 
-/* ---- Chữ ---- */
+.la-brand {
+    -fx-font-size: 20px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -la-accent-strong;
+    -fx-min-width: 110px;
+}
+
+.la-profile-name {
+    -fx-font-family: 'Segoe UI';
+    -fx-font-size: 18px;
+    -fx-font-weight: bold;
+}
 
 .la-caption {
     -fx-font-size: 12px;
@@ -79,7 +73,6 @@
     -fx-text-fill: -la-fg;
 }
 
-/* Card ID là giá trị nhận dạng chính của phiên: nổi hơn các giá trị phụ. */
 .la-card-id {
     -fx-font-family: 'Consolas', monospace;
     -fx-font-size: 15px;
@@ -87,7 +80,6 @@
     -fx-text-fill: -la-fg;
 }
 
-/* Chip: chỉ dùng cho trạng thái (kết nối, lifecycle, đối soát, chữ ký). */
 .la-chip {
     -fx-font-size: 12px;
     -fx-font-weight: bold;
@@ -115,25 +107,31 @@
     -fx-text-fill: -la-danger;
 }
 
-/* ---- Ô nhập: phân biệt rõ ô dùng được và ô bị khoá ---- */
-
 .text-input,
 .password-field {
     -fx-background-color: -la-surface-raised;
+    -fx-background-insets: 0;
     -fx-text-fill: -la-fg;
     -fx-border-color: -la-border;
     -fx-border-width: 1px;
-    -fx-border-radius: 4px;
-    -fx-background-radius: 4px;
+    -fx-border-radius: 8px;
+    -fx-background-radius: 8px;
+}
+
+.text-field,
+.spinner,
+.la-action {
+    -fx-min-height: 40px;
+    -fx-pref-height: 40px;
 }
 
 .text-input:focused,
 .password-field:focused {
     -fx-border-color: -la-accent;
-    -fx-border-width: 2px;
+    -fx-border-width: 1px;
+    -fx-background-color: -la-surface-raised;
 }
 
-/* Ô bị khoá: nền chìm, không viền, chữ mờ — khác hẳn ô dùng được. */
 .text-input:disabled,
 .password-field:disabled {
     -fx-opacity: 1;
@@ -144,12 +142,10 @@
 }
 
 .la-title {
-    -fx-font-size: 15px;
+    -fx-font-size: 13px;
     -fx-font-weight: bold;
-    -fx-text-fill: -la-fg;
+    -fx-text-fill: -la-fg-muted;
 }
-
-/* ---- Trạng thái (đang xử lý / thành công / thất bại / cần đối soát) ---- */
 
 .la-status {
     -fx-font-size: 13px;
@@ -169,15 +165,15 @@
 }
 
 .la-status-bar {
-    -fx-background-color: -la-surface-sunken;
+    -fx-background-color: -la-accent-soft;
     -fx-border-color: -la-border-soft;
-    -fx-border-width: 1px 0 0 0;
+    -fx-border-width: 0 0 1px 0;
 }
 
-/* Gợi ý bước kế tiếp: cùng cỡ chữ với thanh trạng thái, nhạt hơn để không tranh với kết quả thao tác. */
 .la-next-step {
-    -fx-font-size: 13px;
-    -fx-text-fill: -la-fg-subtle;
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -la-accent-strong;
     -fx-padding: 0;
     -fx-border-width: 0;
     -fx-underline: false;
@@ -198,7 +194,7 @@
 .la-next-step--link {
     -fx-cursor: hand;
     -fx-underline: true;
-    -fx-text-fill: -la-fg-muted;
+    -fx-text-fill: -la-accent-strong;
 }
 
 .la-copyable {
@@ -210,12 +206,10 @@
 }
 
 .la-field-error {
-    -fx-min-height: 16px;
+    -fx-min-height: 0;
     -fx-font-size: 12px;
     -fx-text-fill: -la-danger;
 }
-
-/* ---- Icon (Ikonli Feather) ---- */
 
 .la-icon {
     -fx-icon-color: -la-fg-muted;
@@ -233,57 +227,55 @@
     -fx-icon-color: -la-danger;
 }
 
-/* ---- Khối và control riêng ---- */
-
 .la-log {
     -fx-font-family: 'Consolas', monospace;
     -fx-font-size: 13px;
     -fx-control-inner-background: -la-surface-raised;
 }
 
-/* Khung ảnh: nền và viền nằm trên StackPane nên khung không co giãn theo ảnh. */
 .la-preview {
-    -fx-background-color: -la-surface-sunken;
-    -fx-background-radius: 8px;
-    -fx-border-color: -la-border;
-    -fx-border-radius: 8px;
+    -fx-background-color: -la-surface;
+    -fx-background-radius: 12px;
+    -fx-border-color: -la-border-soft;
+    -fx-border-radius: 12px;
     -fx-border-width: 1px;
     -fx-padding: 4px;
+}
+
+.la-preview-empty {
+    -fx-font-size: 13px;
+    -fx-text-fill: -la-fg-muted;
+    -fx-text-alignment: center;
+    -fx-alignment: center;
 }
 
 .la-info {
     -fx-background-color: transparent;
 }
 
-/* ---- Khung cửa sổ ---- */
-
-/* Header cố định: tách khỏi vùng cuộn để trạng thái luôn nhìn thấy. */
 .la-header {
     -fx-background-color: -la-surface-raised;
     -fx-border-color: -la-border-soft;
     -fx-border-width: 0 0 1px 0;
 }
 
-/* Khối nội dung phẳng: một viền, một nền, không lồng khối trong khối. */
 .la-section {
     -fx-background-color: -la-surface-raised;
-    -fx-background-radius: 8px;
+    -fx-background-radius: 12px;
     -fx-border-color: -la-border-soft;
-    -fx-border-radius: 8px;
+    -fx-border-radius: 12px;
     -fx-border-width: 1px;
-    -fx-padding: 12px;
+    -fx-padding: 16px;
 }
 
 .la-section-title {
-    -fx-font-size: 15px;
+    -fx-font-size: 18px;
     -fx-font-weight: bold;
     -fx-text-fill: -la-fg;
 }
 
-/* ---- Tab ---- */
-
 .la-tabs {
-    -fx-tab-min-height: 28px;
+    -fx-tab-min-height: 32px;
 }
 
 .la-tabs > .tab-header-area {
@@ -296,20 +288,25 @@
 
 .la-tabs > .tab-header-area > .headers-region > .tab {
     -fx-background-color: transparent;
-    -fx-background-radius: 8px 8px 0 0;
-    -fx-padding: 4px 14px;
+    -fx-background-radius: 8px;
+    -fx-border-color: transparent;
+    -fx-border-width: 0 0 2px 0;
+    -fx-padding: 4px 16px;
+}
+
+.la-tabs > .tab-header-area > .headers-region > .tab:hover {
+    -fx-background-color: -la-surface-sunken;
 }
 
 .la-tabs > .tab-header-area > .headers-region > .tab:selected {
-    -fx-background-color: -la-surface-raised;
-    -fx-border-color: -la-border-soft -la-border-soft transparent -la-border-soft;
-    -fx-border-width: 1px 1px 0 1px;
-    -fx-border-radius: 8px 8px 0 0;
+    -fx-background-color: -la-accent-soft;
+    -fx-border-color: -la-accent;
 }
 
 .la-tabs > .tab-header-area > .headers-region > .tab .tab-label {
     -fx-text-fill: -la-fg-muted;
     -fx-font-size: 14px;
+    -fx-font-weight: bold;
 }
 
 .la-tabs > .tab-header-area > .headers-region > .tab:selected .tab-label {
@@ -322,7 +319,9 @@
     -fx-padding: 0;
 }
 
-/* ---- Nhật ký và chi tiết kỹ thuật (thu gọn được) ---- */
+.la-tab-body {
+    -fx-padding: 16px 4px 4px 0;
+}
 
 .la-log-pane > .title {
     -fx-background-color: -la-surface-sunken;
@@ -341,12 +340,16 @@
 
 .la-header-toggle {
     -fx-background-color: transparent;
-    -fx-border-color: -la-border;
-    -fx-border-radius: 4px;
-    -fx-background-radius: 4px;
+    -fx-border-color: transparent;
+    -fx-border-radius: 8px;
+    -fx-background-radius: 8px;
     -fx-text-fill: -la-fg-muted;
     -fx-font-size: 13px;
     -fx-padding: 4px 10px;
+}
+
+.la-header-toggle:hover {
+    -fx-background-color: -la-surface-sunken;
 }
 
 .la-header-toggle:selected {
@@ -354,15 +357,38 @@
     -fx-text-fill: -la-accent-strong;
 }
 
-.la-action {
-    -fx-graphic-text-gap: 6px;
+.la-header-actions .la-action,
+.la-header-actions .la-header-toggle {
+    -fx-font-size: 14px;
+    -fx-padding: 6px 12px;
+    -fx-min-height: 36px;
+    -fx-pref-height: 36px;
 }
 
-/* Một nút chính mỗi luồng: nền accent, chữ trắng. Các nút còn lại giữ kiểu phụ. */
+.la-action {
+    -fx-graphic-text-gap: 6px;
+    -fx-background-color: -la-surface-raised;
+    -fx-border-color: -la-border;
+    -fx-border-width: 1px;
+    -fx-border-radius: 8px;
+    -fx-background-radius: 8px;
+    -fx-padding: 8px 12px;
+    -fx-text-fill: -la-fg;
+}
+
+.la-action:hover {
+    -fx-background-color: -la-surface-sunken;
+}
+
+.la-action:focused {
+    -fx-border-color: -la-accent;
+}
+
 .la-primary {
     -fx-background-color: -la-accent;
-    -fx-text-fill: white;
-    -fx-background-radius: 4px;
+    -fx-border-color: -la-accent;
+    -fx-text-fill: -la-surface-raised;
+    -fx-background-radius: 8px;
     -fx-font-weight: bold;
 }
 
@@ -370,14 +396,45 @@
     -fx-background-color: -la-accent-strong;
 }
 
+.la-primary .la-icon {
+    -fx-icon-color: -la-surface-raised;
+}
+
+.button:disabled .la-icon,
+.la-primary:disabled .la-icon {
+    -fx-icon-color: -la-fg-muted;
+}
+
 .button:disabled,
 .la-primary:disabled {
     -fx-opacity: 1;
-    -fx-background-color: -la-surface-sunken;
-    -fx-text-fill: -la-fg-subtle;
+    -fx-background-color: -la-surface;
+    -fx-border-color: -la-border-soft;
+    -fx-border-width: 1px;
+    -fx-border-radius: 8px;
+    -fx-background-radius: 8px;
+    -fx-text-fill: -la-fg-muted;
+    -fx-font-weight: normal;
 }
 
-/* Một dòng thông báo nghiệp vụ: nền nhẹ theo sắc thái thật, không phải banner lớn. */
+.la-copy {
+    -fx-min-width: 26px;
+    -fx-pref-width: 26px;
+    -fx-min-height: 26px;
+    -fx-pref-height: 26px;
+    -fx-padding: 0;
+    -fx-background-color: transparent;
+    -fx-border-color: -la-border-soft;
+    -fx-border-width: 1px;
+    -fx-border-radius: 4px;
+    -fx-background-radius: 4px;
+}
+
+.la-copy:hover {
+    -fx-background-color: -la-surface-sunken;
+    -fx-border-color: -la-border;
+}
+
 .la-note {
     -fx-background-radius: 4px;
     -fx-padding: 4px 8px;
@@ -417,8 +474,6 @@
 }
 
 .la-balance-value.la-state-unknown {
-    -fx-font-size: 14px;
-    -fx-font-weight: normal;
     -fx-text-fill: -la-fg-muted;
 }
 
@@ -428,13 +483,16 @@
     -fx-font-size: 13px;
 }
 
+.la-receipt-details > .title:hover {
+    -fx-background-color: -la-surface;
+}
+
 .la-receipt-details > .content {
     -fx-background-color: transparent;
     -fx-border-width: 0;
     -fx-padding: 8px 0 0 0;
 }
 
-/* Vùng panel cuộn: không viền, không nền riêng để không cắt tầm nhìn. */
 .la-scroll {
     -fx-background-color: transparent;
     -fx-padding: 0;
@@ -444,7 +502,6 @@
     -fx-background-color: transparent;
 }
 
-/* Chia nghiệp vụ và nhật ký: chỉ một vạch mảnh, không nền riêng. */
 .la-split {
     -fx-background-color: transparent;
     -fx-padding: 0;
@@ -455,7 +512,6 @@
     -fx-padding: 0 1px 0 1px;
 }
 
-/* Tiến độ sáu bước của luồng đăng ký thẻ: dấu trạng thái nhỏ, tiêu đề đọc được. */
 .la-step-row {
     -fx-alignment: center-left;
 }
