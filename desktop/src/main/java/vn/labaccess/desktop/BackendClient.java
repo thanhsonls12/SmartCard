@@ -84,6 +84,18 @@ final class BackendClient {
     private static final ObjectMapper JSON = new ObjectMapper()
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
+    record Access(java.time.Instant checkedAt, int httpStatus) {
+        boolean available() {
+            return httpStatus >= 200 && httpStatus < 500;
+        }
+    }
+
+    private volatile Access lastAccess;
+
+    Access lastAccess() {
+        return lastAccess;
+    }
+
     private final HttpClient http;
     private final String baseUrl;
 
@@ -96,6 +108,15 @@ final class BackendClient {
 
     String baseUrl() {
         return baseUrl;
+    }
+
+    void checkDatabase() throws Failure {
+        Reply reply = get("health/database");
+        JsonNode health = parse(reply);
+        if (!"ok".equals(requireString(health, "status", reply.status()))
+                || !"postgresql".equals(requireString(health, "provider", reply.status()))) {
+            throw invalid(reply, "hệ thống chưa xác nhận kết nối sổ giao dịch");
+        }
     }
 
     AdminSession issueAdminSession() throws Failure {
@@ -233,22 +254,28 @@ final class BackendClient {
         try {
             response = http.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         } catch (HttpConnectTimeoutException timeout) {
+            lastAccess = new Access(java.time.Instant.now(), 0);
             throw new Failure("không kết nối được Backend trong " + CONNECT_TIMEOUT_MS
                     + " ms", Kind.TRANSPORT, 0, false);
         } catch (HttpTimeoutException timeout) {
+            lastAccess = new Access(java.time.Instant.now(), 0);
             throw new Failure("Backend không phản hồi trong " + REQUEST_TIMEOUT_MS + " ms",
                     Kind.TRANSPORT, 0, true);
         } catch (ConnectException refused) {
+            lastAccess = new Access(java.time.Instant.now(), 0);
             throw new Failure("không mở được kết nối tới Backend: " + refused.getMessage(),
                     Kind.TRANSPORT, 0, false);
         } catch (IOException failure) {
+            lastAccess = new Access(java.time.Instant.now(), 0);
             throw new Failure("đứt kết nối khi đang chờ phản hồi: " + failure.getMessage(),
                     Kind.TRANSPORT, 0, true);
         } catch (InterruptedException interrupted) {
+            lastAccess = new Access(java.time.Instant.now(), 0);
             Thread.currentThread().interrupt();
             throw new Failure("bị ngắt khi đang gọi Backend", Kind.TRANSPORT, 0, true);
         }
         int status = response.statusCode();
+        lastAccess = new Access(java.time.Instant.now(), status);
         if (status >= 400) {
             throw new Failure(describeError(status, response.body()), Kind.HTTP_REJECTED, status, true);
         }
@@ -264,7 +291,7 @@ final class BackendClient {
     }
 
     record HistoryEntry(String id, long counterAfter, String operation, int delta, int balanceAfter,
-            String verifyStatus) {
+            String verifyStatus, java.time.Instant recordedAt) {
     }
 
     record TransactionHistory(String cardId, java.util.List<HistoryEntry> entries) {
@@ -347,7 +374,14 @@ final class BackendClient {
             if (!verifyStatus.equals("verified")) {
                 throw invalid(reply, "verifyStatus phải là verified, nhận " + verifyStatus);
             }
-            entries.add(new HistoryEntry(id, counter, operation, (int) delta, (int) balance, verifyStatus));
+            java.time.Instant recordedAt;
+            try {
+                recordedAt = java.time.Instant.parse(requireString(row, "recordedAt", reply.status()));
+            } catch (java.time.format.DateTimeParseException exception) {
+                throw invalid(reply, "thời gian ghi nhận giao dịch không hợp lệ");
+            }
+            entries.add(new HistoryEntry(id, counter, operation, (int) delta, (int) balance,
+                    verifyStatus, recordedAt));
         }
         return new TransactionHistory(cardId, java.util.List.copyOf(entries));
     }
