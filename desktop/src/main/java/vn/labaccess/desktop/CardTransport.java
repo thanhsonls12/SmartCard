@@ -1,7 +1,5 @@
 package vn.labaccess.desktop;
 
-import java.net.InetSocketAddress;
-import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -11,14 +9,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
-import javax.smartcardio.ATR;
-import javax.smartcardio.Card;
 import javax.smartcardio.CardChannel;
 import javax.smartcardio.CardException;
-import javax.smartcardio.CardTerminal;
 import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
-import javax.smartcardio.TerminalFactory;
 
 final class CardTransport {
 
@@ -38,9 +32,7 @@ final class CardTransport {
     private final String host;
     private final int port;
 
-    private TerminalFactory factory;
-    private CardTerminal terminal;
-    private Card card;
+    private SimulatorConnection connection;
     private CardChannel channel;
     private volatile boolean connectedFlag;
     private volatile String ioTimeoutDetail;
@@ -60,7 +52,11 @@ final class CardTransport {
     }
 
     boolean isOpen() {
-        return card != null;
+        return connection != null || channel != null || needsReconnect();
+    }
+
+    boolean needsReconnect() {
+        return ioTimeoutDetail != null;
     }
 
     boolean isConnected() {
@@ -110,22 +106,7 @@ final class CardTransport {
     private Session openSession(Attempt attempt) throws CardException,
             java.security.NoSuchAlgorithmException, java.security.NoSuchProviderException {
 
-        TerminalFactory created = TerminalFactory.getInstance(
-                "SocketCardTerminalFactoryType",
-                List.of(new InetSocketAddress(host, port)),
-                "SocketCardTerminalProvider");
-
-        List<CardTerminal> terminals = created.terminals().list();
-        if (terminals.isEmpty()) {
-            throw new CardException("Không có terminal nào từ socket provider");
-        }
-        CardTerminal opened = terminals.get(0);
-
-        if (!opened.isCardPresent() && !opened.waitForCardPresent(10_000)) {
-            throw new CardException("Không có thẻ trên terminal " + opened.getName());
-        }
-
-        Card connected = opened.connect("*");
+        SimulatorConnection connected = SimulatorConnection.open(host, port);
         attempt.record(connected);
         if (attempt.isAbandoned()) {
             String problem = closeProblem(connected);
@@ -134,16 +115,11 @@ final class CardTransport {
             }
             throw new CardException("lần mở phiên đã bị bỏ vì quá hạn chờ");
         }
-        ATR atr = connected.getATR();
-        return new Session(created, opened, connected, connected.getBasicChannel(),
-                opened.getName(), atr == null ? null : atr.getBytes());
+        return new Session(connected, host + ":" + port, connected.atr());
     }
 
     private Opened publish(Session session) {
-        factory = session.factory();
-        terminal = session.terminal();
-        card = session.card();
-        channel = session.channel();
+        connection = session.connection();
         ioTimeoutDetail = null;
         connectedFlag = true;
         return new Opened(session.terminalName(), session.atr());
@@ -153,7 +129,7 @@ final class CardTransport {
         CARD_TRANSMIT.submit(() -> {
             try {
                 String problem = closeProblem(
-                        opening.get(CARD_CONNECT_REAP_MS, TimeUnit.MILLISECONDS).card());
+                        opening.get(CARD_CONNECT_REAP_MS, TimeUnit.MILLISECONDS).connection());
                 if (problem != null) {
                     reportSessionProblem(attempt, problem);
                 }
@@ -173,12 +149,12 @@ final class CardTransport {
         });
     }
 
-    private String closeProblem(Card opened) {
+    private String closeProblem(SimulatorConnection opened) {
         if (opened == null) {
             return null;
         }
         try {
-            opened.disconnect(true);
+            opened.close();
             return null;
         } catch (CardException failed) {
             return "đóng phiên thẻ thất bại: " + failed.getMessage();
@@ -192,16 +168,15 @@ final class CardTransport {
         return problem == null ? base : base + " | " + problem;
     }
 
-    private record Session(TerminalFactory factory, CardTerminal terminal, Card card,
-            CardChannel channel, String terminalName, byte[] atr) {
+    private record Session(SimulatorConnection connection, String terminalName, byte[] atr) {
     }
 
     private final class Attempt {
         private volatile boolean abandoned;
-        private final AtomicReference<Card> opened = new AtomicReference<>();
+        private final AtomicReference<SimulatorConnection> opened = new AtomicReference<>();
         private volatile String problem;
 
-        void record(Card connected) {
+        void record(SimulatorConnection connected) {
             opened.set(connected);
         }
 
@@ -229,35 +204,50 @@ final class CardTransport {
     }
 
     ResponseAPDU transmit(CommandAPDU command) throws CardException {
+        requireConnected();
         CardChannel channelNow = channel;
-        if (channelNow == null) {
+        SimulatorConnection connectionNow = connection;
+        if (channelNow == null && connectionNow == null) {
             throw new CardException("Chưa kết nối");
         }
-        Future<ResponseAPDU> pending = CARD_TRANSMIT.submit(() -> channelNow.transmit(command));
+        Future<ResponseAPDU> pending = CARD_TRANSMIT.submit(() -> connectionNow == null
+                ? channelNow.transmit(command) : connectionNow.transmit(command));
         try {
             return pending.get(CARD_IO_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         } catch (TimeoutException timeout) {
             pending.cancel(true);
-            ioTimeoutDetail = "không có phản hồi APDU trong " + CARD_IO_TIMEOUT_MS + " ms";
+            invalidate("không có phản hồi APDU trong " + CARD_IO_TIMEOUT_MS + " ms");
             throw new CardException("Simulator không phản hồi: " + ioTimeoutDetail);
         } catch (ExecutionException failure) {
             Throwable cause = failure.getCause();
+            invalidate("trao đổi APDU thất bại");
             if (cause instanceof CardException cardFailure) {
                 throw cardFailure;
             }
             throw new CardException("lỗi truyền APDU: " + cause, cause);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
+            pending.cancel(true);
+            invalidate("bị ngắt khi chờ phản hồi APDU");
             throw new CardException("bị ngắt khi chờ phản hồi APDU");
+        }
+    }
+
+    private void invalidate(String detail) {
+        connectedFlag = false;
+        ioTimeoutDetail = detail;
+        String problem = closeProblem(connection);
+        if (problem != null) {
+            diagnostics.accept(problem);
         }
     }
 
     void requireConnected() {
         if (ioTimeoutDetail != null) {
-            throw new IllegalStateException("APDU trước bị timeout (" + ioTimeoutDetail
+            throw new IllegalStateException("Phiên thẻ không còn sử dụng được (" + ioTimeoutDetail
                     + ") — kênh thẻ không dùng lại được, phải Ngắt kết nối rồi Kết nối lại");
         }
-        if (channel == null) {
+        if (channel == null && connection == null) {
             throw new IllegalStateException("Chưa kết nối");
         }
     }
@@ -265,15 +255,13 @@ final class CardTransport {
     boolean disconnect() throws CardException {
         ioTimeoutDetail = null;
         channel = null;
-        terminal = null;
-        factory = null;
-        boolean wasConnected = card != null;
+        boolean wasConnected = connection != null;
         try {
-            if (card != null) {
-                card.disconnect(true);
+            if (connection != null) {
+                connection.disconnect();
             }
         } finally {
-            card = null;
+            connection = null;
             connectedFlag = false;
         }
         return wasConnected;
