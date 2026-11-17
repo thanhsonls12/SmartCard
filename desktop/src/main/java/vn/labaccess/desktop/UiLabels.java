@@ -296,14 +296,15 @@ final class UiLabels {
                     && cause.getMessage().startsWith("Không có thẻ trên terminal ")) {
                 reason = "Không tìm thấy thẻ. Đặt thẻ vào đầu đọc hoặc kiểm tra Simulator, rồi kết nối lại.";
             } else if (cause instanceof java.net.ConnectException) {
-                reason = "Không liên lạc được với đầu đọc/Simulator. Kiểm tra thiết bị và cấu hình kết nối.";
+                reason = "Chưa kết nối được đầu đọc thẻ. Kiểm tra dây cắm và đặt thẻ vào đầu đọc rồi bấm Kết nối."
+                        + " Nếu đang dùng thẻ mô phỏng, nhờ quản trị viên mở trình mô phỏng.";
             } else if (cause instanceof java.net.SocketTimeoutException) {
                 reason = "Hết thời gian chờ phản hồi. Kiểm tra kết nối; không gửi lại thao tác khi chưa rõ kết quả.";
             } else if (cause instanceof java.net.UnknownHostException) {
-                reason = "Không tìm thấy địa chỉ kết nối. Kiểm tra cấu hình đầu đọc/Simulator.";
+                reason = "Không tìm thấy đầu đọc theo địa chỉ đã cài. Nhờ quản trị viên kiểm tra cấu hình kết nối.";
             } else if (cause instanceof java.security.NoSuchProviderException
                     || cause instanceof java.security.NoSuchAlgorithmException) {
-                reason = "Chưa nạp được bộ kết nối thẻ. Kiểm tra cấu hình Java và thư viện đầu đọc.";
+                reason = "Bộ kết nối đầu đọc chưa sẵn sàng. Nhờ quản trị viên kiểm tra bộ cài ứng dụng.";
             }
         } else {
             var status = Pattern.compile("\\bSW=(63C[0-9A-F]|6983|6982|6985|6A82)\\b",
@@ -316,13 +317,40 @@ final class UiLabels {
                         : switch (sw) {
                             case "6983" -> "PIN đang bị khóa. Kiểm tra trạng thái trong tab Cấp thẻ & bảo mật.";
                             case "6982" -> "Chưa đủ quyền thực hiện. Kiểm tra PIN và nhận diện thẻ.";
-                            case "6985" -> "Trạng thái thẻ chưa cho phép thao tác. Kiểm tra điều kiện trong Nhật ký.";
+                            case "6985" -> "Thẻ chưa cho phép thao tác này. Kiểm tra số lượt và ca đang mở;"
+                                    + " nếu giao dịch chưa rõ kết quả, giữ nguyên thẻ để đối soát.";
                             case "6A82" -> "Không tìm thấy ứng dụng cần chọn trên thẻ. Kiểm tra applet và mã ứng dụng.";
                             default -> throw new IllegalStateException(sw);
                         };
             }
         }
+        if (failure instanceof BackendClient.Failure backendFailure) {
+            reason = systemFailure(backendFailure);
+        }
         return "Lỗi khi " + actionName(operation) + ". " + reason;
+    }
+
+    static String systemFailure(BackendClient.Failure failure) {
+        return switch (failure.kind()) {
+            case TRANSPORT -> "Chưa kết nối được sổ giao dịch. Bấm Kiểm tra hệ thống;"
+                    + " nếu vẫn lỗi, nhờ quản trị viên khởi động dịch vụ và cơ sở dữ liệu.";
+            case HTTP_REJECTED -> failure.statusCode() >= 500
+                    ? "Sổ giao dịch đang gặp sự cố. Giữ nguyên thẻ, bấm Kiểm tra hệ thống hoặc liên hệ quản trị viên."
+                    : "Hệ thống từ chối yêu cầu. Kiểm tra đăng ký thẻ; giao dịch chưa rõ kết quả cần đối soát.";
+            case INVALID_RESPONSE -> "Chưa xác nhận được dữ liệu từ sổ giao dịch."
+                    + " Giữ nguyên thẻ và liên hệ quản trị viên;"
+                    + " không thực hiện lại giao dịch đang chờ.";
+        };
+    }
+
+    static String completedAction(String operation) {
+        return switch (operation) {
+            case "GRANT_QUOTA" -> "Đã cấp lượt";
+            case "START_VISIT" -> "Đã mở ca";
+            case "END_VISIT" -> "Đã đóng ca";
+            case "RECONCILE_PENDING" -> "Đã hoàn tất đối soát";
+            default -> outcome(true, operation);
+        };
     }
 
     static String outcome(boolean ok, String operation) {
@@ -332,9 +360,11 @@ final class UiLabels {
     static String actionName(String operation) {
         return switch (operation) {
             case "CONNECT" -> "kết nối";
+            case "CONNECT_AND_IDENTIFY" -> "kết nối và nhận diện thẻ";
+            case "CHECK_SYSTEM" -> "kiểm tra kết nối hệ thống";
             case "DISCONNECT" -> "ngắt kết nối";
             case "SELECT + GET_STATUS" -> "nhận diện thẻ";
-            case "VERIFY + GET_LAST_RECEIPT + GET_STATUS state" -> "đọc trạng thái thẻ";
+            case "VERIFY + GET_LAST_RECEIPT + GET_STATUS state" -> "đọc hồ sơ, ảnh và trạng thái thẻ";
             case "RECONCILE_PENDING" -> "đối soát giao dịch";
             case "GRANT_QUOTA" -> "cấp lượt";
             case "START_VISIT" -> "mở ca";

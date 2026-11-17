@@ -56,6 +56,40 @@ final class StatusBar {
         return node;
     }
 
+    void showFeedback(boolean busy, String busyLabel, PendingJournal.Loaded loaded,
+            Reconciliation reconciliation, String inputProblem, String lastFeedback, UiLabels.Tone lastTone,
+            String expectedCardId) {
+        String feedback;
+        UiLabels.Tone tone;
+        if (busy) {
+            feedback = "Đang xử lý: " + (busyLabel == null ? "…" : UiLabels.actionName(busyLabel));
+            tone = UiLabels.Tone.PENDING;
+        } else if (expectedCardId != null) {
+            feedback = "Giao dịch đang chờ đúng thẻ " + expectedCardId;
+            tone = UiLabels.Tone.PENDING;
+        } else if (loaded.present()) {
+            feedback = loaded.valid() && loaded.status() == PendingJournal.Status.PENDING
+                    ? "Có biên nhận chờ đối soát — đối soát trước khi giao dịch tiếp"
+                    : "Giao dịch đang khóa. Xem Hướng dẫn khôi phục.";
+            tone = loaded.valid() && loaded.status() == PendingJournal.Status.PENDING
+                    ? UiLabels.Tone.PENDING : UiLabels.Tone.ERROR;
+        } else if (reconciliation.receiptUnverified()) {
+            feedback = "Chưa xác minh được biên nhận — Đọc thẻ để xác minh lại";
+            tone = UiLabels.Tone.PENDING;
+        } else if (!reconciliation.transactionAllowed()) {
+            feedback = "Cần đối soát giao dịch trước khi tiếp tục";
+            tone = UiLabels.Tone.ERROR;
+        } else if (inputProblem != null) {
+            feedback = inputProblem;
+            tone = UiLabels.Tone.ERROR;
+        } else {
+            feedback = lastFeedback;
+            tone = lastTone;
+        }
+        setStatus(feedback, tone, busy);
+
+    }
+
     void setStatus(String text, UiLabels.Tone tone, boolean busy) {
         status.setText(text);
         UiLabels.applyTone(status, tone);

@@ -5,7 +5,7 @@ import java.util.List;
 final class Reconciliation {
 
     enum State {
-        KNOWN, UNKNOWN
+        KNOWN, RECEIPT_UNVERIFIED, UNKNOWN
     }
 
     enum Verdict {
@@ -27,6 +27,17 @@ final class Reconciliation {
         return state == State.KNOWN;
     }
 
+    boolean receiptUnverified() {
+        return state == State.RECEIPT_UNVERIFIED;
+    }
+
+    void markReceiptUnverified(String cause) {
+        if (state != State.UNKNOWN) {
+            state = State.RECEIPT_UNVERIFIED;
+            detail = cause;
+        }
+    }
+
     void markUnknown(String cause) {
         state = State.UNKNOWN;
         detail = cause;
@@ -37,10 +48,6 @@ final class Reconciliation {
         detail = cause == null ? "" : cause;
     }
 
-    /**
-     * Chỉ phân loại receipt so với kỳ vọng. Không đổi state: bên gọi chỉ được chuyển KNOWN sau khi
-     * đã đủ bằng chứng và journal đã đóng.
-     */
     Verdict resolve(Receipt receipt, ReceiptExpectation expectation) {
         String cardProblem = expectation.cardProblem(receipt);
         if (cardProblem != null) {

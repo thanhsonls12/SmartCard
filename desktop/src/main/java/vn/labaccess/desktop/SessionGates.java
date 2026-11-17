@@ -69,7 +69,7 @@ final class SessionGates {
             return new NextStep("kiểm tra thông tin vừa nhập rồi thử lại", activeTab);
         }
         if (!state.connected()) {
-            return new NextStep("kết nối đầu đọc", -1);
+            return new NextStep("bấm Kết nối để nhận diện thẻ", -1);
         }
         if (!state.ready()) {
             return new NextStep("nhận diện thẻ", -1);
@@ -78,7 +78,7 @@ final class SessionGates {
             return new NextStep("đối soát giao dịch đang chờ", App.TAB_OPERATIONS);
         }
         if (!state.transactionAllowed()) {
-            return new NextStep("kiểm tra lỗi đối soát trong Nhật ký", -1);
+            return new NextStep("nhập PIN rồi bấm Đọc thẻ để xác minh lại; giao dịch vẫn khóa", App.TAB_OPERATIONS);
         }
         if (!state.issued()) {
             return new NextStep("phát hành thẻ (tab Cấp thẻ & bảo mật)", App.TAB_CARD);
@@ -87,10 +87,10 @@ final class SessionGates {
             return new NextStep("đăng ký thẻ", App.TAB_ENROLL);
         }
         if (!"da-dang-ky".equals(enrollment)) {
-            return new NextStep("kiểm tra Backend rồi nhận diện lại thẻ", -1);
+            return new NextStep("bấm Kiểm tra hệ thống để kết nối lại sổ giao dịch", -1);
         }
         if (!state.snapshotKnown() || !authenticated(state)) {
-            return new NextStep("nhập PIN học viên và đọc trạng thái thẻ", App.TAB_OPERATIONS);
+            return new NextStep("nhập PIN học viên rồi bấm Đọc thẻ", App.TAB_OPERATIONS);
         }
         if (state.card().hasActiveVisit()) {
             return new NextStep("đóng ca khi kết thúc", App.TAB_OPERATIONS);
@@ -126,7 +126,7 @@ final class SessionGates {
         if (state.journalPresent()) {
             return journalReason(state);
         }
-        return state.transactionAllowed() ? null : "cần đối soát giao dịch trước";
+        return null;
     }
 
     private static String transaction(State state) {
@@ -143,14 +143,13 @@ final class SessionGates {
             return journalReason(state);
         }
         if (!state.transactionAllowed()) {
-            return "cần đối soát giao dịch trước";
+            return "cần xác minh lại thẻ trước khi giao dịch";
         }
         if (!state.snapshotKnown()) {
-            return "chưa đọc được trạng thái thẻ — bấm Đọc trạng thái thẻ";
+            return "chưa đọc được trạng thái thẻ — nhập PIN rồi bấm Đọc thẻ";
         }
         if (state.enrollmentProblem() != null) {
-            return state.enrollmentProblem()
-                    + " — kiểm tra đăng ký thẻ trước khi giao dịch";
+            return "chưa xác nhận đăng ký thẻ — bấm Kiểm tra hệ thống hoặc mở tab Đăng ký thẻ";
         }
         return authenticated(state) ? null : "cần PIN học viên đúng để đọc trạng thái thẻ";
     }

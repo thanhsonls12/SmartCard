@@ -54,7 +54,7 @@ final class CardGateway {
 
     CardGateway(String host, int port) {
         this.transport = new CardTransport(host, port);
-        this.pinCommands = new CardPinCommands(transport, () -> ready ? status : null,
+        this.pinCommands = new CardPinCommands(transport, () -> isReady() ? status : null,
                 sw -> lastResponseSw = sw);
         this.photoCommands = new CardPhotoCommands(transport, this::verifyStudentPin,
                 sw -> lastResponseSw = sw);
@@ -65,7 +65,7 @@ final class CardGateway {
     CardGateway(CardChannel channel) {
         this.transport = new CardTransport(channel);
         this.ready = channel != null;
-        this.pinCommands = new CardPinCommands(transport, () -> ready ? status : null,
+        this.pinCommands = new CardPinCommands(transport, () -> isReady() ? status : null,
                 sw -> lastResponseSw = sw);
         this.photoCommands = new CardPhotoCommands(transport, this::verifyStudentPin,
                 sw -> lastResponseSw = sw);
@@ -370,6 +370,36 @@ final class CardGateway {
         return photoCommands.readPhoto(pin);
     }
 
+    boolean photoAbsent() {
+        return photoCommands.photoAbsent();
+    }
+
+    void clearCardIdentity() {
+        profileCommands.reset();
+        photoCommands.reset();
+    }
+
+    CardOperationResult confirmReceiptRead() {
+        if (reconciliation.state() == Reconciliation.State.UNKNOWN) {
+            return CardOperationResult.fail(
+                    "đang có giao dịch chưa rõ kết quả — đối soát pending trước, không tự mở khóa");
+        }
+        if (!reconciliation.receiptUnverified()) {
+            return CardOperationResult.ok("Không có lỗi xác minh biên nhận cần phục hồi.");
+        }
+        String problem = ReceiptReadRecovery.problem(status, lastReceipt,
+                lastReceiptSignatureOk, receiptSink);
+        if (problem != null) {
+            return CardOperationResult.fail("Chưa xác minh lại được thẻ: " + problem);
+        }
+        reconciliation.markKnown("biên nhận, state xác thực và ledger đã khớp");
+        return CardOperationResult.ok("Đã xác minh lại biên nhận và trạng thái thẻ với sổ giao dịch.");
+    }
+
+    CardOperationResult readOperatorCard(char[] pin) throws CardException {
+        return new CardOverviewReader(this).read(pin);
+    }
+
     byte[] lastPhoto() {
         return photoCommands.lastPhoto();
     }
@@ -464,6 +494,9 @@ final class CardGateway {
 
     CardOperationResult readLastReceipt(ReceiptExpectation expectation, int le) throws CardException {
         transport.requireConnected();
+        lastReceipt = null;
+        lastReceiptSignatureOk = false;
+        signatureChecked = false;
 
         ResponseAPDU response = transport.transmit(new CommandAPDU(
                 CardProtocol.CLA_APPLICATION, INS_GET_LAST_RECEIPT, 0x00, 0x00, le));
@@ -484,7 +517,7 @@ final class CardGateway {
         ReceiptCodec.Parse parse = ReceiptCodec.parse(data);
         if (!parse.ok()) {
             lastReceipt = null;
-            reconciliation.markUnknown("receipt không đọc được: " + parse.problem());
+            receiptVerificationFailed(expectation, "receipt không đọc được: " + parse.problem());
             return CardOperationResult.fail(String.format("%s sigLen=%d parser=FAIL (%s) | đối soát=%s",
                     apdu, signatureLength, parse.problem(), reconciliation.state()));
         }
@@ -498,7 +531,7 @@ final class CardGateway {
         String cardProblem = cardIdProblem(receipt);
         if (cardProblem != null) {
             lastReceipt = null;
-            reconciliation.markUnknown(cardProblem);
+            receiptVerificationFailed(expectation, cardProblem);
             return CardOperationResult.fail(String.format("%s | kết luận=MISMATCH (%s) state=%s",
                     detail, cardProblem, reconciliation.state()));
         }
@@ -506,7 +539,7 @@ final class CardGateway {
         CardOperationResult signatureCheck = verifyReceiptSignature(receipt);
         if (!signatureCheck.ok()) {
             lastReceipt = null;
-            reconciliation.markUnknown("chữ ký receipt không hợp lệ");
+            receiptVerificationFailed(expectation, "chữ ký receipt không hợp lệ");
             return CardOperationResult.fail(String.format("%s | ECDSA=FAIL (%s) | kết luận=MISMATCH state=%s",
                     detail, signatureCheck.text(), reconciliation.state()));
         }
@@ -525,6 +558,14 @@ final class CardGateway {
         return verdict == Reconciliation.Verdict.MISMATCH
                 ? CardOperationResult.fail(text)
                 : CardOperationResult.ok(text);
+    }
+
+    private void receiptVerificationFailed(ReceiptExpectation expectation, String problem) {
+        if (expectation == null) {
+            reconciliation.markReceiptUnverified(problem);
+        } else {
+            reconciliation.markUnknown(problem);
+        }
     }
 
     private String cardIdProblem(Receipt receipt) {
@@ -1093,7 +1134,11 @@ final class CardGateway {
     }
 
     boolean isReady() {
-        return ready;
+        return ready && transport.isConnected();
+    }
+
+    boolean needsReconnect() {
+        return transport.needsReconnect();
     }
 
     CardStatus status() {

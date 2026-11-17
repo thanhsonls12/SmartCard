@@ -25,8 +25,26 @@ final class ReceiptPanel {
             Supplier<char[]> studentPin, Runnable studentPinCleared,
             PendingReconcile reconcilePending, Runnable historyInvalidated,
             Runnable historyRemembered, Runnable historyPublished, Runnable buttonsRefreshed,
-            Runnable headerReconcile, Consumer<Boolean> receiptFinished,
+            Consumer<Boolean> receiptFinished,
             Consumer<Boolean> reconcileFinished, Runnable pinRequired) {
+    }
+
+    record CardMismatch(String expectedCardId, String actualCardId) {
+        String guidance() {
+            return "Giao dịch đang chờ thuộc thẻ " + expectedCardId + "; thẻ hiện tại là " + actualCardId
+                    + ". Đưa lại thẻ " + expectedCardId
+                    + " rồi kết nối và nhận diện lại. Không thực hiện lại giao dịch.";
+        }
+    }
+
+    CardMismatch pendingCardMismatch() {
+        PendingJournal.Loaded loaded = session.pendingJournal().get();
+        CardStatus current = gateway.isReady() ? gateway.status() : null;
+        if (current == null || !loaded.valid() || loaded.status() != PendingJournal.Status.PENDING
+                || loaded.entry() == null || loaded.entry().cardId().equalsIgnoreCase(current.cardId())) {
+            return null;
+        }
+        return new CardMismatch(loaded.entry().cardId(), current.cardId());
     }
 
     private final CardGateway gateway;
@@ -35,6 +53,7 @@ final class ReceiptPanel {
     private final Session session;
 
     private final Label valueVisitId = UiLabels.value();
+    private final Label valueReconcile = UiLabels.chip();
     private final ReceiptView receiptView = new ReceiptView();
     private boolean canRead;
     private final Button btnReconcile = new Button("Đối soát giao dịch", Icons.reconcile());
@@ -79,6 +98,29 @@ final class ReceiptPanel {
         return btnReconcile;
     }
 
+    Node reconcileStatus() {
+        return valueReconcile;
+    }
+
+    void showReconcile() {
+        boolean known = gateway.reconciliation().transactionAllowed();
+        PendingJournal.Loaded loaded = session.pendingJournal().get();
+        boolean recovery = JournalRecoveryView.needed(loaded);
+        boolean pending = loaded.present() && loaded.valid()
+                && loaded.status() == PendingJournal.Status.PENDING;
+        if (recovery) {
+            valueReconcile.setText("Cần khôi phục");
+        } else if (pending || !known) {
+            valueReconcile.setText(gateway.reconciliation().receiptUnverified()
+                    ? "Cần xác minh biên nhận" : "Cần đối soát");
+        } else {
+            valueReconcile.setText("Không có giao dịch chờ");
+        }
+        UiLabels.Tone tone = recovery || !known || pending
+                ? UiLabels.Tone.ERROR : UiLabels.Tone.NEUTRAL;
+        UiLabels.applyChip(valueReconcile, tone);
+    }
+
     String displayedVisitId() {
         return valueVisitId.getText();
     }
@@ -89,13 +131,17 @@ final class ReceiptPanel {
 
     void applyLock(boolean busy, String whyReadReceipt, String whyReconcile) {
         canRead = whyReadReceipt == null;
+        CardMismatch mismatch = pendingCardMismatch();
+        if (mismatch != null) {
+            whyReconcile = mismatch.guidance();
+        }
         boolean recovery = JournalRecoveryView.needed(session.pendingJournal().get());
         btnReconcile.setText(recovery ? "Hướng dẫn khôi phục" : "Đối soát giao dịch");
         btnReconcile.setTooltip(new javafx.scene.control.Tooltip(recovery
                 ? "Xem nguyên nhân và các bước xử lý nhật ký; không thay đổi dữ liệu"
                 : whyReconcile == null ? "Đọc biên nhận để đối soát giao dịch" : whyReconcile));
         btnReconcile.setDisable(recovery ? busy : whyReconcile != null);
-        UiLabels.setWhy(why, pinNote);
+        UiLabels.setWhy(why, mismatch == null ? pinNote : mismatch.guidance());
     }
 
     boolean reconcileEnabled() {
@@ -161,7 +207,7 @@ final class ReceiptPanel {
         valueVisitId.setText(authenticated && status.hasActiveVisit()
                 ? status.activeVisitId()
                 : authenticated ? "Không có ca đang mở" : "Chưa đọc trạng thái ca");
-        session.headerReconcile().run();
+        showReconcile();
         if (!gateway.reconciliation().detail().isEmpty()) {
             log.accept("Đối soát: " + gateway.reconciliation().detail());
         }
@@ -234,30 +280,7 @@ final class ReceiptPanel {
         session.studentPinCleared().run();
         runner.run("VERIFY + GET_LAST_RECEIPT + GET_STATUS state", () -> {
             try {
-                gateway.clearAuthenticatedStatus();
-                CardOperationResult keyReady = gateway.prepareReceiptVerification();
-                if (!keyReady.ok()) {
-                    return CardOperationResult.fail("public key: " + keyReady.text());
-                }
-                CardOperationResult verify = gateway.verifyStudentPin(studentPin);
-                if (!verify.ok()) {
-                    return CardOperationResult.fail("VERIFY: " + verify.text());
-                }
-                CardOperationResult read = gateway.readLastReceipt(null);
-                String receiptEvidence;
-                if (!read.ok() && gateway.lastResponseSw() == Sw.CONDITIONS_NOT_SATISFIED) {
-                    receiptEvidence = "thẻ ISSUED chưa có receipt";
-                } else if (!read.ok()) {
-                    return read;
-                } else {
-                    receiptEvidence = read.text();
-                }
-                CardOperationResult state = gateway.readAuthenticatedStatus(studentPin);
-                if (!state.ok()) {
-                    return CardOperationResult.fail(receiptEvidence
-                            + " | không nạp được state ca: " + state.text());
-                }
-                return CardOperationResult.ok(receiptEvidence + " | " + state.text());
+                return gateway.readOperatorCard(studentPin);
             } finally {
                 java.util.Arrays.fill(studentPin, '\0');
             }
@@ -301,13 +324,9 @@ final class ReceiptPanel {
                 if (!reconciled.ok()) {
                     return reconciled;
                 }
-                CardOperationResult refreshed = gateway.readAuthenticatedStatus(studentPin);
-                if (!refreshed.ok()) {
-                    return CardOperationResult.fail(reconciled.text()
-                            + " | state ca chưa được làm mới: " + refreshed.text());
-                }
+                CardOperationResult done = ConfirmedOperationRefresh.read(gateway, reconciled, studentPin);
                 session.historyRemembered().run();
-                return CardOperationResult.ok(reconciled.text() + " | " + refreshed.text());
+                return done;
             } finally {
                 java.util.Arrays.fill(studentPin, '\0');
             }

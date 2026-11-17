@@ -47,14 +47,16 @@ final class TransactionPanel {
     private final Label studentPinError = UiLabels.fieldError();
     private final Label adminPinError = UiLabels.fieldError();
     private final Label deltaError = UiLabels.fieldError();
-    private final Button btnReadState = new Button("Đọc trạng thái thẻ");
+    private final Button btnReadState = new Button("Đọc thẻ");
     private final Label balance = UiLabels.value();
     private final Label visit = UiLabels.chip();
     private final Label stateNote = UiLabels.caption(
-            "Mỗi thao tác cần nhập lại PIN học viên; cấp lượt cần thêm PIN quản trị.");
+            "Đọc thẻ gồm hồ sơ, ảnh và số lượt. Nhập lại PIN cho mỗi giao dịch; cấp lượt cần thêm PIN quản trị.");
     private final Button btnGrant = new Button("Cấp lượt");
-    private final Button btnStart = new Button("Mở ca");
+    private final Button btnStart = new Button("Mở ca · −1 lượt");
     private final Button btnEnd = new Button("Đóng ca");
+    private final Label grantPreview = UiLabels.caption("");
+    private final Label visitPreview = UiLabels.caption("");
     private final Label why = UiLabels.whyNote();
     private final VBox node;
 
@@ -85,7 +87,19 @@ final class TransactionPanel {
         fieldAdminPin.textProperty().addListener(
                 (observable, was, now) -> UiLabels.clearFieldError(adminPinError));
         fieldDelta.getEditor().textProperty().addListener(
-                (observable, was, now) -> UiLabels.clearFieldError(deltaError));
+                (observable, was, now) -> {
+                    UiLabels.clearFieldError(deltaError);
+                    showEffects(gateway.status(), session.snapshotKnown().getAsBoolean());
+                });
+        fieldStudentPin.setOnAction(event -> {
+            if (!session.snapshotKnown().getAsBoolean() && !btnReadState.isDisabled()) {
+                btnReadState.fire();
+            } else if (!btnEnd.isDisabled()) {
+                btnEnd.requestFocus();
+            } else if (!btnStart.isDisabled()) {
+                btnStart.requestFocus();
+            }
+        });
 
         for (Button action : new Button[] {btnReadState, btnGrant, btnStart, btnEnd}) {
             action.getStyleClass().add("la-action");
@@ -116,9 +130,14 @@ final class TransactionPanel {
                 UiRows.valueBlock("Số lượt còn lại", balance),
                 UiRows.valueBlock("Ca hiện tại", visit), studentField, btnReadState);
         HBox visitActions = new HBox(UiScale.SPACE_2, btnStart, btnEnd);
-        FlowPane actions = UiRows.wrapping(UiRows.field("Ca sử dụng", visitActions), adminField,
+        grantPreview.setId("grant-preview");
+        grantPreview.setWrapText(true);
+        visitPreview.setId("visit-preview");
+        visitPreview.setWrapText(true);
+        FlowPane grantActions = UiRows.wrapping(adminField,
                 UiRows.field("Số lượt cần cấp", fieldDelta, deltaError), btnGrant);
-        node = UiSection.of("Vận hành thẻ", state, stateNote, actions, why);
+        node = UiSection.of("Vận hành thẻ", state, stateNote, visitActions, visitPreview,
+                grantActions, grantPreview, why);
     }
 
     VBox node() {
@@ -156,6 +175,12 @@ final class TransactionPanel {
         return false;
     }
 
+    void focusStudentPin() {
+        if (!fieldStudentPin.isDisabled() && fieldStudentPin.getScene() != null) {
+            fieldStudentPin.requestFocus();
+        }
+    }
+
     void showState(CardStatus status, boolean known) {
         boolean available = known && status != null && status.studentStateAvailable();
         String balanceText = available ? status.balance() + " lượt" : "Chưa đọc";
@@ -170,6 +195,26 @@ final class TransactionPanel {
         visit.setText(available ? status.hasActiveVisit() ? "Đang mở" : "Chưa mở" : "Chưa đọc");
         UiLabels.applyChip(visit, available && status.hasActiveVisit()
                 ? UiLabels.Tone.OK : UiLabels.Tone.NEUTRAL);
+        showEffects(status, available);
+    }
+
+    private void showEffects(CardStatus status, boolean known) {
+        boolean available = known && status != null && status.studentStateAvailable();
+        visitPreview.setText(!available ? "Đọc thẻ để xem tác động của ca sử dụng."
+                : status.hasActiveVisit() ? "Đóng ca không trừ thêm lượt."
+                : status.balance() == 0 ? "Thẻ hết lượt. Cấp thêm lượt trước khi mở ca."
+                : "Sau khi mở ca: còn " + (status.balance() - 1) + " lượt.");
+        String entered = fieldDelta.getEditor().getText();
+        if (!available || entered == null || !entered.matches("\\d{1,4}")
+                || Integer.parseInt(entered) < DELTA_MIN) {
+            grantPreview.setText(available ? "Nhập số lượt muốn cấp." : "Đọc thẻ để xem số lượt sau khi cấp.");
+            return;
+        }
+        int delta = Integer.parseInt(entered);
+        int after = status.balance() + delta;
+        grantPreview.setText(after > Receipt.MAX_BALANCE
+                ? "Chỉ có thể cấp thêm " + (Receipt.MAX_BALANCE - status.balance()) + " lượt."
+                : "Cấp thêm " + delta + " → còn " + after + " lượt.");
     }
 
     void applyLock(boolean busy, String whyGrant, String whyStart, String whyEnd, String whyRead) {
@@ -428,14 +473,7 @@ final class TransactionPanel {
                 if (!transaction.ok()) {
                     return transaction;
                 }
-                CardOperationResult refreshed = gateway.readAuthenticatedStatus(studentPin);
-                if (!refreshed.ok()) {
-                    gateway.clearAuthenticatedStatus();
-                    return CardOperationResult.fail(transaction.text()
-                            + " | state ca chưa được làm mới: " + refreshed.text());
-                }
-                CardOperationResult done = CardOperationResult.ok(transaction.text()
-                        + " | " + refreshed.text());
+                CardOperationResult done = ConfirmedOperationRefresh.read(gateway, transaction, studentPin);
                 session.historyRemembered().run();
                 return done;
             } finally {

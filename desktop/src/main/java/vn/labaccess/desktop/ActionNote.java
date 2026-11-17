@@ -30,6 +30,35 @@ final class ActionNote {
         return node;
     }
 
+    void showSession(PendingJournal.Loaded loaded, boolean reconnect, String mismatch,
+            Reconciliation reconciliation, String lastFailure, UiLabels.Tone lastTone) {
+        if (JournalRecoveryView.needed(loaded)) {
+            show(JournalRecoveryView.summary(loaded) + " Mở Hướng dẫn khôi phục.",
+                    UiLabels.Tone.ERROR, false);
+        } else if (reconnect) {
+            String channel = lastFailure != null && lastFailure.contains("Ngắt kết nối")
+                    ? lastFailure
+                    : (lastFailure == null ? "" : lastFailure + " ")
+                            + "Kênh thẻ không còn sử dụng được. Ngắt kết nối rồi Kết nối lại.";
+            show(channel + (loaded.present()
+                    ? " Giữ nguyên giao dịch chờ để đối soát; không thực hiện lại." : ""),
+                    UiLabels.Tone.PENDING, true);
+        } else if (mismatch != null) {
+            show(mismatch, UiLabels.Tone.PENDING, false);
+        } else if (reconciliation.receiptUnverified()) {
+            show("Chưa xác minh được biên nhận. Giao dịch đang khóa; nhập PIN rồi bấm Đọc thẻ"
+                    + " để xác minh lại với sổ giao dịch.", UiLabels.Tone.PENDING, true);
+        } else if (loaded.present() || !reconciliation.transactionAllowed()) {
+            show("Có giao dịch chưa rõ kết quả. Không thực hiện lại; kiểm tra và đối soát trước.",
+                    UiLabels.Tone.PENDING, true);
+        } else if (lastFailure != null) {
+            show(lastFailure, lastTone, true);
+        } else {
+            show(null, UiLabels.Tone.NEUTRAL, false);
+        }
+
+    }
+
     void show(String text, UiLabels.Tone tone, boolean showDetails) {
         boolean visible = text != null && !text.isBlank();
         label.setText(visible ? text : "");

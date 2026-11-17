@@ -19,6 +19,7 @@ final class CardPhotoCommands {
     private final IntConsumer responseSwSink;
 
     private byte[] lastPhoto;
+    private boolean photoAbsent;
 
     CardPhotoCommands(CardTransport transport, PinCheck pinCheck, IntConsumer responseSwSink) {
         this.transport = transport;
@@ -53,6 +54,7 @@ final class CardPhotoCommands {
     CardOperationResult uploadPhoto(byte[] image, char[] adminPin) throws CardException {
         transport.requireConnected();
         lastPhoto = null;
+        photoAbsent = false;
         if (image == null || image.length != PhotoImage.LENGTH) {
             return CardOperationResult.fail("ảnh phải đúng " + PhotoImage.LENGTH
                     + " byte grayscale raw 8-bit (chưa gửi APDU)");
@@ -111,6 +113,7 @@ final class CardPhotoCommands {
     CardOperationResult readPhoto(char[] pin) throws CardException {
         transport.requireConnected();
         lastPhoto = null;
+        photoAbsent = false;
         CardOperationResult verified = pinCheck.verify(pin);
         if (!verified.ok()) {
             return CardOperationResult.fail("đọc ảnh không chạy — VERIFY: " + verified.text());
@@ -122,6 +125,7 @@ final class CardPhotoCommands {
             int length = PhotoImage.chunkLength(offset);
             ResponseAPDU chunk = transmitReadChunk(offset, length);
             if (chunk.getSW() != Sw.OK) {
+                photoAbsent = offset == 0 && chunk.getSW() == Sw.CONDITIONS_NOT_SATISFIED;
                 return CardOperationResult.fail(String.format(
                         "PHOTO_READ_CHUNK offset=%d Le=%d SW=%04X | %s",
                         offset, length, chunk.getSW(), photoStatusText(chunk.getSW())));
@@ -147,8 +151,13 @@ final class CardPhotoCommands {
         return lastPhoto;
     }
 
+    boolean photoAbsent() {
+        return photoAbsent;
+    }
+
     void reset() {
         lastPhoto = null;
+        photoAbsent = false;
     }
 
     private static String photoStatusText(int sw) {
