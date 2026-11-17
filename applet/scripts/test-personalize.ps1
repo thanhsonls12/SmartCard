@@ -12,6 +12,15 @@ $toolsOut = Join-Path $buildDir 'tools'
 $buildLogDir = Join-Path $buildDir 'logs'
 $logDir = Join-Path $repoRoot 'logs'
 $source = Join-Path $PSScriptRoot 'PersonalizeSelfTest.java'
+$apduCasesSource = Join-Path $PSScriptRoot 'ApduErrorCases.java'
+$transportCasesSource = Join-Path $PSScriptRoot 'ApduTransportCases.java'
+$transportSource = Join-Path $PSScriptRoot '../../desktop/src/main/java/vn/labaccess/desktop/CardTransport.java'
+$gatewayCasesSource = Join-Path $PSScriptRoot 'GatewayTransportCases.java'
+$gatewayNames = @('CardGateway', 'CardLifecycle', 'CardOperationResult', 'CardPhotoCommands', 'CardPinCommands',
+    'CardProfileCommands', 'CardProtocol', 'CardStatus', 'CardStatusCodec', 'PendingJournal', 'PersonalizeRequest',
+    'PhotoImage', 'Profile', 'ProfileCodec', 'ProfileCryptoMeta', 'ProfileMetaCodec', 'Receipt', 'ReceiptCodec',
+    'ReceiptExpectation', 'ReceiptVerifier', 'Reconciliation', 'SimulatorConnection', 'Sw')
+$gatewaySources = $gatewayNames | ForEach-Object { Join-Path $PSScriptRoot "../../desktop/src/main/java/vn/labaccess/desktop/$_.java" }
 
 function Stop-Test {
     param([string]$Message)
@@ -51,7 +60,7 @@ $clientDir = Join-Path $JcHomeSimulator 'client'
 $amserviceJar = Join-Path $clientDir 'AMService/amservice.jar'
 $socketJar = Join-Path $clientDir 'COMService/socketprovider.jar'
 $propsFile = Join-Path $JcHomeSimulator 'samples/client.config.properties'
-foreach ($path in @($amserviceJar, $socketJar, $propsFile, $source)) {
+foreach ($path in @($amserviceJar, $socketJar, $propsFile, $source, $apduCasesSource)) {
     if (-not (Test-Path $path)) {
         Stop-Test "Required file missing: $path"
     }
@@ -64,7 +73,7 @@ $classpath = "$amserviceJar;$socketJar"
 
 Write-Host '=== LabAccess PERSONALIZE and PIN runtime selftest ==='
 Write-Host '[1/3] Compile harness'
-$result = Invoke-Native { & $javac -g -d $toolsOut -cp $classpath $source }
+$result = Invoke-Native { & $javac -g -d $toolsOut -cp $classpath $source $apduCasesSource $transportCasesSource $transportSource $gatewayCasesSource @gatewaySources }
 $result.Output | ForEach-Object { Write-Host "      $_" }
 if ($result.ExitCode -ne 0) {
     Stop-Test "javac failed with exit code $($result.ExitCode)"

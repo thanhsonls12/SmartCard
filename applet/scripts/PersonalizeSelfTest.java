@@ -144,36 +144,94 @@ public final class PersonalizeSelfTest {
                 throw new IllegalStateException("test AID install failed");
             }
             selectTestInstance(channel);
-            runCases(channel, adminPin, studentPin, unblockedPin, changedPin);
-            if (Boolean.getBoolean("labaccess.personalizeOnly")) {
-                runProfileCases(channel, studentPin);
+            if (Boolean.getBoolean("labaccess.tamperOnly")) {
+                byte[] payload = validPayload(adminPin, studentPin);
+                try {
+                    record("AES-CONTROL-PERSONALIZE", "PERSONALIZE unmodified test CAP", SW_OK,
+                            transmit(channel, personalizeCommand(payload)).getSW());
+                    record("AES-CONTROL-VERIFY", "VERIFY before control profile", SW_OK,
+                            transmit(channel, pinCommand(INS_VERIFY_STUDENT_PIN, studentPin)).getSW());
+                    ResponseAPDU profile = transmit(channel, profileCommand());
+                    recordBoolean("AES-CONTROL-PROFILE", "unmodified record returns exact profile",
+                            profile.getSW() == SW_OK && profileMatches(profile.getData()));
+                    clear(profile.getData());
+                    runTamperCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
+                } finally {
+                    clear(payload);
+                }
+            } else if (Boolean.getBoolean("labaccess.apduErrorsOnly")) {
+                byte[] payload = validPayload(adminPin, studentPin);
+                CardChannel testChannel = channel;
+                byte[] provisioningPin = adminPin;
+                try {
+                    String transportProbe = System.getProperty("labaccess.transportProbe", "");
+                    if (transportProbe.equals("gateway-sw6c")) {
+                        ResponseAPDU personalized = channel.transmit(new CommandAPDU(0x80, 0x30, 0, 0, payload, 256));
+                        if (personalized.getSW() != SW_OK) {
+                            throw new IllegalStateException("gateway test provisioning failed");
+                        }
+                        card.disconnect(true);
+                        try {
+                            failed += vn.labaccess.desktop.GatewayTransportCases.run(
+                                    Integer.getInteger("labaccess.simulator.port", 9025), adminPin, studentPin,
+                                    java.nio.file.Path.of(System.getProperty("labaccess.evidence")));
+                        } finally {
+                            card = connect();
+                            channel = card.getBasicChannel();
+                        }
+                    } else if (!transportProbe.isEmpty()) {
+                        failed += vn.labaccess.desktop.ApduTransportCases.run(channel, adminPin,
+                                studentPin, payload, transportProbe);
+                    } else {
+                        ApduErrorCases apduCases = new ApduErrorCases(channel, adminPin, studentPin, CARD_ID, () -> {
+                            if (!removeTestInstance(propertiesPath, testChannel)
+                                    || !installTestInstance(propertiesPath, testChannel, provisioningPin)) {
+                                throw new IllegalStateException("fresh test instance failed");
+                            }
+                            selectTestInstance(testChannel);
+                        });
+                        try {
+                            failed += apduCases.run(payload, System.getProperty("labaccess.apduGroups", "all"));
+                        } finally {
+                            channel = apduCases.channel();
+                            card = channel.getCard();
+                        }
+                    }
+                } finally {
+                    clear(payload);
+                }
             } else {
-                runEnrollmentCases(channel, studentPin);
-                runProfileCases(channel, studentPin);
-                metadata = runMetadataCases(channel, studentPin);
-                runQuotaCases(channel, adminPin);
-                card = runAuthorizationResetCase(card, studentPin);
-                channel = card.getBasicChannel();
-                runTamperCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
-                runMetadataDifferential(propertiesPath, channel, adminPin, studentPin,
-                        testCapPath, metadata);
-                runQuotaVariantCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
-                card = runVisitCases(propertiesPath, channel, adminPin, studentPin, testCapPath);
-                channel = card.getBasicChannel();
-                card = runVisitVariantCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
-                channel = card.getBasicChannel();
-                card = runReceiptCases(propertiesPath, channel, adminPin, studentPin, testCapPath);
-                channel = card.getBasicChannel();
-                runReceiptFaultBeforeCommitCase(propertiesPath, channel, adminPin, studentPin,
-                        variantsRoot);
-                runReceiptFaultAfterCommitCase(propertiesPath, channel, adminPin, studentPin,
-                        variantsRoot);
-                runReceiptSignatureSizeCase(propertiesPath, channel, adminPin, studentPin,
-                        variantsRoot);
-                card = runPhotoFinishFaultCase(propertiesPath, card, adminPin, studentPin, variantsRoot);
-                channel = card.getBasicChannel();
+                runCases(channel, adminPin, studentPin, unblockedPin, changedPin);
+                if (Boolean.getBoolean("labaccess.personalizeOnly")) {
+                    runProfileCases(channel, studentPin);
+                } else {
+                    runEnrollmentCases(channel, studentPin);
+                    runProfileCases(channel, studentPin);
+                    metadata = runMetadataCases(channel, studentPin);
+                    runQuotaCases(channel, adminPin);
+                    card = runAuthorizationResetCase(card, studentPin);
+                    channel = card.getBasicChannel();
+                    runTamperCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
+                    runMetadataDifferential(propertiesPath, channel, adminPin, studentPin,
+                            testCapPath, metadata);
+                    runQuotaVariantCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
+                    card = runVisitCases(propertiesPath, channel, adminPin, studentPin, testCapPath);
+                    channel = card.getBasicChannel();
+                    card = runVisitVariantCases(propertiesPath, channel, adminPin, studentPin, variantsRoot);
+                    channel = card.getBasicChannel();
+                    card = runReceiptCases(propertiesPath, channel, adminPin, studentPin, testCapPath);
+                    channel = card.getBasicChannel();
+                    runReceiptFaultBeforeCommitCase(propertiesPath, channel, adminPin, studentPin,
+                            variantsRoot);
+                    runReceiptFaultAfterCommitCase(propertiesPath, channel, adminPin, studentPin,
+                            variantsRoot);
+                    runReceiptSignatureSizeCase(propertiesPath, channel, adminPin, studentPin,
+                            variantsRoot);
+                    card = runPhotoFinishFaultCase(propertiesPath, card, adminPin, studentPin, variantsRoot);
+                    channel = card.getBasicChannel();
+                }
+                runStudentIdBoundaryCases(propertiesPath, channel, adminPin, studentPin);
             }
-            runStudentIdBoundaryCases(propertiesPath, channel, adminPin, studentPin);
         } catch (Exception exception) {
             failed++;
             log("SUITE FAILED: " + exception.getClass().getSimpleName());
@@ -195,7 +253,9 @@ public final class PersonalizeSelfTest {
                 card.disconnect(true);
             }
         }
-        writeReceiptArtifacts(artifactsPath);
+        if (!Boolean.getBoolean("labaccess.apduErrorsOnly") && !Boolean.getBoolean("labaccess.tamperOnly")) {
+            writeReceiptArtifacts(artifactsPath);
+        }
         log("KET LUAN: " + (failed == 0 ? "PASS" : "FAIL (" + failed + ")"));
         if (failed != 0) {
             System.exit(1);
@@ -1773,7 +1833,7 @@ public final class PersonalizeSelfTest {
         recordBoolean("E17", "Le=72 van verify duoc", nodeVerifyEnrollment(
                 publicKeyHex, encodeHex(CARD_ID), encodeHex(nonce), encodeHex(minLe.getData()),
                 "valid", true));
-        record("E18", "khong gui Le van duoc chap nhan", SW_OK,
+        record("E18", "khong gui Le bi tu choi", SW_WRONG_LENGTH,
                 transmit(channel, new CommandAPDU(CLA, INS_SIGN_ENROLLMENT, 0, 0, nonce)).getSW());
 
         record("E19", "khong tao receipt", SW_CONDITIONS,
