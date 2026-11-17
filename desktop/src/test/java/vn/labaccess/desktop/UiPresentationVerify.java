@@ -28,7 +28,9 @@ public final class UiPresentationVerify {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         Platform.startup(() -> {
             try {
+                UiTheme.apply(new javafx.scene.Scene(new VBox()));
                 historyStates();
+                operatorIdentityAndEffects();
                 groupedReasons();
                 failureMessages();
                 receiptPresentation();
@@ -69,13 +71,14 @@ public final class UiPresentationVerify {
         TableView<?> table = (TableView<?>) panel.node().lookup("#history-table");
         Label placeholder = (Label) table.getPlaceholder();
         Label verdict = (Label) panel.node().lookup("#history-verdict");
+        Label loadStatus = (Label) panel.node().lookup("#history-load-status");
         check("unloaded history is not reported empty", placeholder.getText().equals("Chưa tải lịch sử"));
         panel.setEnabled(true, null);
         check("reload invokes existing runner", panel.pressReload() && requests[0] == 1);
         check("loading placeholder", placeholder.getText().equals("Đang tải lịch sử…"));
         panel.showFailure(new IllegalStateException("Backend chưa phản hồi"));
         check("failure placeholder", placeholder.getText().startsWith("Không tải được lịch sử"));
-        check("failure retains reason", verdict.getText().contains("Backend chưa phản hồi"));
+        check("failure retains reason", loadStatus.getText().contains("Backend chưa phản hồi"));
 
         panel.show(history(List.of(), 0, 0));
         check("successful empty result", placeholder.getText().equals("Sổ chưa có giao dịch"));
@@ -84,15 +87,16 @@ public final class UiPresentationVerify {
                 placeholder.getText().contains("dữ liệu không khớp"));
 
         BackendClient.HistoryEntry row = new BackendClient.HistoryEntry(
-                "giao-dich-thu-nghiem", 1, "GRANT", 5, 5, "verified");
+                "giao-dich-thu-nghiem", 1, "GRANT", 5, 5, "verified",
+                java.time.Instant.parse("2026-11-12T08:00:00Z"));
         panel.show(history(List.of(row), 1, 5));
         check("loaded history", panel.rowCount() == 1);
         panel.pressReload();
         check("reload preserves existing rows", panel.rowCount() == 1
-                && verdict.getText().contains("lần tải trước"));
+                && loadStatus.getText().contains("lần tải trước"));
         panel.showFailure(new IllegalStateException("Mất kết nối Backend"));
         check("failed reload preserves existing rows", panel.rowCount() == 1
-                && verdict.getText().contains("lần tải trước (1 dòng)"));
+                && loadStatus.getText().contains("lần tải trước (1 dòng)"));
         panel.onCard("0011223344556677");
         check("another card clears loaded rows", panel.rowCount() == 0);
         panel.show(history(List.of(row), 1, 5));
@@ -106,6 +110,90 @@ public final class UiPresentationVerify {
         panel.clear();
         check("clear resets placeholder and data", panel.rowCount() == 0
                 && placeholder.getText().equals("Chưa tải lịch sử"));
+        panel.onCard(CARD_ID);
+        BackendClient.HistoryEntry start = new BackendClient.HistoryEntry(
+                "start-id", 2, "START", -1, 4, "verified", java.time.Instant.parse("2026-11-13T08:00:00Z"));
+        BackendClient.HistoryEntry end = new BackendClient.HistoryEntry(
+                "end-id", 3, "END", 0, 4, "verified", java.time.Instant.parse("2026-11-13T09:00:00Z"));
+        panel.show(history(List.of(row, start, end), 3, 4));
+        check("history displays newest counter first", table.getItems().equals(List.of(end, start, row)));
+        javafx.scene.control.ComboBox<?> filter = (javafx.scene.control.ComboBox<?>) panel.node().lookup("#history-operation");
+        javafx.scene.control.DatePicker day = (javafx.scene.control.DatePicker) panel.node().lookup("#history-day");
+        Button clear = (Button) panel.node().lookup("#history-clear-filters");
+        check("unfiltered history has no reset action", clear.isDisabled());
+        filter.getSelectionModel().select(2);
+        check("operation filter isolates START", table.getItems().equals(List.of(start)));
+        table.getSelectionModel().select(0);
+        Label detail = (Label) ((javafx.scene.control.TitledPane) panel.node().lookup("TitledPane")).getContent();
+        check("selected transaction includes complete identity and time", detail.getText().contains("start-id")
+                && detail.getText().contains("13/11/2026") && detail.getText().contains("Số thứ tự trên thẻ: 2"));
+        day.setValue(java.time.LocalDate.of(2026, 11, 12));
+        check("date and operation filters combine", panel.rowCount() == 0
+                && placeholder.getText().contains("Xóa lọc") && !detail.getText().contains("start-id"));
+        clear.fire();
+        check("clearing filters restores all rows", panel.rowCount() == 3 && clear.isDisabled());
+        day.setValue(java.time.LocalDate.of(2026, 11, 13));
+        check("recording date filter", table.getItems().equals(List.of(end, start)));
+        panel.show(history(List.of(row, start, end), 3, 9));
+        String mismatch = verdict.getText();
+        filter.getSelectionModel().select(1);
+        check("filters never hide full-ledger mismatch", panel.rowCount() == 0
+                && mismatch.contains("khác sổ") && verdict.getText().equals(mismatch));
+        panel.request();
+        check("loading never hides mismatch", verdict.getText().equals(mismatch)
+                && loadStatus.isVisible() && loadStatus.getText().contains("Đang cập nhật"));
+        panel.showFailure(new IllegalStateException("Mất kết nối"));
+        check("failed reload keeps both warnings visible", verdict.isVisible()
+                && verdict.getText().equals(mismatch) && loadStatus.isVisible());
+        clear.fire();
+        check("filter changes retain stale-data warning", panel.rowCount() == 3
+                && loadStatus.getText().contains("lần tải trước (3 dòng)")
+                && verdict.getText().equals(mismatch));
+        panel.onCard("0011223344556677");
+        check("new card clears filters and selection", day.getValue() == null
+                && filter.getSelectionModel().getSelectedIndex() == 0 && panel.rowCount() == 0
+                && !detail.getText().contains("start-id"));
+    }
+
+    private static void operatorIdentityAndEffects() {
+        CardIdentityPanel identity = new CardIdentityPanel();
+        CardStatus status = new CardStatus(1, CardLifecycle.ISSUED, "F04C4142010101", CARD_ID,
+                true, 5, 1, false, "");
+        Profile profile = new Profile(1, "SV2024001", "Nguyễn Thị Phương Thảo", 30);
+        byte[] photo = new byte[4096];
+        identity.show(status, profile, photo, false);
+        check("operator sees student identity", hasText(identity.node(), "Nguyễn Thị Phương Thảo")
+                && hasText(identity.node(), "Mã sinh viên: SV2024001"));
+        javafx.scene.image.ImageView portrait = (javafx.scene.image.ImageView) identity.node().lookup("ImageView");
+        check("operator sees card photo", portrait.getImage() != null);
+        identity.show(status, null, null, false);
+        check("new unread session clears name and photo", portrait.getImage() == null
+                && !hasText(identity.node(), "Nguyễn Thị Phương Thảo")
+                && hasText(identity.node(), "Nhập PIN và bấm Đọc thẻ để xem hồ sơ, ảnh và số lượt."));
+        identity.show(status, profile, null, true);
+        check("missing photo is explicit", hasText(identity.node(), "Thẻ chưa có ảnh"));
+        identity.show(status, profile, null, false);
+        check("invalidated photo is not claimed absent", hasText(identity.node(), "Chưa đọc ảnh")
+                && !hasText(identity.node(), "Thẻ chưa có ảnh"));
+        identity.show(null, null, null, false);
+        check("disconnected identity gives connection guidance", hasText(identity.node(), "Kết nối thẻ để bắt đầu."));
+
+        CardGateway gateway = new CardGateway("127.0.0.1", 1);
+        TransactionPanel panel = new TransactionPanel(gateway, (label, work, callback) -> {
+            throw new AssertionError("Preview must not send card commands");
+        }, ignored -> { }, new TransactionPanel.Session(() -> true, () -> true,
+                (plan, supplier, pin) -> { throw new AssertionError("Preview must not transact"); },
+                () -> { }, () -> { }, ignored -> { }, () -> { }, () -> { }));
+        panel.showState(status, true);
+        check("START and GRANT show consequences before acting", hasText(panel.node(), "Sau khi mở ca: còn 4 lượt.")
+                && hasText(panel.node(), "Cấp thêm 5 → còn 10 lượt."));
+        panel.showState(new CardStatus(1, 1, status.instanceAid(), CARD_ID, true, 0, 2, false, ""), true);
+        check("empty balance explains prerequisite", hasText(panel.node(), "Thẻ hết lượt. Cấp thêm lượt trước khi mở ca."));
+        panel.showState(new CardStatus(1, 1, status.instanceAid(), CARD_ID, true, 4, 2, true, "11".repeat(16)), true);
+        check("END explains no additional charge", hasText(panel.node(), "Đóng ca không trừ thêm lượt."));
+        panel.showState(status, false);
+        check("unknown state hides projections", !hasText(panel.node(), "Cấp thêm 5 → còn 10 lượt.")
+                && hasText(panel.node(), "Đọc thẻ để xem tác động của ca sử dụng."));
     }
 
     private static BackendClient.HistoryLoad history(List<BackendClient.HistoryEntry> rows,
@@ -139,7 +227,7 @@ public final class UiPresentationVerify {
     private static void failureMessages() {
         String connect = UiLabels.failureMessage("CONNECT", "",
                 new IllegalStateException(new ConnectException("Connection refused")));
-        check("connection error has recovery guidance", connect.contains("đầu đọc/Simulator")
+        check("connection error has recovery guidance", connect.contains("đầu đọc thẻ")
                 && connect.contains("Kiểm tra"));
         check("absent card has concrete recovery guidance", UiLabels.failureMessage("CONNECT", "",
                 new javax.smartcardio.CardException("Không có thẻ trên terminal test"))
@@ -203,11 +291,16 @@ public final class UiPresentationVerify {
                 visibleErrors++;
                 javafx.scene.text.Text expected = new javafx.scene.text.Text(label.getText());
                 expected.setFont(label.getFont());
+                expected.setBoundsType(((javafx.scene.text.Text) label.lookup(".text")).getBoundsType());
+                expected.setLineSpacing(label.getLineSpacing());
                 expected.setWrappingWidth(label.getWidth() - label.getInsets().getLeft()
                         - label.getInsets().getRight());
-                check("field error fits at width " + width + ": " + label.getText(),
-                        label.getHeight() + 1 >= expected.getLayoutBounds().getHeight()
-                                + label.getInsets().getTop() + label.getInsets().getBottom());
+                double requiredHeight = expected.getLayoutBounds().getHeight()
+                        + label.getInsets().getTop() + label.getInsets().getBottom();
+                check("field error fits at width " + width + ": " + label.getText()
+                                + " [width=" + label.getWidth() + ", height=" + label.getHeight()
+                                + ", required=" + requiredHeight + "]",
+                        label.getHeight() + 1 >= requiredHeight);
             }
         }
         check("invalid form exposes field errors at width " + width, visibleErrors > 0);
