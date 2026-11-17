@@ -257,6 +257,7 @@ describe('ReceiptsService.listTransactions', () => {
       operation: 'GRANT' | 'START' | 'END';
       delta: bigint;
       balanceAfter: bigint;
+      recordedAt: Date;
     }[];
   }) {
     const findMany = vi.fn().mockResolvedValue(options.rows ?? []);
@@ -270,17 +271,17 @@ describe('ReceiptsService.listTransactions', () => {
   it('returns enrolled history in counter order with verified status', async () => {
     const { service, findMany } = makeHistoryDb({
       rows: [
-        { id: '11111111-1111-1111-1111-111111111111', counterAfter: 1n, operation: 'GRANT', delta: 5n, balanceAfter: 5n },
-        { id: '22222222-2222-2222-2222-222222222222', counterAfter: 2n, operation: 'START', delta: -1n, balanceAfter: 4n },
-        { id: '33333333-3333-3333-3333-333333333333', counterAfter: 3n, operation: 'END', delta: 0n, balanceAfter: 4n },
+        { id: '11111111-1111-1111-1111-111111111111', counterAfter: 1n, operation: 'GRANT', delta: 5n, balanceAfter: 5n, recordedAt: new Date('2026-11-12T08:00:00Z') },
+        { id: '22222222-2222-2222-2222-222222222222', counterAfter: 2n, operation: 'START', delta: -1n, balanceAfter: 4n, recordedAt: new Date('2026-11-12T09:00:00Z') },
+        { id: '33333333-3333-3333-3333-333333333333', counterAfter: 3n, operation: 'END', delta: 0n, balanceAfter: 4n, recordedAt: new Date('2026-11-12T10:00:00Z') },
       ],
     });
     await expect(service.listTransactions('A1B2C3D41122EF07')).resolves.toEqual({
       cardId: 'a1b2c3d41122ef07',
       transactions: [
-        { id: '11111111-1111-1111-1111-111111111111', counterAfter: 1, operation: 'GRANT', delta: 5, balanceAfter: 5, verifyStatus: 'verified' },
-        { id: '22222222-2222-2222-2222-222222222222', counterAfter: 2, operation: 'START', delta: -1, balanceAfter: 4, verifyStatus: 'verified' },
-        { id: '33333333-3333-3333-3333-333333333333', counterAfter: 3, operation: 'END', delta: 0, balanceAfter: 4, verifyStatus: 'verified' },
+        { id: '11111111-1111-1111-1111-111111111111', counterAfter: 1, operation: 'GRANT', delta: 5, balanceAfter: 5, verifyStatus: 'verified', recordedAt: new Date('2026-11-12T08:00:00Z') },
+        { id: '22222222-2222-2222-2222-222222222222', counterAfter: 2, operation: 'START', delta: -1, balanceAfter: 4, verifyStatus: 'verified', recordedAt: new Date('2026-11-12T09:00:00Z') },
+        { id: '33333333-3333-3333-3333-333333333333', counterAfter: 3, operation: 'END', delta: 0, balanceAfter: 4, verifyStatus: 'verified', recordedAt: new Date('2026-11-12T10:00:00Z') },
       ],
     });
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ orderBy: { counterAfter: 'asc' } }));

@@ -41,6 +41,7 @@ export interface TransactionHistoryEntry {
   delta: number;
   balanceAfter: number;
   verifyStatus: 'verified';
+  recordedAt: Date;
 }
 
 export interface TransactionHistory {
@@ -146,6 +147,7 @@ export class ReceiptsService {
         operation: true,
         delta: true,
         balanceAfter: true,
+        recordedAt: true,
       },
     });
 
@@ -169,6 +171,7 @@ export class ReceiptsService {
         delta,
         balanceAfter,
         verifyStatus: 'verified',
+        recordedAt: row.recordedAt,
       };
     });
 

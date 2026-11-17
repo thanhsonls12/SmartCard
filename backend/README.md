@@ -160,6 +160,12 @@ Remove-Item Env:\DATABASE_URL
 
 `DATABASE_URL` đặt trong biến môi trường sẽ thắng giá trị trong `.env`, nên cùng một cấu hình `prisma.config.ts` phục vụ cả DB dev và DB test.
 
+## Lịch sử giao dịch
+
+`GET /cards/:cardId/transactions` trả `cardId` và mảng `transactions` theo `counterAfter` tăng dần. Mỗi dòng gồm `id`, `counterAfter`, `operation`, `delta`, `balanceAfter`, `verifyStatus` và `recordedAt` (chuỗi ISO 8601). `recordedAt` lấy từ thời điểm Backend lưu receipt, không nằm trong payload do thẻ ký và có thể muộn hơn giao dịch trên thẻ khi đối soát. Không có migration mới.
+
+Desktop kiểm đối chiếu trên toàn bộ lịch sử trước khi hiển thị theo counter giảm dần và lọc ngày/loại giao dịch. Ngày lọc dùng múi giờ máy đang chạy; chi tiết giao dịch ghi rõ múi giờ. Desktop và Backend cần cùng bản hỗ trợ `recordedAt`; phản hồi thiếu/sai thời gian bị từ chối.
+
 ## Phạm vi
 
 Backend chỉ phục vụ demo local có kiểm soát, không mở API ra Internet và không thêm JWT/RBAC, CRUD phòng hay dashboard (BE-11, BE-12). Đã có enrollment (BE-04–BE-06), ghi receipt (BE-07/BE-08) và `GET /cards/:cardId/transactions` (BE-09).
