@@ -89,6 +89,19 @@ describe('Enrollment (e2e)', () => {
       .send({ challengeId, signature });
   }
 
+  async function snapshotEnrollment(label: string, cardIdHex: string) {
+    const [snapshot] = await database.$queryRaw<Record<string, unknown>[]>`
+      SELECT jsonb_build_object(
+        'students', COALESCE((SELECT jsonb_agg(to_jsonb(s) ORDER BY s.id) FROM students s WHERE s."cardId" = decode(${cardIdHex}, 'hex')), '[]'::jsonb),
+        'card_ledgers', COALESCE((SELECT jsonb_agg(to_jsonb(l)) FROM card_ledgers l WHERE l."cardId" = decode(${cardIdHex}, 'hex')), '[]'::jsonb),
+        'enrollment_challenges', COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY c.id) FROM enrollment_challenges c WHERE c."cardId" = decode(${cardIdHex}, 'hex')), '[]'::jsonb),
+        'transactions', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM transactions t WHERE t."cardId" = decode(${cardIdHex}, 'hex')), '[]'::jsonb)
+      ) AS state`;
+    expect(snapshot).toBeDefined();
+    console.log(`ENROLLMENT_SNAPSHOT ${label} cardId=${cardIdHex} ${JSON.stringify(snapshot, (key, value: unknown) => key === 'adminSessionId' ? '<redacted>' : value)}`);
+    return snapshot;
+  }
+
   it('issues an admin session with a thirty minute ttl', async () => {
     const response = await request(app.getHttpServer()).post('/admin/sessions').expect(201);
     sessionIds.push(response.body.sessionId);
@@ -204,7 +217,7 @@ describe('Enrollment (e2e)', () => {
   });
 
   it('rejects a replay of an already used challenge', async () => {
-    const cardIdHex = 'a1b2c3d41122ee05';
+    const cardIdHex = randomBytes(8).toString('hex');
     const sessionId = await issueSession();
     const card = newCardKey();
 
@@ -212,10 +225,21 @@ describe('Enrollment (e2e)', () => {
     const signature = signChallenge(card.privateKey, cardIdHex, card.pointHex, challengeResponse.body.nonce);
     await completeChallenge(sessionId, challengeResponse.body.challengeId, signature).expect(201);
 
+    const before = await snapshotEnrollment('replay-before', cardIdHex);
+
     await completeChallenge(sessionId, challengeResponse.body.challengeId, signature).expect(409);
+
+    expect(await snapshotEnrollment('replay-after', cardIdHex)).toEqual(before);
 
     expect(await database.student.count({ where: { cardId: bytesOf(cardIdHex) } })).toBe(1);
     expect(await database.cardLedger.count({ where: { cardId: bytesOf(cardIdHex) } })).toBe(1);
+    expect(await database.transaction.count({ where: { cardId: bytesOf(cardIdHex) } })).toBe(0);
+    const ledger = await database.cardLedger.findUnique({ where: { cardId: bytesOf(cardIdHex) } });
+    expect(ledger?.lastCounter).toBe(0n);
+    expect(ledger?.lastBalance).toBe(0n);
+    expect(ledger?.activeVisitId).toBeNull();
+    const challenge = await database.enrollmentChallenge.findUnique({ where: { id: challengeResponse.body.challengeId } });
+    expect(challenge?.usedAt).toBeInstanceOf(Date);
   });
 
   it('lets exactly one of two concurrent completes enroll the card', async () => {
@@ -249,19 +273,34 @@ describe('Enrollment (e2e)', () => {
   });
 
   it('rejects a challenge for a card that is already enrolled', async () => {
-    const cardIdHex = 'a1b2c3d41122ee08';
+    const cardIdHex = randomBytes(8).toString('hex');
     const sessionId = await issueSession();
     const card = newCardKey();
 
     const challengeResponse = await createChallenge(sessionId, cardIdHex, card).expect(201);
     const signature = signChallenge(card.privateKey, cardIdHex, card.pointHex, challengeResponse.body.nonce);
+    const secondCard = newCardKey();
+    const replacementChallenge = await createChallenge(sessionId, cardIdHex, secondCard).expect(201);
+    const beforeWrongKey = await snapshotEnrollment('wrong-key-before', cardIdHex);
+    const wrongSignature = signChallenge(secondCard.privateKey, cardIdHex, card.pointHex, challengeResponse.body.nonce);
+    await completeChallenge(sessionId, challengeResponse.body.challengeId, wrongSignature).expect(422);
+    expect(await snapshotEnrollment('wrong-key-after', cardIdHex)).toEqual(beforeWrongKey);
     await completeChallenge(sessionId, challengeResponse.body.challengeId, signature).expect(201);
 
-    const secondCard = newCardKey();
+    const before = await snapshotEnrollment('replace-key-before', cardIdHex);
     await createChallenge(sessionId, cardIdHex, secondCard).expect(409);
+    expect(await snapshotEnrollment('replace-key-create-after', cardIdHex)).toEqual(before);
+    const replacementSignature = signChallenge(secondCard.privateKey, cardIdHex, secondCard.pointHex, replacementChallenge.body.nonce);
+    await completeChallenge(sessionId, replacementChallenge.body.challengeId, replacementSignature).expect(409);
+    expect(await snapshotEnrollment('replace-key-complete-after', cardIdHex)).toEqual(before);
 
     const student = await database.student.findUnique({ where: { cardId: bytesOf(cardIdHex) } });
     expect(Buffer.from(student?.publicKey ?? []).toString('hex')).toBe(card.pointHex);
+    expect(await database.student.count({ where: { cardId: bytesOf(cardIdHex) } })).toBe(1);
+    expect(await database.cardLedger.count({ where: { cardId: bytesOf(cardIdHex) } })).toBe(1);
+    expect(await database.transaction.count({ where: { cardId: bytesOf(cardIdHex) } })).toBe(0);
+    const replacement = await database.enrollmentChallenge.findUnique({ where: { id: replacementChallenge.body.challengeId } });
+    expect(replacement?.usedAt).toBeNull();
   });
 
   it('rejects a malformed public key and a malformed challenge id', async () => {
