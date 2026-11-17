@@ -19,10 +19,11 @@ final class Personalization {
 
     void process(byte[] buffer, short lc) {
         try {
+            PersonalizePayload.requireLength(buffer, lc);
             if (state.isIssued()) {
                 ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
             }
-            PersonalizePayload.validate(buffer, lc);
+            PersonalizePayload.validateFormat(buffer);
             AdminPinVerifier.verify(pins.admin(), buffer, PersonalizePayload.OFFSET_ADMIN_PIN);
             personalize(buffer);
         } finally {

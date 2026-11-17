@@ -52,10 +52,20 @@ final class PersonalizePayload {
         return (short) (displayNameOffset(buffer) + displayNameLength(buffer));
     }
 
-    static void validate(byte[] buffer, short lc) {
+    static void requireLength(byte[] buffer, short lc) {
         if (lc < MIN_LENGTH || lc > MAX_LENGTH) {
             ISOException.throwIt(Sw.WRONG_LENGTH);
         }
+        short nameLengthOffset = displayNameLengthOffset(buffer);
+        if ((short) (nameLengthOffset + 1) > lc) {
+            ISOException.throwIt(Sw.WRONG_LENGTH);
+        }
+        if (totalLength(buffer) != lc) {
+            ISOException.throwIt(Sw.WRONG_LENGTH);
+        }
+    }
+
+    static void validateFormat(byte[] buffer) {
         if (buffer[OFFSET_ADMIN_PIN_LENGTH] != ADMIN_PIN_LENGTH_FIELD) {
             ISOException.throwIt(Sw.WRONG_DATA);
         }
@@ -66,16 +76,10 @@ final class PersonalizePayload {
         }
         short studentPinOffset = studentPinOffset(buffer);
         short nameLengthOffset = (short) (studentPinOffset + Protocol.STUDENT_PIN_LENGTH);
-        if ((short) (nameLengthOffset + 1) > lc) {
-            ISOException.throwIt(Sw.WRONG_LENGTH);
-        }
         short displayNameLength = (short) (buffer[nameLengthOffset] & UNSIGNED_BYTE_MASK);
         if (displayNameLength < (short) 1
                 || displayNameLength > Protocol.DISPLAY_NAME_MAX_LENGTH) {
             ISOException.throwIt(Sw.WRONG_DATA);
-        }
-        if ((short) (nameLengthOffset + 1 + displayNameLength) != lc) {
-            ISOException.throwIt(Sw.WRONG_LENGTH);
         }
         PinFormat.requireDigits(buffer, OFFSET_ADMIN_PIN, Protocol.ADMIN_PIN_LENGTH);
         normalizeStudentId(buffer, studentIdLength);
