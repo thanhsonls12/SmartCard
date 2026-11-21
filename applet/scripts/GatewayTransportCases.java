@@ -24,9 +24,11 @@ public final class GatewayTransportCases {
 
             public CardGateway.LedgerCheck ledger(String cardId) {
                 Receipt receipt = saved[0];
-                return new CardGateway.LedgerCheck(receipt != null, "isolated test ledger",
-                        receipt == null ? 0 : receipt.counterAfter(), receipt == null ? 0 : receipt.balanceAfter(),
-                        receipt == null ? null : receipt.visitIdHex());
+                if (receipt == null) {
+                    return new CardGateway.LedgerCheck(true, "isolated test ledger", cardId, 1, 5, null);
+                }
+                return new CardGateway.LedgerCheck(true, "isolated test ledger", cardId,
+                        receipt.counterAfter(), receipt.balanceAfter(), receipt.visitIdHex());
             }
         });
         try {

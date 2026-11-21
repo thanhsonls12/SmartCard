@@ -42,6 +42,12 @@ final class ApduErrorCases {
     }
 
     int run(byte[] payload, String groups) throws Exception {
+        if ("adgr03-baseline".equals(groups)) {
+            return adminBaselineCases(payload);
+        }
+        if ("adgr03".equals(groups)) {
+            return adminReadCases(payload);
+        }
         if ("qa02".equals(groups)) {
             return pinLockoutCases(payload);
         }
@@ -90,6 +96,7 @@ final class ApduErrorCases {
         if (!"g1".equals(groups)) {
             transactionCases();
             pinCases();
+            changePinRoundtripCase();
             readHeaderCases();
             authenticatedRetryCases();
             issuedPriorityCases(payload);
@@ -98,6 +105,307 @@ final class ApduErrorCases {
         }
         System.out.println("APDU_ERRORS cases=" + cases + " failed=" + failed + " skipped=0");
         return failed;
+    }
+
+    private int adminBaselineCases(byte[] payload) throws Exception {
+        caseId = "ADGR03-BASELINE-PERSONALIZE";
+        expect(command(0x30, 0, payload, 256), 0x9000);
+        captureStatus("personalized");
+        expect(command(0x50, 0, grantData(adminPin), 6), 0x9000);
+        captureStatus("granted");
+        authorizeStart();
+        captureStatus("started");
+        authorizeEnd();
+        captureStatus("ended");
+        System.out.println("ADGR03-BASELINE cases=" + cases + " failed=" + failed);
+        return failed;
+    }
+
+    private int adminReadCases(byte[] payload) throws Exception {
+        unissuedAdminCases();
+        caseId = "ADGR03-PERSONALIZE";
+        expect(command(0x30, 0, payload, 256), 0x9000);
+        System.out.println("CARD cardId=" + hex(cardId)
+                + " aid=F04C414202EE01 capability=admin-read");
+        noReceiptCases();
+        retryRestoreCase();
+        expect(command(0x50, 0, grantData(adminPin), 6), 0x9000);
+        captureStatus("granted");
+        grantedCases();
+        authorizeStart();
+        captureStatus("started");
+        openVisitCases();
+        authorizeEnd();
+        captureStatus("ended");
+        closedVisitCases();
+        errorCases();
+        permissionCases();
+        invariantCases();
+        adminLockCases(payload);
+        System.out.println("ADGR03 cases=" + cases + " failed=" + failed);
+        return failed;
+    }
+
+    private void captureStatus(String step) throws Exception {
+        byte[] publicStatus = expect(command(0x10, 0, EMPTY, 256), 0x9000);
+        require(publicStatus.length == 27, "public status length");
+        expect(command(0x20, 0, studentPin, 0), 0x9000);
+        byte[] authenticated = expect(command(0x10, 0, EMPTY, 256), 0x9000);
+        require(authenticated.length == 50, "authenticated status length");
+        System.out.println("ADGR03-STATUS step=" + step + " public=" + hex(publicStatus)
+                + " auth=" + hex(authenticated));
+    }
+
+    private void authorizeStart() throws Exception {
+        expect(command(0x20, 0, studentPin, 0), 0x9000);
+        expect(command(0x51, 0, visitId, 6), 0x9000);
+    }
+
+    private void authorizeEnd() throws Exception {
+        expect(command(0x20, 0, studentPin, 0), 0x9000);
+        expect(command(0x52, 0, visitId, 6), 0x9000);
+    }
+
+    private void unissuedAdminCases() throws Exception {
+        checkSoft("ADGR03-UNISSUED", () -> {
+            byte[] publicBefore = expect(command(0x10, 0, EMPTY, 256), 0x9000);
+            require(publicBefore.length == 27, "unissued public length");
+            require(publicBefore[18] == 0, "unissued lifecycle");
+            expect(command(0x11, 0, adminPin, 256), 0x6985);
+            expect(command(0x63, 0, adminPin, 107), 0x6985);
+            expect(command(0x11, 0, different(adminPin), 256), 0x6985);
+            require(Arrays.equals(publicBefore, expect(command(0x10, 0, EMPTY, 256), 0x9000)),
+                    "unissued admin read changed public state");
+            System.out.println(caseId + " ISSUED-precedes-PIN valid=6985 wrongPin=6985 publicStateUnchanged");
+        });
+    }
+
+    private void noReceiptCases() throws Exception {
+        captureStatus("personalized");
+        check("ADGR03-NORECEIPT-STATUS-EQUALS-STUDENT", this::requireAdminStatusEqualsStudent);
+        check("ADGR03-STATUS-LE-BOUNDARY", () -> {
+            expect(command(0x11, 0, adminPin, 49), 0x6700);
+            byte[] exact = expect(command(0x11, 0, adminPin, 50), 0x9000);
+            byte[] zero = expect(command(0x11, 0, adminPin, 256), 0x9000);
+            require(exact.length == 50, "Le=50 length");
+            require(Arrays.equals(exact, zero), "Le=50 differs from Le=00");
+            System.out.println(caseId + " LE 49=6700 50=9000 00=9000 length=50");
+        });
+        check("ADGR03-NORECEIPT-LE-BOUNDARY", () -> {
+            expect(command(0x63, 0, adminPin, 106), 0x6700);
+            expect(command(0x63, 0, adminPin, 107), 0x6985);
+            expect(command(0x63, 0, adminPin, 256), 0x6985);
+            System.out.println(caseId + " LE 106=6700 107=6985 00=6985");
+        });
+    }
+
+    private void retryRestoreCase() throws Exception {
+        check("ADGR03-RETRY-RESTORE-AFTER-6985", () -> {
+            resetAdminRetry();
+            expect(command(0x11, 0, different(adminPin), 256), 0x63C4);
+            expect(command(0x63, 0, adminPin, 107), 0x6985);
+            expect(command(0x11, 0, different(adminPin), 256), 0x63C4);
+            System.out.println(caseId + " CHAIN 63C4 -> 6985 -> 63C4");
+        });
+    }
+
+    private void grantedCases() throws Exception {
+        check("ADGR03-GRANTED-STATUS-EQUALS-STUDENT", this::requireAdminStatusEqualsStudent);
+        check("ADGR03-GRANTED-RECEIPT-EQUALS-STUDENT", this::requireAdminReceiptEqualsStudent);
+        check("ADGR03-RECEIPT-LE-BOUNDARY", () -> {
+            expect(command(0x63, 0, adminPin, 106), 0x6700);
+            byte[] exact = expect(command(0x63, 0, adminPin, 107), 0x9000);
+            byte[] zero = expect(command(0x63, 0, adminPin, 256), 0x9000);
+            require(Arrays.equals(exact, zero), "Le=107 differs from Le=00");
+            require(exact.length == 35 + (exact[34] & 255), "response length is not 35+DER");
+            System.out.println(caseId + " LE 106=6700 107=9000 00=9000 length=" + exact.length);
+        });
+    }
+
+    private void openVisitCases() throws Exception {
+        check("ADGR03-OPEN-STATUS-EQUALS-STUDENT", this::requireAdminStatusEqualsStudent);
+        check("ADGR03-OPEN-RECEIPT-EQUALS-STUDENT", this::requireAdminReceiptEqualsStudent);
+    }
+
+    private void closedVisitCases() throws Exception {
+        check("ADGR03-CLOSED-STATUS-EQUALS-STUDENT", this::requireAdminStatusEqualsStudent);
+        check("ADGR03-CLOSED-RECEIPT-EQUALS-STUDENT", this::requireAdminReceiptEqualsStudent);
+        check("ADGR03-LASTCLOSED-VISIT-PROXY", () -> {
+            expect(command(0x20, 0, studentPin, 0), 0x9000);
+            expect(command(0x51, 0, visitId, 6), 0x6985);
+            System.out.println(caseId + " lastClosedVisitId chưa có APDU đọc trực tiếp:"
+                    + " bằng chứng là START dùng lại visitId vừa đóng bị từ chối 6985");
+        });
+    }
+
+    private void errorCases() throws Exception {
+        shapeErrorKeepsRetry("ADGR03-ERROR-CLA-STATUS",
+                new CommandAPDU(0x90, 0x11, 0, 0, adminPin, 256), 0x6E00);
+        shapeErrorKeepsRetry("ADGR03-ERROR-CLA-RECEIPT",
+                new CommandAPDU(0x90, 0x63, 0, 0, adminPin, 107), 0x6E00);
+        shapeErrorKeepsRetry("ADGR03-ERROR-INS",
+                new CommandAPDU(0x80, 0x7F, 1, 1, new byte[] { 0 }, 256), 0x6D00);
+        shapeErrorKeepsRetry("ADGR03-ERROR-P1P2-STATUS",
+                new CommandAPDU(0x80, 0x11, 1, 1, adminPin, 256), 0x6A86);
+        shapeErrorKeepsRetry("ADGR03-ERROR-P1P2-RECEIPT",
+                new CommandAPDU(0x80, 0x63, 1, 0, adminPin, 107), 0x6A86);
+        check("ADGR03-ERROR-LC-STATUS", () -> {
+            expect(command(0x11, 0, EMPTY, 256), 0x6700);
+            expect(command(0x11, 0, join(adminPin, new byte[] { 0 }), 256), 0x6700);
+            seededRetryProbe(command(0x11, 0, Arrays.copyOf(adminPin, 7), 256), 0x6700);
+        });
+        check("ADGR03-ERROR-LC-RECEIPT", () -> {
+            expect(command(0x63, 0, EMPTY, 107), 0x6700);
+            expect(command(0x63, 0, join(adminPin, new byte[] { 0 }), 107), 0x6700);
+            seededRetryProbe(command(0x63, 0, Arrays.copyOf(adminPin, 7), 107), 0x6700);
+        });
+        shapeErrorKeepsRetry("ADGR03-ERROR-NO-LE-STATUS", command(0x11, 0, adminPin, 0), 0x6700);
+        shapeErrorKeepsRetry("ADGR03-ERROR-NO-LE-RECEIPT", command(0x63, 0, adminPin, 0), 0x6700);
+        shapeErrorKeepsRetry("ADGR03-ERROR-PIN-FORMAT-STATUS",
+                command(0x11, 0, nonDigit(adminPin), 256), 0x6A80);
+        shapeErrorKeepsRetry("ADGR03-ERROR-PIN-FORMAT-RECEIPT",
+                command(0x63, 0, nonDigit(adminPin), 107), 0x6A80);
+        shapeErrorKeepsRetry("ADGR03-ERROR-LE-BEFORE-PIN-STATUS",
+                command(0x11, 0, different(adminPin), 49), 0x6700);
+        shapeErrorKeepsRetry("ADGR03-ERROR-LE-BEFORE-PIN-RECEIPT",
+                command(0x63, 0, different(adminPin), 106), 0x6700);
+        check("ADGR03-ERROR-MULTI-SHAPE-FIRST", () -> {
+            resetAdminRetry();
+            expect(command(0x11, 0, different(adminPin), 256), 0x63C4);
+            expect(new CommandAPDU(0x80, 0x11, 1, 1, Arrays.copyOf(adminPin, 7), 256), 0x6A86);
+            expect(new CommandAPDU(0x80, 0x63, 1, 1, nonDigit(adminPin), 106), 0x6A86);
+            expect(new CommandAPDU(0x80, 0x11, 0, 0, Arrays.copyOf(adminPin, 7), 256), 0x6700);
+            expect(command(0x11, 0, different(adminPin), 256), 0x63C3);
+            resetAdminRetry();
+            System.out.println(caseId + " SEEDED 63C4 shape=6A86/6700 after=63C3 retryUnchanged");
+        });
+    }
+
+    private void shapeErrorKeepsRetry(String id, CommandAPDU malformed, int expectedSw)
+            throws Exception {
+        check(id, () -> seededRetryProbe(malformed, expectedSw));
+    }
+
+    private void changePinRoundtripCase() throws Exception {
+        check("PIN-CHANGE-ROUNDTRIP", () -> {
+            byte[] nextPin = different(studentPin);
+            resetPins();
+            verify();
+            expect(command(0x21, 0, join(studentPin, nextPin), 0), 0x9000);
+            expect(command(0x20, 0, studentPin, 0), 0x63C2);
+            expect(command(0x20, 0, nextPin, 0), 0x9000);
+            resetPins();
+            expect(command(0x20, 0, studentPin, 0), 0x9000);
+            System.out.println(caseId + " change=9000 oldRejected=63C2 newAccepted=9000"
+                    + " restored=9000");
+        });
+    }
+
+    private void seededRetryProbe(CommandAPDU malformed, int expectedSw) throws Exception {        resetAdminRetry();
+        expect(command(0x11, 0, different(adminPin), 256), 0x63C4);
+        expect(malformed, expectedSw);
+        expect(command(0x11, 0, different(adminPin), 256), 0x63C3);
+        resetAdminRetry();
+        System.out.println(caseId + " SEEDED=63C4 shape=" + String.format("%04X", expectedSw)
+                + " after=63C3 retryUnchanged");
+    }
+
+    private void permissionCases() throws Exception {
+        caseId = "ADGR03-PHOTO-SETUP";
+        expect(command(0x32, 0, photoBeginData(), 0), 0x9000);
+        upload(photo.length);
+        expect(command(0x35, 0, EMPTY, 0), 0x9000);
+        check("ADGR03-INTERLEAVE-ADMIN-READ-CLOSES-STUDENT", () -> {
+            Snapshot before = snapshot();
+            verify();
+            byte[] firstChunk = expect(command(0x34, 0, EMPTY, 128), 0x9000);
+            expect(command(0x11, 0, adminPin, 256), 0x9000);
+            expect(command(0x34, 128, EMPTY, 128), 0x6982);
+            expect(command(0x20, 0, studentPin, 0), 0x9000);
+            byte[] again = expect(command(0x34, 0, EMPTY, 128), 0x9000);
+            require(Arrays.equals(firstChunk, again), "photo chunk changed after admin read");
+            same(before, snapshot());
+            System.out.println(caseId + " studentAuthCleared=6982 photoChunk0Unchanged=true"
+                    + " length=" + again.length);
+        });
+        check("ADGR03-SELECT-CLEARS-STUDENT", () -> {
+            verify();
+            selectAgain("SELECT");
+            expect(command(0x31, 0, EMPTY, 256), 0x6982);
+        });
+        check("ADGR03-DESELECT-CLEARS-STUDENT", () -> {
+            verify();
+            selectAgain("DESELECT");
+            expect(command(0x31, 0, EMPTY, 256), 0x6982);
+        });
+        check("ADGR03-RESET-CLEARS-STUDENT", () -> {
+            verify();
+            selectAgain("RESET");
+            expect(command(0x31, 0, EMPTY, 256), 0x6982);
+        });
+    }
+
+    private void invariantCases() throws Exception {
+        check("ADGR03-INVARIANT-READS-DO-NOT-MUTATE", () -> {
+            Snapshot before = snapshot();
+            expect(command(0x11, 0, adminPin, 256), 0x9000);
+            expect(command(0x63, 0, adminPin, 107), 0x9000);
+            expect(command(0x11, 0, adminPin, 49), 0x6700);
+            expect(command(0x63, 0, adminPin, 106), 0x6700);
+            expect(command(0x11, 0, nonDigit(adminPin), 256), 0x6A80);
+            expect(command(0x11, 0, adminPin, 256), 0x9000);
+            same(before, snapshot());
+        });
+    }
+
+    private void adminLockCases(byte[] payload) throws Exception {
+        reinstall.run();
+        caseId = "ADGR03-ADMIN-LOCK-SETUP";
+        expect(command(0x30, 0, payload, 256), 0x9000);
+        checkSoft("ADGR03-ADMIN-LOCK", () -> {
+            for (int sw : new int[] { 0x63C4, 0x63C3, 0x63C2, 0x63C1, 0x6983 }) {
+                expect(command(0x11, 0, different(adminPin), 256), sw);
+            }
+            expect(command(0x11, 0, adminPin, 256), 0x6983);
+            expect(command(0x63, 0, adminPin, 107), 0x6983);
+            expect(command(0x50, 0, grantData(adminPin), 6), 0x6983);
+            System.out.println(caseId + " LOCKED readsAndGrant=6983");
+        });
+    }
+
+    private void requireAdminStatusEqualsStudent() throws Exception {
+        expect(command(0x20, 0, studentPin, 0), 0x9000);
+        byte[] student = expect(command(0x10, 0, EMPTY, 256), 0x9000);
+        byte[] admin = expect(command(0x11, 0, adminPin, 256), 0x9000);
+        require(student.length == 50, "student authenticated length");
+        require(admin.length == 50, "admin status length");
+        require(Arrays.equals(student, admin), "admin status differs from student status");
+        System.out.println(caseId + " STATUS-BYTES-EQUAL length=50");
+    }
+
+    private void requireAdminReceiptEqualsStudent() throws Exception {
+        expect(command(0x20, 0, studentPin, 0), 0x9000);
+        byte[] student = expect(command(0x60, 0, EMPTY, 256), 0x9000);
+        byte[] admin = expect(command(0x63, 0, adminPin, 107), 0x9000);
+        require(admin.length == 35 + (admin[34] & 255), "receipt framing");
+        require(Arrays.equals(student, admin), "admin receipt differs from student receipt");
+        System.out.println(caseId + " RECEIPT-BYTES-EQUAL length=" + admin.length
+                + " derLen=" + (admin[34] & 255));
+    }
+
+    private void checkSoft(String id, CheckedCase test) {
+        caseId = id;
+        cases++;
+        try {
+            test.run();
+            System.out.println(id + " | PASS");
+        } catch (AssertionError failure) {
+            failed++;
+            System.out.println(id + " | FAIL | " + failure.getMessage());
+        } catch (Exception exception) {
+            failed++;
+            System.out.println(id + " | FAIL | " + exception.getClass().getSimpleName());
+        }
     }
 
     private int pinLockoutCases(byte[] payload) throws Exception {
@@ -1141,6 +1449,10 @@ final class ApduErrorCases {
 
     private void verify() throws Exception {
         expect(command(0x20, 0, studentPin, 0), 0x9000);
+    }
+
+    private void resetAdminRetry() throws Exception {
+        expect(command(0x11, 0, adminPin, 256), 0x9000);
     }
 
     private void upload(int length) throws Exception {

@@ -19,7 +19,9 @@ $gatewayCasesSource = Join-Path $PSScriptRoot 'GatewayTransportCases.java'
 $gatewayNames = @('CardGateway', 'CardLifecycle', 'CardOperationResult', 'CardPhotoCommands', 'CardPinCommands',
     'CardProfileCommands', 'CardProtocol', 'CardStatus', 'CardStatusCodec', 'PendingJournal', 'PersonalizeRequest',
     'PhotoImage', 'Profile', 'ProfileCodec', 'ProfileCryptoMeta', 'ProfileMetaCodec', 'Receipt', 'ReceiptCodec',
-    'ReceiptExpectation', 'ReceiptVerifier', 'Reconciliation', 'SimulatorConnection', 'Sw')
+    'ReceiptExpectation', 'ReceiptVerifier', 'Reconciliation', 'SimulatorConnection', 'Sw',
+    'CardAdminCommands', 'ReceiptReadRecovery', 'CardOverviewReader', 'StudentLedgerGate',
+    'LedgerAlignment')
 $gatewaySources = $gatewayNames | ForEach-Object { Join-Path $PSScriptRoot "../../desktop/src/main/java/vn/labaccess/desktop/$_.java" }
 
 function Stop-Test {

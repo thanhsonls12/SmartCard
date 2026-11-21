@@ -183,13 +183,16 @@ public final class PersonalizeSelfTest {
                         failed += vn.labaccess.desktop.ApduTransportCases.run(channel, adminPin,
                                 studentPin, payload, transportProbe);
                     } else {
+                        ApduErrorCases[] caseHolder = new ApduErrorCases[1];
                         ApduErrorCases apduCases = new ApduErrorCases(channel, adminPin, studentPin, CARD_ID, () -> {
-                            if (!removeTestInstance(propertiesPath, testChannel)
-                                    || !installTestInstance(propertiesPath, testChannel, provisioningPin)) {
+                            CardChannel current = caseHolder[0].channel();
+                            if (!removeTestInstance(propertiesPath, current)
+                                    || !installTestInstance(propertiesPath, current, provisioningPin)) {
                                 throw new IllegalStateException("fresh test instance failed");
                             }
-                            selectTestInstance(testChannel);
+                            selectTestInstance(current);
                         });
+                        caseHolder[0] = apduCases;
                         try {
                             failed += apduCases.run(payload, System.getProperty("labaccess.apduGroups", "all"));
                         } finally {

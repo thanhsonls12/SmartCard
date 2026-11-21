@@ -16,6 +16,7 @@ function parseOptions(argv) {
 }
 
 const config = {
+    controlPort: Number(options.control ?? 0),
     listenPort: Number(options.listen ?? 9026),
     upstreamHost: options['upstream-host'] ?? '127.0.0.1',
     upstreamPort: Number(options['upstream-port'] ?? 9025),
@@ -37,7 +38,11 @@ const counters = {
     responsesDropped: 0,
     lrcErrors: 0,
     unparsedBytes: 0,
+    receiptsCorrupted: 0,
+    ins: {},
 };
+
+const runtime = { action: null };
 
 function emit(entry) {
     const line = JSON.stringify({ t: new Date().toISOString(), ...entry });
@@ -69,12 +74,10 @@ function popcount(value) {
     return count;
 }
 
-const SENSITIVE_INS = new Set([0x20, 0x21, 0x23, 0x30, 0x32, 0x50]);
+const SENSITIVE_INS = new Set([0x11, 0x20, 0x21, 0x23, 0x30, 0x32, 0x50, 0x63]);
 
-const SENSITIVE_APDU = /80(?:20|21|23|30|32|50)0000/;
-
-function maskedHex(buffer) {
-    return SENSITIVE_APDU.test(hex(buffer)) ? '<masked: sensitive apdu>' : hex(buffer);
+function sensitiveCommand(ins) {
+    return SENSITIVE_INS.has(ins);
 }
 
 function describeCommand(block) {
@@ -95,11 +98,21 @@ function describeCommand(block) {
         if (inf.length >= 5) {
             info.lc = inf[4];
         }
-        info.hex = SENSITIVE_INS.has(inf[1]) ? `${hex(inf.subarray(0, 5))} data=***` : hex(inf);
+        info.sensitive = sensitiveCommand(inf[1]);
+        info.hex = info.sensitive ? `${hex(inf.subarray(0, 5))} data=***` : hex(inf);
     } else {
+        info.sensitive = false;
         info.hex = hex(inf);
     }
     return info;
+}
+
+function loggedFrameHex(block, command) {
+    return command && command.sensitive ? '<masked: sensitive apdu>' : hex(block);
+}
+
+function chunkRecord(id, kind, length) {
+    return { ev: 'chunk', pair: id, dir: kind, len: length, classified: false };
 }
 
 function describeResponse(block) {
@@ -111,7 +124,7 @@ function describeResponse(block) {
         infLen: length,
         blockLen: block.length,
         pcbType: (block[1] & 0xC0) === 0x00 ? 'I' : (block[1] & 0xC0) === 0x80 ? 'R' : 'S',
-        hex: maskedHex(inf),
+        hex: hex(inf),
     };
     if (inf.length >= 2) {
         info.sw = (inf[inf.length - 2] << 8) | inf[inf.length - 1];
@@ -158,7 +171,7 @@ class Pair {
 
     handle(kind, chunk) {
         if (config.mode === 'rawdump') {
-            emit({ ev: 'chunk', pair: this.id, dir: kind, len: chunk.length, hex: maskedHex(chunk) });
+            emit(chunkRecord(this.id, kind, chunk.length));
             const target = kind === 'app' ? this.upstream : this.downstream;
             writeAll(target, chunk);
             return;
@@ -207,7 +220,7 @@ class Pair {
 
     onAppFrame(frame, kind) {
         counters.appToSimFrames += 1;
-        const entry = { ev: 'app-frame', pair: this.id, index: counters.appToSimFrames, kind, len: frame.length, hex: maskedHex(frame) };
+        const entry = { ev: 'app-frame', pair: this.id, index: counters.appToSimFrames, kind, len: frame.length, hex: hex(frame) };
         if (kind === 'block') {
             const lrc = xorBlock(frame, 0, frame.length - 1);
             if (lrc !== frame[frame.length - 1]) {
@@ -215,6 +228,19 @@ class Pair {
                 entry.lrc = 'MISMATCH';
             }
             const info = describeCommand(frame);
+            counters.ins[info.ins] = (counters.ins[info.ins] ?? 0) + 1;
+            const control = controlFlags(info);
+            if (config.mode === 'short-input' && info.cla === 0x80 && info.ins === 0x30 && !armConsumed) {
+                armConsumed = true;
+                const shortened = Buffer.concat([frame.subarray(0, 3 + frame[2] - 4), Buffer.alloc(1)]);
+                shortened[2] -= 4;
+                shortened[shortened.length - 1] = xorBlock(shortened, 0, shortened.length - 1);
+                emit({ ev: 'truncate-command', pair: this.id, ins: '30', declaredLc: info.lc,
+                    originalInfLength: frame[2], transmittedInfLength: shortened[2], removedBytes: 4 });
+                this.pendingReplies.push({ kind: 'block', start: false, dropped: false });
+                writeAll(this.upstream, shortened);
+                return;
+            }
             entry.nad = info.nad;
             entry.pcb = info.pcb;
             entry.cla = info.cla;
@@ -223,6 +249,7 @@ class Pair {
             entry.p2 = info.p2;
             entry.lc = info.lc;
             entry.inf = info.hex;
+            entry.hex = loggedFrameHex(frame, info);
             const isStartStrict = info.cla === config.armCla && info.ins === config.armIns
                     && info.p1 === (config.armP1P2 >> 8) && info.p2 === (config.armP1P2 & 0xff)
                     && info.lc === config.armLc;
@@ -236,12 +263,16 @@ class Pair {
                     counters.startRequestsForwarded += 1;
                     entry.armAction = 'forward-single-start';
                 }
-                this.pendingReplies.push({ kind: 'block', start: true, dropped: false, frame });
+                this.pendingReplies.push({ kind: 'block', start: true, dropped: false, frame, ...control });
             } else {
-                this.pendingReplies.push({ kind: 'block', start: false, dropped: false });
+                this.pendingReplies.push({ kind: 'block', start: false, dropped: false, ...control });
             }
         } else {
             this.pendingReplies.push({ kind, start: false, dropped: false });
+        }
+        if (config.mode === 'sw6c' || config.mode === 'short-input') {
+            entry.hex = '<redacted>';
+            if (entry.inf) entry.inf = '<redacted>';
         }
         emit(entry);
         writeAll(this.upstream, frame);
@@ -286,7 +317,7 @@ class Pair {
 
     onSimFrame(frame, kind, pending) {
         counters.simToAppFrames += 1;
-        const entry = { ev: 'sim-frame', pair: this.id, index: counters.simToAppFrames, kind, len: frame.length, hex: maskedHex(frame) };
+        const entry = { ev: 'sim-frame', pair: this.id, index: counters.simToAppFrames, kind, len: frame.length, hex: hex(frame) };
         let drop = false;
         if (kind === 'block') {
             const lrc = xorBlock(frame, 0, frame.length - 1);
@@ -299,8 +330,63 @@ class Pair {
             entry.dataLen = info.dataLen;
             entry.data = info.data;
             entry.pcbType = info.pcbType;
+            if (pending && pending.rejectResponse) {
+                const rejected = Buffer.from([frame[0], frame[1], 2, 0x6F, 0x00, 0]);
+                rejected[5] = xorBlock(rejected, 0, 5);
+                entry.action = 'REJECT_SW_6F00';
+                entry.upstreamSw = info.swHex;
+                entry.downstreamSw = '6F00';
+                emit(entry);
+                writeAll(this.downstream, rejected);
+                return;
+            }
+            if (pending && (pending.dropResponse || pending.corruptResponse)) {
+                if (pending.dropResponse) {
+                    counters.responsesDropped += 1;
+                    entry.action = 'DROP';
+                    if (info.dataLen === 6) {
+                        entry.dropDetail = {
+                            balanceAfter: parseInt(entry.data.slice(0, 4), 16),
+                            counterAfter: parseInt(entry.data.slice(4, 12), 16),
+                            sw: entry.sw,
+                        };
+                    }
+                    emit(entry);
+                    this.scheduleRelease();
+                    return;
+                }
+                if (!info.dataLen) {
+                    counters.receiptsCorrupted += 0;
+                    emit(entry);
+                    writeAll(this.downstream, frame);
+                    return;
+                }
+                const corrupted = Buffer.from(frame);
+                const payloadByte = 3 + info.dataLen - 1;
+                corrupted[payloadByte] ^= 0x01;
+                corrupted[corrupted.length - 1] = xorBlock(corrupted, 0, corrupted.length - 1);
+                entry.corruptedByte = payloadByte;
+                counters.receiptsCorrupted += 1;
+                entry.action = 'CORRUPT_RECEIPT_BYTE';
+                emit(entry);
+                writeAll(this.downstream, corrupted);
+                return;
+            }
             if (pending && pending.start) {
                 entry.answersStart = true;
+                if (config.mode === 'sw6c' && !armConsumed && info.sw === 0x9000) {
+                    armConsumed = true;
+                    const replaced = Buffer.from([frame[0], frame[1], 2, 0x6C, 0x06, 0]);
+                    replaced[5] = xorBlock(replaced, 0, 5);
+                    entry.action = 'REPLACE_SW_6C06';
+                    entry.upstreamSw = info.swHex;
+                    entry.downstreamSw = '6C06';
+                    entry.hex = '<redacted>';
+                    entry.data = '<redacted>';
+                    emit(entry);
+                    writeAll(this.downstream, replaced);
+                    return;
+                }
                 if (config.mode === 'arm' && info.sw === 0x9000 && info.dataLen === 6) {
                     drop = true;
                 } else {
@@ -322,6 +408,10 @@ class Pair {
             this.scheduleRelease();
             return;
         }
+        if (config.mode === 'sw6c' || config.mode === 'short-input') {
+            entry.hex = '<redacted>';
+            if (entry.data) entry.data = '<redacted>';
+        }
         emit(entry);
         writeAll(this.downstream, frame);
     }
@@ -338,11 +428,109 @@ class Pair {
     }
 }
 
+function controlFlags(info) {
+    if (info.cla !== 0x80) {
+        return { dropResponse: false, corruptResponse: false };
+    }
+    const all = { dropResponse: false, corruptResponse: false };
+    const action = runtime.action;
+    if (action === 'drop-status-after-grant' && info.ins === 0x50) {
+        runtime.action = 'drop-status';
+        emit({ ev: 'control-action', action, ins: '50', next: runtime.action });
+        return all;
+    }
+    if (action === 'drop-status' && info.ins === 0x60) {
+        runtime.action = 'drop-status';
+        emit({ ev: 'control-action', action, ins: '60' });
+        return { dropResponse: false, corruptResponse: false };
+    }
+    if (action === 'drop-status' && info.ins === 0x10) {
+        runtime.action = null;
+        emit({ ev: 'control-action', action, ins: '10' });
+        return { dropResponse: true, corruptResponse: false };
+    }
+    if (action === 'reject-status-after-grant' && info.ins === 0x50) {
+        runtime.action = 'reject-status';
+        emit({ ev: 'control-action', action, ins: '50', next: runtime.action });
+        return all;
+    }
+    if (action === 'reject-status' && info.ins === 0x10) {
+        runtime.action = null;
+        emit({ ev: 'control-action', action, ins: '10' });
+        return { dropResponse: false, corruptResponse: false, rejectResponse: true };
+    }
+    if (action === 'drop-grant' && info.ins === 0x50) {
+        runtime.action = null;
+        emit({ ev: 'control-action', action, ins: '50' });
+        return { dropResponse: true, corruptResponse: false };
+    }
+    if (action === 'corrupt-receipt' && info.ins === 0x60) {
+        runtime.action = null;
+        emit({ ev: 'control-action', action, ins: '60' });
+        return { dropResponse: false, corruptResponse: true };
+    }
+    return all;
+}
+
 function writeAll(socket, chunk) {
     if (!socket || socket.destroyed) {
         return;
     }
     socket.write(chunk);
+}
+
+function block(inf) {
+    const frame = Buffer.alloc(4 + inf.length);
+    frame[0] = 0x00;
+    frame[1] = 0x00;
+    frame[2] = inf.length;
+    inf.copy(frame, 3);
+    frame[frame.length - 1] = xorBlock(frame, 0, frame.length - 1);
+    return frame;
+}
+
+function runRedactionSelfTest() {
+    const pin = '11223344';
+    const pinHex = Buffer.from(pin, 'ascii').toString('hex').toUpperCase();
+    const wrongHeader = Buffer.concat([
+        Buffer.from([0x00, 0x11, 0x9F, 0x01, 0x08]),
+        Buffer.from(pin, 'ascii'),
+        Buffer.from([0x00])
+    ]);
+    const frame = block(wrongHeader);
+    const command = describeCommand(frame);
+    const loggedHex = loggedFrameHex(frame, command);
+    const oldHeaderOnly = /80(?:11|20|21|23|30|32|50|63)0000/i.test(hex(frame));
+    const chunk = chunkRecord(1, 'app', frame.length);
+    const rendered = JSON.stringify({ command: command.hex, frame: loggedHex, chunk });
+    const leaks = rendered.includes(pin) || rendered.includes(pinHex) || rendered.includes(pinHex.toLowerCase());
+    const ok = command.sensitive
+        && command.hex.endsWith('data=***')
+        && loggedHex === '<masked: sensitive apdu>'
+        && oldHeaderOnly === false
+        && chunk.hex === undefined
+        && chunk.classified === false
+        && chunk.len === frame.length
+        && !leaks;
+    console.log(JSON.stringify({
+        ev: 'redaction-self-test',
+        ok,
+        wrongHeaderMasked: command.sensitive && loggedHex === '<masked: sensitive apdu>',
+        oldHeaderRegexMissed: oldHeaderOnly === false,
+        inf: command.hex,
+        hex: loggedHex,
+        chunk,
+        digitHits: leaks ? 1 : 0,
+        hexHits: leaks ? 1 : 0
+    }));
+    if (!ok) {
+        process.exitCode = 1;
+    }
+}
+
+if (process.argv.includes('--self-test')) {
+    runRedactionSelfTest();
+    process.exit(process.exitCode ?? 0);
 }
 
 let nextPairId = 0;
@@ -352,7 +540,8 @@ const server = net.createServer((client) => {
     counters.connections += 1;
     const pair = new Pair(nextPairId, client);
     client.setNoDelay(true);
-    emit({ ev: 'pair-open', pair: pair.id, mode: config.mode, arm: pair.armState, remote: `${client.remoteAddress}:${client.remotePort}` });
+    emit({ ev: 'pair-open', pair: pair.id, mode: config.mode, arm: pair.armState,
+        upstreamPort: config.upstreamPort, remote: `${client.remoteAddress}:${client.remotePort}` });
 
     const upstream = net.connect({ host: config.upstreamHost, port: config.upstreamPort });
     upstream.setNoDelay(true);
@@ -393,6 +582,40 @@ emit({
 server.listen(config.listenPort, '127.0.0.1', () => {
     emit({ ev: 'listening', address: `127.0.0.1:${config.listenPort}` });
 });
+
+if (config.controlPort > 0) {
+    const control = net.createServer(socket => {
+        let buffered = '';
+        socket.setEncoding('utf8');
+        socket.on('data', chunk => {
+            buffered += chunk;
+            const lines = buffered.split('\n');
+            buffered = lines.pop();
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                let request;
+                try {
+                    request = JSON.parse(line);
+                } catch {
+                    socket.write(JSON.stringify({ ok: false, problem: 'invalid-json' }) + '\n');
+                    continue;
+                }
+                if (request.action !== undefined) {
+                    runtime.action = request.action === 'none' ? null : request.action;
+                    emit({ ev: 'control-set', action: runtime.action });
+                }
+                if (request['upstream-port'] !== undefined) {
+                    config.upstreamPort = Number(request['upstream-port']);
+                    emit({ ev: 'control-upstream', upstreamPort: config.upstreamPort });
+                }
+                socket.write(JSON.stringify({ ok: true, action: runtime.action, counters }) + '\n');
+            }
+        });
+    });
+    control.listen(config.controlPort, '127.0.0.1', () => {
+        emit({ ev: 'control-listening', address: `127.0.0.1:${config.controlPort}` });
+    });
+}
 
 function summary(reason) {
     emit({ ev: 'summary', reason, counters, arm: { mode: config.mode, remainingArmState: 'see pair logs' } });
