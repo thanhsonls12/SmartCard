@@ -44,14 +44,14 @@ public final class OperatorRecoveryUiVerify {
                     return null;
                 });
                 card = new RecoveryCardFixture();
-                gateway = (CardGateway) field(app, "gateway");
+                gateway = (CardGateway) field(field(app, "session"), "gateway");
                 Object transport = field(gateway, "transport");
                 set(transport, "channel", card);
                 set(transport, "connectedFlag", true);
                 gateway.identify();
                 gateway.setReceiptSink(card);
                 gateway.applyCardEnrollment(new CardGateway.EnrollmentCheck(true, true, "fixture"));
-                journal = (PendingJournal) field(app, "journal");
+                journal = (PendingJournal) field(field(app, "session"), "journal");
                 fx(() -> { invoke(app, "syncCardConnection"); app.refreshButtons(); return null; });
                 receiptRecovery();
                 wrongPinKeepsLogChoice();
@@ -62,7 +62,10 @@ public final class OperatorRecoveryUiVerify {
                 brokenConnection();
                 System.out.println("OPERATOR RECOVERY UI PASS: " + checks + " checks");
             } finally {
-                if (app != null) ((ExecutorService) field(app, "worker")).shutdownNow();
+                if (app != null) {
+                    Object taskRunner = field(app, "taskRunner");
+                    ((ExecutorService) field(taskRunner, "executor")).shutdownNow();
+                }
                 fx(() -> { if (stage != null) stage.hide(); return null; });
                 Platform.exit();
             }
@@ -104,7 +107,7 @@ public final class OperatorRecoveryUiVerify {
             check("verified read clears verification header",
                     ((Label) ((ReceiptPanel) field(app, "receiptPanel")).reconcileStatus()).getText().equals("Không có giao dịch chờ"));
             check("same read action recovers without mutation", gateway.reconciliation().transactionAllowed()
-                    && (boolean) field(app, "stateSnapshotKnown") && card.stateCommands == 0);
+                    && (boolean) field(field(app, "session"), "snapshotKnown") && card.stateCommands == 0);
             return null;
         });
     }
@@ -152,7 +155,7 @@ public final class OperatorRecoveryUiVerify {
             fx(() -> {
                 check("completed grant is not reported as failure", note().contains("cấp lượt")
                         && note().contains("Chưa cập nhật trạng thái") && !note().contains("Lỗi:"));
-                check("completed grant keeps stale snapshot locked", !(boolean) field(app, "stateSnapshotKnown")
+                check("completed grant keeps stale snapshot locked", !(boolean) field(field(app, "session"), "snapshotKnown")
                         && !app.pressGrant());
                 check("grant executed once and journal resolved", card.stateCommands == 1 && card.counter == 2
                         && !journal.load().present());
@@ -202,7 +205,7 @@ public final class OperatorRecoveryUiVerify {
             fx(() -> {
                 check("completed reconciliation retains success and refresh warning",
                         note().contains("Đã hoàn tất đối soát") && note().contains("Chưa cập nhật trạng thái")
-                                && !journal.load().present() && !(boolean) field(app, "stateSnapshotKnown"));
+                                && !journal.load().present() && !(boolean) field(field(app, "session"), "snapshotKnown"));
                 check("reconciliation never repeats state command", card.stateCommands == commandsBefore);
                 return null;
             });
@@ -321,7 +324,8 @@ public final class OperatorRecoveryUiVerify {
 
     private static void awaitOperation() throws Exception {
         CountDownLatch finished = new CountDownLatch(1);
-        ((ExecutorService) field(app, "worker")).submit(() -> Platform.runLater(finished::countDown));
+        Object taskRunner = field(app, "taskRunner");
+        ((ExecutorService) field(taskRunner, "executor")).submit(() -> Platform.runLater(finished::countDown));
         if (!finished.await(25, TimeUnit.SECONDS)) throw new AssertionError("UI operation did not finish");
         fx(() -> { check("operation exits busy", !app.isBusy()); return null; });
     }

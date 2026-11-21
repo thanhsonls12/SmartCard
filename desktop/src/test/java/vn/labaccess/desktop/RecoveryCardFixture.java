@@ -130,8 +130,8 @@ final class RecoveryCardFixture extends CardChannel implements CardGateway.Recei
 
     @Override
     public CardGateway.LedgerCheck ledger(String cardIdHex) {
-        return new CardGateway.LedgerCheck(ledgerAvailable, "fixture ledger", counter + ledgerOffset,
-                balance, ledgerVisit);
+        return new CardGateway.LedgerCheck(ledgerAvailable, "fixture ledger", cardIdHex,
+                counter + ledgerOffset, balance, ledgerVisit);
     }
 
     @Override public Card getCard() { return null; }

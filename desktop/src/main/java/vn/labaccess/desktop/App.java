@@ -179,13 +179,24 @@ public class App extends Application {
         });
         transactionPanel = new TransactionPanel(gateway, this::runOp, this::log,
                 new TransactionPanel.Session(this::snapshotKnown, this::sessionOpen,
-                        this::runCardStateTransaction, this::invalidateHistory,
+                        this::runCardStateTransaction,
+                        (delta, pin) -> new AdminGrantService(gateway, journal, backendClient).grant(delta, pin),
+                        this::invalidateHistory,
                         this::rememberHistory, this::transactionFinished, this::studentPinChanged,
                         () -> receiptPanel.pressReadReceipt()));
+        SupersededRecovery superseded = new SupersededRecovery(gateway, journal, backendClient);
+        StaffManualReconcile manual = new StaffManualReconcile(gateway, backendClient);
         receiptPanel = new ReceiptPanel(gateway, this::runOp, this::log,
                 new ReceiptPanel.Session(this::sessionOpen, this::pendingJournal, journal.file(),
                         this::studentPinInput, this::clearStudentPinInput,
-                        this::reconcileCardPending, this::invalidateHistory,
+                        pin -> gateway.reconcilePending(journal, pin, superseded::studentEvidence),
+                        new ReceiptPanel.AdminRecovery(() -> {
+                            showTab(TAB_OPERATIONS);
+                            return transactionPanel.requireAdminPin();
+                        }, transactionPanel::takeAdminPin, transactionPanel::clearAdminPin,
+                                new AdminGrantRecovery(gateway, journal, backendClient)::reconcile,
+                                superseded::confirm, manual::inspect, manual::confirm),
+                        this::invalidateHistory,
                         this::rememberHistory, this::publishHistory, this::refreshButtons,
                         this::receiptFinished, this::reconcileFinished,
                         () -> {
@@ -676,21 +687,21 @@ public class App extends Application {
     private CardGateway.LedgerCheck ledgerOf(String cardIdHex) {
         try {
             BackendClient.LedgerSnapshot snapshot = backendClient.ledgerOf(cardIdHex);
-            return new CardGateway.LedgerCheck(true, "ledger đọc được", snapshot.lastCounter(),
-                    snapshot.lastBalance(), snapshot.activeVisitId());
+            return new CardGateway.LedgerCheck(true, "ledger đọc được", snapshot.cardId(),
+                    snapshot.lastCounter(), snapshot.lastBalance(), snapshot.activeVisitId());
         } catch (BackendClient.Failure failure) {
-            return new CardGateway.LedgerCheck(false, failure.getMessage(), -1, -1, null);
+            return new CardGateway.LedgerCheck(false, failure.getMessage(), cardIdHex, -1, -1, null);
         }
     }
 
-    private void runOp(String label, Callable<CardOperationResult> op, Consumer<Boolean> onResult) {
+    private boolean runOp(String label, Callable<CardOperationResult> op, Consumer<Boolean> onResult) {
         if (closing) {
             log("[" + label + "] bỏ qua — đang đóng cửa sổ");
-            return;
+            return false;
         }
         if (busy) {
             log("[" + label + "] bỏ qua — đang xử lý thao tác khác");
-            return;
+            return false;
         }
         busy = true;
         lastFailure = null;
@@ -705,6 +716,7 @@ public class App extends Application {
             String problem = null;
             String warning = null;
             boolean ok = false;
+            boolean awaitingConfirmation = false;
             try {
                 if (technical) {
                     log("   " + label + " chạy trên thread=" + Thread.currentThread().getName());
@@ -712,9 +724,12 @@ public class App extends Application {
                 CardOperationResult r = op.call();
                 ok = r.ok();
                 warning = r.warning();
-                line = (ok ? "[OK]   " : "[FAIL] ") + label + ": " + r.text();
+                awaitingConfirmation = r.superseded() != null;
+                line = (awaitingConfirmation ? "[INFO] " : ok ? "[OK]   " : "[FAIL] ")
+                        + label + ": " + r.text();
                 if (!ok) {
-                    problem = UiLabels.failureMessage(label, r.text(), null);
+                    problem = awaitingConfirmation ? "Cần nhân viên xác nhận trước khi đóng journal."
+                            : UiLabels.failureMessage(label, r.text(), null);
                 }
             } catch (Exception ex) {
                 line = "[ERROR] " + label + ": " + ex;
@@ -724,6 +739,7 @@ public class App extends Application {
             final String lineFinal = line;
             final String failureFinal = problem;
             final String warningFinal = warning;
+            final boolean confirmationPending = awaitingConfirmation;
             Platform.runLater(() -> {
                 log(lineFinal);
                 if (technical) {
@@ -739,10 +755,11 @@ public class App extends Application {
                 }
                 busy = false;
                 busyLabel = null;
-                lastFeedback = warningFinal == null ? UiLabels.outcome(okFinal, label)
+                lastFeedback = confirmationPending ? "Chờ nhân viên xác nhận"
+                        : warningFinal == null ? UiLabels.outcome(okFinal, label)
                         : UiLabels.completedAction(label);
                 lastFailure = warningFinal == null ? failureFinal : lastFeedback + ". " + warningFinal;
-                lastTone = warningFinal != null ? UiLabels.Tone.PENDING
+                lastTone = warningFinal != null || confirmationPending ? UiLabels.Tone.PENDING
                         : okFinal ? UiLabels.Tone.OK : UiLabels.Tone.ERROR;
                 updateButtons();
                 if (!closing && uiReady && mainTabs.getSelectionModel().getSelectedIndex() == TAB_OPERATIONS) {
@@ -750,6 +767,7 @@ public class App extends Application {
                 }
             });
         });
+        return true;
     }
 
     private void syncCardConnection() {
@@ -1032,11 +1050,6 @@ public class App extends Application {
         return gateway.runStateTransaction(journal, plan, supplier, studentPin);
     }
 
-    private CardOperationResult reconcileCardPending(char[] studentPin)
-            throws javax.smartcardio.CardException {
-        return gateway.reconcilePending(journal, studentPin);
-    }
-
     private PendingJournal.Loaded pendingJournal() { return journal.load(); }
 
     private void invalidateHistory() { historyReady = false; }
@@ -1049,7 +1062,7 @@ public class App extends Application {
 
     private void transactionFinished(boolean ok) {
         CardStatus refreshed = gateway.status();
-        stateSnapshotKnown = ok && refreshed != null && refreshed.studentStateAvailable();
+        stateSnapshotKnown = ok && refreshed != null && refreshed.stateAvailable();
         if (!stateSnapshotKnown) {
             gateway.clearAuthenticatedStatus();
         }
@@ -1066,7 +1079,7 @@ public class App extends Application {
         CardStatus refreshed = gateway.status();
         stateSnapshotKnown = ok && !journal.load().present()
                 && gateway.reconciliation().transactionAllowed()
-                && refreshed != null && refreshed.studentStateAvailable();
+                && refreshed != null && refreshed.stateAvailable();
     }
 
     boolean isBusy() {

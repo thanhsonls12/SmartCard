@@ -5,5 +5,5 @@ import java.util.function.Consumer;
 
 interface CardOpRunner {
 
-    void run(String label, Callable<CardOperationResult> operation, Consumer<Boolean> onResult);
+    boolean run(String label, Callable<CardOperationResult> operation, Consumer<Boolean> onResult);
 }

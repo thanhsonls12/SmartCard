@@ -4,12 +4,17 @@ import java.util.List;
 
 final class Reconciliation {
 
+    @FunctionalInterface
+    interface SupersededEvidence {
+        CardOperationResult read(PendingJournal.Entry entry, Receipt receipt, char[] studentPin);
+    }
+
     enum State {
         KNOWN, RECEIPT_UNVERIFIED, UNKNOWN
     }
 
     enum Verdict {
-        EXECUTED, NOT_EXECUTED, MISMATCH
+        EXECUTED, NOT_EXECUTED, MISMATCH, SUPERSEDED
     }
 
     private State state = State.KNOWN;

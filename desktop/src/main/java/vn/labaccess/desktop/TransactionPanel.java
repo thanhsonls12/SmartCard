@@ -1,9 +1,11 @@
 package vn.labaccess.desktop;
 
 import java.util.HexFormat;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
+import javafx.application.Platform;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
@@ -22,9 +24,15 @@ final class TransactionPanel {
             + DELTA_MIN + " đến " + DELTA_MAX + ".";
 
     record Session(BooleanSupplier snapshotKnown, BooleanSupplier open,
-            StateTransaction stateTransaction, Runnable historyInvalidated,
+            StateTransaction stateTransaction, GrantTransaction grantTransaction, Runnable historyInvalidated,
             Runnable historyRemembered, Consumer<Boolean> finished,
             Runnable studentPinChanged, Runnable stateReader) {
+    }
+
+    @FunctionalInterface
+    interface GrantTransaction {
+
+        CardOperationResult run(int delta, AdminGrantService.PinSource adminPin);
     }
 
     @FunctionalInterface
@@ -47,11 +55,12 @@ final class TransactionPanel {
     private final Label studentPinError = UiLabels.fieldError();
     private final Label adminPinError = UiLabels.fieldError();
     private final Label deltaError = UiLabels.fieldError();
+    private String grantAwaitingReadCardId;
     private final Button btnReadState = new Button("Đọc thẻ");
     private final Label balance = UiLabels.value();
     private final Label visit = UiLabels.chip();
     private final Label stateNote = UiLabels.caption(
-            "Đọc thẻ gồm hồ sơ, ảnh và số lượt. Nhập lại PIN cho mỗi giao dịch; cấp lượt cần thêm PIN quản trị.");
+            "Đọc thẻ, mở/đóng ca dùng PIN học viên. Cấp lượt chỉ cần PIN quản trị; nhập lại PIN cho mỗi thao tác.");
     private final Button btnGrant = new Button("Cấp lượt");
     private final Button btnStart = new Button("Mở ca · −1 lượt");
     private final Button btnEnd = new Button("Đóng ca");
@@ -119,8 +128,8 @@ final class TransactionPanel {
         btnStart.setOnAction(e -> start());
         btnEnd.setOnAction(e -> end());
 
-        VBox studentField = UiRows.field("PIN học viên · mọi thao tác", fieldStudentPin, studentPinError);
-        VBox adminField = UiRows.field("PIN quản trị · cấp lượt", fieldAdminPin, adminPinError);
+        VBox studentField = UiRows.field("PIN học viên · đọc thẻ, mở/đóng ca", fieldStudentPin, studentPinError);
+        VBox adminField = UiRows.field("PIN quản trị · cấp lượt, đối soát cấp lượt", fieldAdminPin, adminPinError);
 
         balance.getStyleClass().add("la-balance-value");
         balance.setId("transaction-balance");
@@ -166,12 +175,25 @@ final class TransactionPanel {
         fieldStudentPin.clear();
     }
 
+    void clearAdminPin() {
+        fieldAdminPin.clear();
+    }
+
     boolean requireStudentPin() {
         if (digits(fieldStudentPin.getText(), PersonalizeRequest.STUDENT_PIN_LENGTH)) {
             return true;
         }
         UiLabels.setFieldError(studentPinError, PersonalizeRequest.studentPinProblem() + ".");
         UiLabels.inputProblem(log, fieldStudentPin, PersonalizeRequest.studentPinProblem() + ".");
+        return false;
+    }
+
+    boolean requireAdminPin() {
+        if (digits(fieldAdminPin.getText(), PersonalizeRequest.ADMIN_PIN_LENGTH)) {
+            return true;
+        }
+        UiLabels.setFieldError(adminPinError, PersonalizeRequest.adminPinProblem() + ".");
+        UiLabels.inputProblem(log, fieldAdminPin, PersonalizeRequest.adminPinProblem() + ".");
         return false;
     }
 
@@ -182,8 +204,12 @@ final class TransactionPanel {
     }
 
     void showState(CardStatus status, boolean known) {
-        boolean available = known && status != null && status.studentStateAvailable();
-        String balanceText = available ? status.balance() + " lượt" : "Chưa đọc";
+        boolean available = known && status != null && status.stateAvailable();
+        if (available || (status != null && !status.cardId().equals(grantAwaitingReadCardId))) {
+            grantAwaitingReadCardId = null;
+        }
+        String balanceText = available ? status.balance() + " lượt"
+                : grantAwaitingReadCardId != null ? "Đã cấp — cần đọc lại" : "Chưa đọc";
         if (!balanceText.equals(balance.getText())) {
             UiLabels.clearFieldError(deltaError);
         }
@@ -195,7 +221,7 @@ final class TransactionPanel {
         visit.setText(available ? status.hasActiveVisit() ? "Đang mở" : "Chưa mở" : "Chưa đọc");
         UiLabels.applyChip(visit, available && status.hasActiveVisit()
                 ? UiLabels.Tone.OK : UiLabels.Tone.NEUTRAL);
-        showEffects(status, available);
+        showEffects(status, known);
     }
 
     private void showEffects(CardStatus status, boolean known) {
@@ -204,10 +230,12 @@ final class TransactionPanel {
                 : status.hasActiveVisit() ? "Đóng ca không trừ thêm lượt."
                 : status.balance() == 0 ? "Thẻ hết lượt. Cấp thêm lượt trước khi mở ca."
                 : "Sau khi mở ca: còn " + (status.balance() - 1) + " lượt.");
+        boolean grantAvailable = known && status != null && status.stateAvailable();
         String entered = fieldDelta.getEditor().getText();
-        if (!available || entered == null || !entered.matches("\\d{1,4}")
+        if (!grantAvailable || entered == null || !entered.matches("\\d{1,4}")
                 || Integer.parseInt(entered) < DELTA_MIN) {
-            grantPreview.setText(available ? "Nhập số lượt muốn cấp." : "Đọc thẻ để xem số lượt sau khi cấp.");
+            grantPreview.setText(grantAvailable ? "Nhập số lượt muốn cấp."
+                    : "Cấp lượt sẽ đọc trạng thái bằng PIN quản trị trước khi thực hiện.");
             return;
         }
         int delta = Integer.parseInt(entered);
@@ -218,6 +246,7 @@ final class TransactionPanel {
     }
 
     void applyLock(boolean busy, String whyGrant, String whyStart, String whyEnd, String whyRead) {
+        fieldAdminPin.setDisable(busy);
         btnReadState.setDisable(whyRead != null);
         btnGrant.setDisable(whyGrant != null);
         btnStart.setDisable(whyStart != null);
@@ -321,53 +350,50 @@ final class TransactionPanel {
 
     private void grant() {
         boolean deltaOk = commitDelta();
-        boolean pinsOk = pinsValid(true);
-        if (!deltaOk || !pinsOk) {
-            if (!deltaOk) {
-                UiLabels.inputProblem(log, fieldDelta.getEditor(), DELTA_PROBLEM);
-            }
+        boolean pinOk = digits(fieldAdminPin.getText(), PersonalizeRequest.ADMIN_PIN_LENGTH);
+        UiLabels.setFieldError(adminPinError, pinOk ? null : PersonalizeRequest.adminPinProblem() + ".");
+        if (!deltaOk || !pinOk) {
+            UiLabels.inputProblem(log, deltaOk ? fieldAdminPin : fieldDelta.getEditor(),
+                    deltaOk ? PersonalizeRequest.adminPinProblem() : DELTA_PROBLEM);
             return;
         }
+        if (!session.open().getAsBoolean()) {
+            log.accept("[FAIL] GRANT_QUOTA: đang xử lý thao tác khác hoặc đang đóng");
+            return;
+        }
+        UiLabels.clearFieldError(studentPinError);
         int delta = fieldDelta.getValue();
-        if (!session.snapshotKnown().getAsBoolean()) {
-            log.accept("[FAIL] GRANT_QUOTA: đọc state hiện tại bằng VERIFY + GET_LAST_RECEIPT trước");
-            return;
-        }
-        CardStatus status = gateway.status();
-        if (status == null || !status.studentStateAvailable()) {
-            log.accept("[FAIL] GRANT_QUOTA: chưa có snapshot state student đã xác thực");
-            return;
-        }
-        long counter = status.counter();
-        if (counter >= Receipt.COUNTER_MASK) {
-            log.accept("[FAIL] GRANT_QUOTA: counter đã đạt giới hạn");
-            return;
-        }
-        int expectedBalance = status.balance() + delta;
-        if (expectedBalance > Receipt.MAX_BALANCE) {
-            String problem = "Chỉ còn có thể cấp " + (Receipt.MAX_BALANCE - status.balance()) + " lượt.";
-            UiLabels.setFieldError(deltaError, problem);
-            UiLabels.inputProblem(log, fieldDelta.getEditor(), problem);
-            return;
-        }
-        byte[] adminPin = pinToBytes(fieldAdminPin);
-        if (adminPin == null) {
-            log.accept("[FAIL] cấp quota: " + PersonalizeRequest.adminPinProblem());
-            return;
-        }
-        char[] studentPin = fieldStudentPin.getText().toCharArray();
-        if (!App.validPin(studentPin, PersonalizeRequest.STUDENT_PIN_LENGTH)) {
-            App.clearBuffers(studentPin, adminPin);
-            log.accept("[FAIL] cấp quota: " + PersonalizeRequest.studentPinProblem());
-            return;
-        }
-        fieldAdminPin.clear();
         fieldStudentPin.clear();
-        ReceiptExpectation expectation = new ReceiptExpectation(
-                HexFormat.of().parseHex(status.cardId()), counter + 1,
-                Receipt.OPERATION_GRANT, null);
-        runTransaction("GRANT_QUOTA", studentPin, adminPin, expectation,
-                delta, expectedBalance, gateway.grantCommand(adminPin, delta));
+        fieldAdminPin.setDisable(true);
+        CardStatus selected = gateway.status();
+        AtomicBoolean needsReread = new AtomicBoolean();
+        runner.run("GRANT_QUOTA", () -> {
+            session.historyInvalidated().run();
+            CardOperationResult result = session.grantTransaction().run(delta, this::takeAdminPin);
+            if (result.ok()) {
+                needsReread.set(result.warning() != null);
+                session.historyRemembered().run();
+            }
+            return result;
+        }, ok -> {
+            if (ok) {
+                grantAwaitingReadCardId = needsReread.get() ? selected.cardId() : null;
+            }
+            fieldAdminPin.clear();
+            fieldAdminPin.setDisable(false);
+            session.finished().accept(ok);
+        });
+    }
+
+    char[] takeAdminPin() {
+        if (Platform.isFxApplicationThread()) {
+            char[] pin = fieldAdminPin.getText().toCharArray();
+            fieldAdminPin.clear();
+            return pin;
+        }
+        char[] pin = FxPinSource.take(() -> fieldAdminPin.getText().toCharArray());
+        Platform.runLater(fieldAdminPin::clear);
+        return pin;
     }
 
     private void start() {
@@ -463,10 +489,6 @@ final class TransactionPanel {
             session.historyInvalidated().run();
             try {
                 gateway.clearAuthenticatedStatus();
-                CardOperationResult verify = gateway.verifyStudentPin(studentPin);
-                if (!verify.ok()) {
-                    return CardOperationResult.fail(label + " không chạy — VERIFY: " + verify.text());
-                }
                 CardOperationResult transaction = session.stateTransaction().run(
                         new CardGateway.TransactionPlan(expectation, delta, expectedBalance),
                         supplier, studentPin);
@@ -489,23 +511,6 @@ final class TransactionPanel {
             random.nextBytes(visitId);
         } while (allZero(visitId));
         return visitId;
-    }
-
-    private static byte[] pinToBytes(PasswordField field) {
-        String text = field.getText();
-        if (text == null || text.length() != PersonalizeRequest.ADMIN_PIN_LENGTH) {
-            return null;
-        }
-        byte[] bytes = new byte[PersonalizeRequest.ADMIN_PIN_LENGTH];
-        for (int i = 0; i < PersonalizeRequest.ADMIN_PIN_LENGTH; i++) {
-            char c = text.charAt(i);
-            if (c < '0' || c > '9') {
-                java.util.Arrays.fill(bytes, (byte) 0);
-                return null;
-            }
-            bytes[i] = (byte) c;
-        }
-        return bytes;
     }
 
     private boolean pinsValid(boolean needsAdminPin) {

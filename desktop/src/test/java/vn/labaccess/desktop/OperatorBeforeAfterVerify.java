@@ -2,7 +2,6 @@ package vn.labaccess.desktop;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
@@ -43,43 +42,7 @@ public final class OperatorBeforeAfterVerify {
     }
 
     private static void refreshResult() throws Exception {
-        RecoveryCardFixture card = new RecoveryCardFixture();
-        CardGateway gateway = card.gateway();
-        Path directory = Files.createTempDirectory("before-after-transaction");
-        PendingJournal journal = new PendingJournal(directory.resolve("pending.txt"));
-        card.failRefreshAfterSave = true;
-        try {
-            boolean ok = fx(() -> {
-                boolean[] finished = {false};
-                CardOpRunner runner = (label, work, callback) -> {
-                    try {
-                        callback.accept(work.call().ok());
-                    } catch (Exception failure) {
-                        throw new IllegalStateException(failure);
-                    }
-                };
-                TransactionPanel panel = new TransactionPanel(gateway, runner, ignored -> { },
-                        new TransactionPanel.Session(() -> true, () -> true,
-                                (plan, command, pin) -> gateway.runStateTransaction(journal, plan, command, pin),
-                                () -> { }, () -> { }, value -> finished[0] = value, () -> { }, () -> { }));
-                panel.applyLock(false, null, null, null, null);
-                char[] student = RecoveryCardFixture.pin(6);
-                char[] admin = RecoveryCardFixture.pin(8);
-                try {
-                    panel.fillInputs(student, admin, 5);
-                    if (!panel.pressGrant()) throw new AssertionError("grant disabled");
-                } finally {
-                    java.util.Arrays.fill(student, (char) 0);
-                    java.util.Arrays.fill(admin, (char) 0);
-                }
-                return finished[0];
-            });
-            if (card.stateCommands != 1 || journal.load().present()) throw new AssertionError("transaction precondition");
-            outcome("2 confirmed transaction preserves success", ok);
-        } finally {
-            Files.deleteIfExists(journal.file());
-            Files.delete(directory);
-        }
+        outcome("2 confirmed transaction preserves success", AdminGrantVerify.confirmedGrantSurvivesRefreshFailure());
     }
 
     private static void transportReady() throws Exception {
@@ -121,7 +84,8 @@ public final class OperatorBeforeAfterVerify {
         log.setAccessible(true);
         log.invoke(app, "[FAIL] VERIFY_STUDENT_PIN: SW=63C2", "fixture PIN failure");
         outcome("7 PIN failure preserves collapsed log", !pane.isExpanded());
-        ((java.util.concurrent.ExecutorService) get(app, "worker")).shutdownNow();
+        Object owner = baseline ? app : get(app, "taskRunner");
+        ((java.util.concurrent.ExecutorService) get(owner, baseline ? "worker" : "executor")).shutdownNow();
     }
 
     private static void pendingCardHint() throws Exception {
@@ -156,6 +120,9 @@ public final class OperatorBeforeAfterVerify {
             values.add(10, noOp);
         }
         var constructor = ReceiptPanel.Session.class.getDeclaredConstructors()[0];
+        if (!baseline && constructor.getParameterCount() == arguments.length + 1) {
+            values.add(6, null);
+        }
         constructor.setAccessible(true);
         return (ReceiptPanel.Session) constructor.newInstance(values.toArray());
     }

@@ -38,6 +38,8 @@ final class CardTransport {
     private volatile String ioTimeoutDetail;
     private volatile java.util.function.Consumer<String> diagnostics = text -> {
     };
+    private volatile java.util.function.IntConsumer commandTrace = ins -> {
+    };
 
     CardTransport(String host, int port) {
         this.host = host;
@@ -65,6 +67,11 @@ final class CardTransport {
 
     void setDiagnostics(java.util.function.Consumer<String> sink) {
         this.diagnostics = sink;
+    }
+
+    void traceCommands(java.util.function.IntConsumer sink) {
+        commandTrace = sink == null ? ins -> {
+        } : sink;
     }
 
     private void reportSessionProblem(Attempt attempt, String detail) {
@@ -204,6 +211,7 @@ final class CardTransport {
     }
 
     ResponseAPDU transmit(CommandAPDU command) throws CardException {
+        commandTrace.accept(command.getINS() & 0xFF);
         requireConnected();
         CardChannel channelNow = channel;
         SimulatorConnection connectionNow = connection;

@@ -116,7 +116,7 @@ record PendingJournal(Path file) {
             String visitIdHex = fields[7];
             byte[] visitId;
             if (visitIdHex.isEmpty()) {
-                visitId = new byte[Receipt.VISIT_ID_LENGTH];
+                visitId = null;
             } else {
                 if (!visitIdHex.matches("[0-9A-Fa-f]{32}")) {
                     return new Loaded(true, false, null, null, "visitId không hợp lệ");

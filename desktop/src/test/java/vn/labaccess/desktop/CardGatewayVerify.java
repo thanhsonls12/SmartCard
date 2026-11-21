@@ -54,6 +54,7 @@ public final class CardGatewayVerify {
         checkPendingJournal();
         checkVerifyMapping();
         checkTransactionGate();
+        checkStudentLedgerBeforeVisit();
         checkPersonalizeOffline();
         checkPersonalizeMapping();
         checkPublicKeyOffline();
@@ -105,37 +106,39 @@ public final class CardGatewayVerify {
 
     private static void checkLifecycleRules() {
         System.out.println("--- Nhom V: kiem lifecycle/cardId bang response tong hop ---");
+        CardStatus.StateSource publicSource = CardStatus.StateSource.PUBLIC;
+        CardStatus.StateSource studentSource = CardStatus.StateSource.STUDENT;
 
         CardGateway offline = new CardGateway(HOST, PORT);
         record("V03", "lifecycle 00 + cardId toan 00 chap nhan",
-                offline.checkStatus(statusApdu(0x00, "0000000000000000"), AID).ok(), true);
+                offline.checkStatus(statusApdu(0x00, "0000000000000000"), AID, publicSource).ok(), true);
         record("V04", "lifecycle 02 chua dinh nghia bi tu choi",
-                offline.checkStatus(statusApdu(0x02, "0000000000000000"), AID).ok(), false);
+                offline.checkStatus(statusApdu(0x02, "0000000000000000"), AID, publicSource).ok(), false);
         record("V05", "lifecycle 00 nhung cardId da gan bi tu choi",
-                offline.checkStatus(statusApdu(0x00, "0123456789ABCDEF"), AID).ok(), false);
+                offline.checkStatus(statusApdu(0x00, "0123456789ABCDEF"), AID, publicSource).ok(), false);
         record("V06", "lifecycle 01 ISSUED nhung cardId toan 00 bi tu choi",
-                offline.checkStatus(statusApdu(0x01, "0000000000000000"), AID).ok(), false);
+                offline.checkStatus(statusApdu(0x01, "0000000000000000"), AID, publicSource).ok(), false);
         record("V07", "lifecycle 01 ISSUED + cardId da gan duoc chap nhan",
-                offline.checkStatus(statusApdu(0x01, "0123456789ABCDEF"), AID).ok(), true);
+                offline.checkStatus(statusApdu(0x01, "0123456789ABCDEF"), AID, publicSource).ok(), true);
         record("V08", "AID tra ve khac AID yeu cau bi tu choi",
-                offline.checkStatus(statusApdu(0x00, "0000000000000000"), WRONG_AID).ok(), false);
+                offline.checkStatus(statusApdu(0x00, "0000000000000000"), WRONG_AID, publicSource).ok(), false);
 
         CardGateway stateGateway = new CardGateway(HOST, PORT);
         record("V10", "GET_STATUS public chi chap nhan schema 27 byte",
-                stateGateway.checkStatus(statusApdu(0x01, CARD_ID), AID).ok()
+                stateGateway.checkStatus(statusApdu(0x01, CARD_ID), AID, publicSource).ok()
                         && stateGateway.status() != null
                         && !stateGateway.status().studentStateAvailable(), true);
         record("V11", "GET_STATUS authenticated parse balance/counter/active visit ID",
-                stateGateway.checkStatus(authenticatedStatusApdu(5, 2, true, VISIT_ID), AID).ok()
+                stateGateway.checkStatus(authenticatedStatusApdu(5, 2, true, VISIT_ID), AID, studentSource).ok()
                         && stateGateway.status().studentStateAvailable()
                         && stateGateway.status().balance() == 5
                         && stateGateway.status().counter() == 2
                         && stateGateway.status().hasActiveVisit()
                         && stateGateway.status().activeVisitId().equalsIgnoreCase(VISIT_ID), true);
         record("V12", "GET_STATUS closed visit phai co ID zero",
-                stateGateway.checkStatus(authenticatedStatusApdu(5, 2, false, VISIT_ID), AID).ok(), false);
+                stateGateway.checkStatus(authenticatedStatusApdu(5, 2, false, VISIT_ID), AID, studentSource).ok(), false);
         record("V13", "GET_STATUS open visit phai co ID khac zero",
-                stateGateway.checkStatus(authenticatedStatusApdu(5, 2, true, NO_VISIT_ID), AID).ok(), false);
+                stateGateway.checkStatus(authenticatedStatusApdu(5, 2, true, NO_VISIT_ID), AID, studentSource).ok(), false);
         checkCardPublicKeyCacheReset();
     }
 
@@ -445,8 +448,7 @@ public final class CardGatewayVerify {
                 return authenticatedStatusApdu(balance, counter, activeVisit,
                         "00000000000000000000000000000000");
             }
-            if (ins == 0x11) {
-                // VERIFY student PIN: đúng 9000 cho fixture.
+            if (ins == 0x20) {
                 return response(Sw.OK);
             }
             return new ResponseAPDU(new byte[] {0, 5, 0, 0, 0, 1, (byte) 0x90, 0});
@@ -551,53 +553,97 @@ public final class CardGatewayVerify {
             TestKey oldKey = newTestKey();
             PendingJournal oldJournal = new PendingJournal(dir.resolve("old-receipt.txt"));
             PendingJournal.Entry oldEntry = new PendingJournal.Entry(CARD_ID, 2,
-                    Receipt.OPERATION_GRANT, 5, 10, null, System.currentTimeMillis());
+                    Receipt.OPERATION_START, -1, 4, HexFormat.of().parseHex(VISIT_ID), System.currentTimeMillis());
             oldJournal.writePending(oldEntry);
-            // NOT_EXECUTED đòi state xác thực (VERIFY + GET_STATUS) khớp mốc trước giao dịch
-            // và ledger Backend cùng mốc: counter=1, balance=5, không ca mở.
             CardGateway oldGateway = readyGateway(signedCardWithState(oldKey,
                     signedReceipt(oldKey, 1, 5, 1, 5, CARD_ID, NO_VISIT_ID), 1, 5, false));
-            // NOT_EXECUTED đòi ledger cùng mốc state thẻ: counter=1, balance=5, không ca mở.
             oldGateway.setReceiptSink(fixtureSink(1, 5));
             char[] pin = {'1', '2', '3', '4', '5', '6'};
             CardOperationResult oldResult = oldGateway.reconcilePending(oldJournal, pin);
-            record("R04", "receipt cu verify PASS nhung counter lui -> NOT_EXECUTED, xoa journal",
-                    oldResult.ok() && !oldJournal.load().present(), true);
+            record("R04", "Student START -> NOT_EXECUTED, xoa journal",
+                    oldResult.ok() && oldResult.text().contains("kết luận=NOT_EXECUTED")
+                            && !oldJournal.load().present(), true);
             System.out.println("    R04 text: " + oldResult.text());
 
             TestKey newKey = newTestKey();
             PendingJournal newJournal = new PendingJournal(dir.resolve("new-receipt.txt"));
-            PendingJournal.Entry newEntry = new PendingJournal.Entry(CARD_ID, 2,
-                    Receipt.OPERATION_GRANT, 5, 10, null, System.currentTimeMillis());
+            PendingJournal.Entry newEntry = new PendingJournal.Entry(CARD_ID, 3,
+                    Receipt.OPERATION_END, 0, 4, HexFormat.of().parseHex(VISIT_ID), System.currentTimeMillis());
             newJournal.writePending(newEntry);
             CardGateway newGateway = readyGateway(signedCard(newKey,
-                    signedReceipt(newKey, 1, 5, 2, 10, CARD_ID, NO_VISIT_ID)));
-            // EXECUTED phải đối chiếu ledger sau khi lưu: mốc fixture phải khớp receipt.
-            newGateway.setReceiptSink(fixtureSink(2, 10));
+                    signedReceipt(newKey, Receipt.OPERATION_END, 0, 3, 4, CARD_ID, VISIT_ID)));
+            newGateway.setReceiptSink(fixtureSink(3, 4));
             char[] newPin = {'1', '2', '3', '4', '5', '6'};
             CardOperationResult newResult = newGateway.reconcilePending(newJournal, newPin);
-            record("R05", "receipt moi verify PASS + counter dung -> EXECUTED, xoa journal",
-                    newResult.ok() && !newJournal.load().present(), true);
+            record("R05", "Student END -> EXECUTED, xoa journal",
+                    newResult.ok() && newResult.text().contains("kết luận=EXECUTED")
+                            && !newJournal.load().present(), true);
             System.out.println("    R05 text: " + newResult.text());
 
             TestKey cardKey = newTestKey();
             TestKey foreignKey = newTestKey();
             PendingJournal foreignJournal = new PendingJournal(dir.resolve("foreign-key.txt"));
             foreignJournal.writePending(new PendingJournal.Entry(CARD_ID, 2,
-                    Receipt.OPERATION_GRANT, 5, 10, null, System.currentTimeMillis()));
+                    Receipt.OPERATION_START, -1, 4, HexFormat.of().parseHex(VISIT_ID), System.currentTimeMillis()));
             CardGateway foreignGateway = readyGateway(signedCard(cardKey,
-                    signedReceipt(foreignKey, 1, 5, 2, 10, CARD_ID, NO_VISIT_ID)));
+                    signedReceipt(foreignKey, Receipt.OPERATION_START, -1, 2, 4, CARD_ID, VISIT_ID)));
             char[] foreignPin = {'1', '2', '3', '4', '5', '6'};
             CardOperationResult foreign = foreignGateway.reconcilePending(foreignJournal, foreignPin);
-            record("R06", "cardId khop payload nhung key khong thuoc the -> giu journal",
+            record("R06", "Student START voi receipt ky sai khoa -> giu journal",
                     !foreign.ok() && foreignJournal.load().present()
                             && foreignGateway.reconciliation().state() == Reconciliation.State.UNKNOWN,
                     true);
 
+            checkStudentRecoveryRejectsGrant(dir, pin);
             deleteRecursively(dir);
         } catch (Exception ex) {
             record("R00", "nhom R loi khong mong doi: " + ex, false, true);
         }
+    }
+
+    private static void checkStudentRecoveryRejectsGrant(Path dir, char[] studentPin) throws Exception {
+        PendingJournal journal = new PendingJournal(dir.resolve("grant-via-student.txt"));
+        if (!journal.writePending(new PendingJournal.Entry(CARD_ID, 1, Receipt.OPERATION_GRANT,
+                5, 5, null, System.currentTimeMillis()))) {
+            throw new IllegalStateException("GRANT fixture journal was not created");
+        }
+        String before = Files.readString(journal.file());
+        TestKey key = newTestKey();
+        byte[] receipt = signedReceipt(key, Receipt.OPERATION_GRANT, 5, 1, 5, CARD_ID, NO_VISIT_ID);
+        var apdus = new java.util.ArrayList<Integer>();
+        CardGateway gateway = readyGateway(scriptedChannel(command -> {
+            int ins = command.getINS();
+            apdus.add(ins);
+            return switch (ins) {
+                case 0x10 -> statusApdu(CardLifecycle.ISSUED, CARD_ID);
+                case 0x60 -> responseWithData(receipt, Sw.OK);
+                case 0x61 -> responseWithData(key.encoded(), Sw.OK);
+                default -> response(Sw.OK);
+            };
+        }));
+        apdus.clear();
+        var backendCalls = new java.util.ArrayList<String>();
+        gateway.setReceiptSink(new CardGateway.ReceiptSink() {
+            @Override
+            public CardGateway.ReceiptSave save(Receipt supplied) {
+                backendCalls.add("POST");
+                return new CardGateway.ReceiptSave(true, "fixture ACK");
+            }
+
+            @Override
+            public CardGateway.LedgerCheck ledger(String cardIdHex) {
+                backendCalls.add("GET");
+                return new CardGateway.LedgerCheck(true, "fixture ledger", cardIdHex, 1, 5, null);
+            }
+        });
+        CardOperationResult rejected = gateway.reconcilePending(journal, studentPin);
+        boolean unchanged = journal.load().status() == PendingJournal.Status.PENDING
+                && before.equals(Files.readString(journal.file()));
+        record("R07", "Student GRANT bi chan truoc APDU/HTTP va giu journal",
+                !rejected.ok() && unchanged && apdus.isEmpty() && backendCalls.isEmpty()
+                        && gateway.reconciliation().state() == Reconciliation.State.UNKNOWN, true);
+        System.out.printf("TRACE Student GRANT: APDU=%d HTTP=%d journalUnchanged=%s state=%s%n",
+                apdus.size(), backendCalls.size(), unchanged, gateway.reconciliation().state());
     }
 
     private static void checkIdentifyWithRealCard(CardGateway gateway) {
@@ -1143,6 +1189,207 @@ public final class CardGatewayVerify {
         if (liveStudentPinChars != null) {
             java.util.Arrays.fill(liveStudentPinChars, '\0');
             liveStudentPinChars = null;
+        }
+    }
+
+    private static void checkStudentLedgerBeforeVisit() throws Exception {
+        System.out.println();
+        System.out.println("--- Nhom L: START/END doi chieu state Student voi ledger truoc journal ---");
+        Path dir = Files.createTempDirectory("labaccess-student-ledger");
+        char[] pin = sampleDigits(6);
+        try {
+            byte[] visit = HexFormat.of().parseHex(VISIT_ID);
+            VisitProbe blockedStart = visitProbe(dir.resolve("blocked-start.txt"), 5, 1, false,
+                    NO_VISIT_ID, null, 0, 0, null);
+            CardOperationResult startBlocked = runVisit(blockedStart, pin, visit, Receipt.OPERATION_START, -1, 4);
+            VisitProbe blockedEnd = visitProbe(dir.resolve("blocked-end.txt"), 5, 1, false,
+                    NO_VISIT_ID, null, 0, 0, null);
+            CardOperationResult endBlocked = runVisit(blockedEnd, pin, visit, Receipt.OPERATION_END, 0, 5);
+            boolean blocked = !startBlocked.ok() && !endBlocked.ok()
+                    && startBlocked.text().contains("Quay lại máy đang giữ nhật ký để đối soát")
+                    && endBlocked.text().contains("Quay lại máy đang giữ nhật ký để đối soát")
+                    && blockedStart.stateCommands == 0 && blockedEnd.stateCommands == 0
+                    && blockedStart.posts == 0 && blockedEnd.posts == 0
+                    && !blockedStart.journal.load().present() && !blockedEnd.journal.load().present()
+                    && blockedStart.gateway.reconciliation().transactionAllowed()
+                    && blockedEnd.gateway.reconciliation().transactionAllowed();
+            record("L01", "GRANT da commit chua ghi so: 0 START/END, 0 POST, khong journal",
+                    blocked, true);
+            System.out.println("    L01 start=" + startBlocked.text());
+            System.out.println("    L01 end=" + endBlocked.text());
+
+            VisitProbe wrongCard = visitProbe(dir.resolve("wrong-card.txt"), 5, 1, false,
+                    NO_VISIT_ID, null, 1, 5, null);
+            wrongCard.gateway.setReceiptSink(ledgerSink(wrongCard, OTHER_CARD_ID, 1, 5, null));
+            CardOperationResult cardBlocked = runVisit(wrongCard, pin, visit, Receipt.OPERATION_START, -1, 4);
+            record("L01b", "cardId lech ledger: chan truoc START/END va journal",
+                    !cardBlocked.ok() && cardBlocked.text().contains("Quay lại máy đang giữ nhật ký để đối soát")
+                            && wrongCard.stateCommands == 0 && wrongCard.posts == 0
+                            && !wrongCard.journal.load().present(), true);
+
+            VisitProbe wrongVisit = visitProbe(dir.resolve("wrong-visit.txt"), 4, 2, true,
+                    VISIT_ID, null, 2, 4, OTHER_VISIT_ID);
+            CardOperationResult visitBlocked = runVisit(wrongVisit, pin, visit, Receipt.OPERATION_END, 0, 4);
+            record("L01c", "ca lech ledger: chan truoc END va journal",
+                    !visitBlocked.ok() && visitBlocked.text().contains("Quay lại máy đang giữ nhật ký để đối soát")
+                            && wrongVisit.stateCommands == 0 && wrongVisit.posts == 0
+                            && !wrongVisit.journal.load().present(), true);
+
+            VisitProbe matchedStart = visitProbe(dir.resolve("matched-start.txt"), 5, 1, false,
+                    NO_VISIT_ID, newTestKey(), 1, 5, null);
+            CardOperationResult started = runVisit(matchedStart, pin, visit, Receipt.OPERATION_START, -1, 4);
+            record("L02", "ledger khop: START_VISIT van chay va dong journal",
+                    started.ok() && matchedStart.stateCommands == 1 && matchedStart.posts == 1
+                            && !matchedStart.journal.load().present()
+                            && matchedStart.gateway.reconciliation().state() == Reconciliation.State.KNOWN
+                            && freshVerifyBefore(matchedStart.commands, 0x51),
+                    true);
+            System.out.println("    L02 " + started.text());
+            System.out.println("    L02 lenh=" + matchedStart.commands);
+
+            VisitProbe matchedEnd = visitProbe(dir.resolve("matched-end.txt"), 4, 2, true,
+                    VISIT_ID, newTestKey(), 2, 4, VISIT_ID);
+            CardOperationResult ended = runVisit(matchedEnd, pin, visit, Receipt.OPERATION_END, 0, 4);
+            record("L03", "ledger khop: END_VISIT van chay va dong journal",
+                    ended.ok() && matchedEnd.stateCommands == 1 && matchedEnd.posts == 1
+                            && !matchedEnd.journal.load().present()
+                            && matchedEnd.gateway.reconciliation().state() == Reconciliation.State.KNOWN
+                            && freshVerifyBefore(matchedEnd.commands, 0x52),
+                    true);
+            System.out.println("    L03 " + ended.text());
+            System.out.println("    L03 lenh=" + matchedEnd.commands);
+
+            byte[] oldVisit = HexFormat.of().parseHex(OTHER_VISIT_ID);
+            VisitProbe stale = visitProbe(dir.resolve("stale-plan.txt"), 4, 2, true,
+                    VISIT_ID, null, 2, 4, VISIT_ID);
+            CardOperationResult staleResult = stale.gateway.runStateTransaction(stale.journal,
+                    new CardGateway.TransactionPlan(new ReceiptExpectation(
+                            HexFormat.of().parseHex(CARD_ID), 2, Receipt.OPERATION_END, oldVisit), 0, 5),
+                    () -> stale.gateway.visitCommand((byte) 0x52, oldVisit).transmit(), pin);
+            record("L04", "the va ledger da tien, snapshot UI cu: 0 END, 0 POST, khong journal",
+                    !staleResult.ok() && staleResult.text().contains("không khớp trạng thái vừa đọc")
+                            && stale.stateCommands == 0 && stale.posts == 0
+                            && !stale.journal.load().present()
+                            && !stale.commands.contains(0x52),
+                    true);
+            System.out.println("    L04 " + staleResult.text());
+        } catch (Exception ex) {
+            record("L00", "doi chieu ledger Student loi khong mong doi: " + ex, false, true);
+            System.out.println("    exception: " + ex);
+        } finally {
+            Arrays.fill(pin, '\0');
+            deleteRecursively(dir);
+        }
+    }
+
+    private static CardOperationResult runVisit(VisitProbe probe, char[] pin, byte[] visit, int operation,
+            int delta, int expectedBalance) throws CardException {
+        long counter = operation == Receipt.OPERATION_START ? 2 : 3;
+        return probe.gateway.runStateTransaction(probe.journal,
+                new CardGateway.TransactionPlan(new ReceiptExpectation(
+                        HexFormat.of().parseHex(CARD_ID), counter, operation, visit), delta, expectedBalance),
+                () -> probe.gateway.visitCommand(
+                        (byte) (operation == Receipt.OPERATION_START ? 0x51 : 0x52), visit).transmit(),
+                pin);
+    }
+
+    private static VisitProbe visitProbe(Path journalFile, int balance, long counter, boolean active,
+            String cardVisit, TestKey key, long ledgerCounter, int ledgerBalance, String ledgerVisit)
+            throws CardException {
+        byte[] receipt = key == null ? new byte[0] : signedReceipt(key,
+                cardVisit.equals(NO_VISIT_ID) ? Receipt.OPERATION_START : Receipt.OPERATION_END,
+                cardVisit.equals(NO_VISIT_ID) ? -1 : 0,
+                cardVisit.equals(NO_VISIT_ID) ? 2 : 3,
+                cardVisit.equals(NO_VISIT_ID) ? 4 : 4, CARD_ID, cardVisit.equals(NO_VISIT_ID) ? VISIT_ID : cardVisit);
+        VisitProbe probe = new VisitProbe(new PendingJournal(journalFile));
+        probe.gateway = readyGateway(scriptedChannel(command -> {
+            int ins = command.getINS() & 0xFF;
+            probe.commands.add(ins);
+            if (ins == 0x20) {
+                probe.authorized = true;
+                return response(Sw.OK);
+            }
+            if (ins == 0x10) {
+                if (!probe.authorized) {
+                    return statusApdu(0x01, CARD_ID);
+                }
+                probe.authorized = false;
+                return authenticatedStatusApdu(balance, counter, active, cardVisit);
+            }
+            if (ins == 0x51 || ins == 0x52 || ins == 0x60) {
+                if (!probe.authorized) {
+                    return response(Sw.SECURITY_NOT_SATISFIED);
+                }
+                probe.authorized = false;
+            }
+            if (ins == 0x51 || ins == 0x52) {
+                probe.stateCommands++;
+                int afterBalance = ins == 0x51 ? balance - 1 : balance;
+                long afterCounter = counter + 1;
+                return new ResponseAPDU(new byte[] {
+                        (byte) (afterBalance >> 8), (byte) afterBalance,
+                        (byte) (afterCounter >> 24), (byte) (afterCounter >> 16),
+                        (byte) (afterCounter >> 8), (byte) afterCounter, (byte) 0x90, 0});
+            }
+            if (ins == 0x61 && key != null) {
+                return responseWithData(key.encoded(), Sw.OK);
+            }
+            if (ins == 0x60 && key != null) {
+                return responseWithData(receipt, Sw.OK);
+            }
+            return response(Sw.OK);
+        }));
+        probe.gateway.setReceiptSink(ledgerSink(probe, null, ledgerCounter, ledgerBalance, ledgerVisit));
+        return probe;
+    }
+
+    private static CardGateway.ReceiptSink ledgerSink(VisitProbe probe, String cardId, long counter,
+            int balance, String visitId) {
+        return new CardGateway.ReceiptSink() {
+            @Override
+            public CardGateway.ReceiptSave save(Receipt ignored) {
+                probe.posts++;
+                return new CardGateway.ReceiptSave(true, "fixture ledger=OK");
+            }
+
+            @Override
+            public CardGateway.LedgerCheck ledger(String cardIdHex) {
+                return new CardGateway.LedgerCheck(true, "fixture ledger",
+                        cardId == null ? cardIdHex : cardId, counter, balance, visitId);
+            }
+        };
+    }
+
+    private static boolean freshVerifyBefore(java.util.List<Integer> commands, int stateIns) {
+        int stateAt = commands.indexOf(stateIns);
+        int statusAt = -1;
+        for (int index = stateAt - 1; index >= 0; index--) {
+            if (commands.get(index) == 0x10) {
+                statusAt = index;
+                break;
+            }
+        }
+        if (stateAt < 0 || statusAt < 0) {
+            return false;
+        }
+        for (int index = statusAt + 1; index < stateAt; index++) {
+            if (commands.get(index) == 0x20) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static final class VisitProbe {
+        final PendingJournal journal;
+        final java.util.List<Integer> commands = new java.util.ArrayList<>();
+        CardGateway gateway;
+        boolean authorized;
+        int stateCommands;
+        int posts;
+
+        VisitProbe(PendingJournal journal) {
+            this.journal = journal;
         }
     }
 
@@ -3180,7 +3427,7 @@ public final class CardGatewayVerify {
             @Override
             public CardGateway.LedgerCheck ledger(String cardIdHex) {
                 return new CardGateway.LedgerCheck(true, "fixture ledger đọc được",
-                        lastCounter, lastBalance, null);
+                        cardIdHex, lastCounter, lastBalance, null);
             }
         };
     }
@@ -3319,40 +3566,29 @@ public final class CardGatewayVerify {
             return;
         }
 
-        char[] adminPinChars = liveSecret(true);
-        char[] studentPin = liveSecret(false);
-        if (adminPinChars == null || studentPin == null) {
+        String backendUrl = System.getProperty("labaccess.backend");
+        if (backendUrl == null || backendUrl.isBlank()) {
             skip("Z01", "fault-after-commit that tren Simulator",
-                    "khong doc duoc PIN dung do dai; khong gui APDU");
+                    "can dat -Dlabaccess.backend toi Backend thu nghiem co the da enroll");
             return;
         }
-        byte[] adminPin = new byte[8];
-        for (int i = 0; i < 8; i++) {
-            adminPin[i] = (byte) adminPinChars[i];
+        char[] adminPin = liveSecret(true);
+        if (adminPin == null) {
+            skip("Z01", "fault-after-commit that tren Simulator",
+                    "khong doc duoc PIN quan tri dung do dai; khong gui APDU");
+            return;
         }
 
         Path dir = null;
         try {
+            BackendClient backend = new BackendClient(backendUrl);
+            BackendClient.LedgerSnapshot before = backend.ledgerOf(gateway.status().cardId());
+            gateway.applyCardEnrollment(new CardGateway.EnrollmentCheck(true, true, "Backend thu nghiem"));
+            long counterBefore = before.lastCounter();
+            int balanceBefore = before.lastBalance();
             dir = Files.createTempDirectory("labaccess-fault-commit");
             Path file = dir.resolve("pending-journal.txt");
             PendingJournal journal = new PendingJournal(file);
-
-            Receipt before = gateway.lastReceipt();
-            long counterBefore;
-            int balanceBefore;
-            if (before != null) {
-                counterBefore = before.counterAfter();
-                balanceBefore = before.balanceAfter();
-            } else {
-                CardOperationResult read = gateway.readLastReceipt(null);
-                if (!read.ok() || gateway.lastReceipt() == null) {
-                    record("Z00", "khong doc duoc receipt baseline truoc fault", false, true);
-                    System.out.println("    baseline: " + read.text());
-                    return;
-                }
-                counterBefore = gateway.lastReceipt().counterAfter();
-                balanceBefore = gateway.lastReceipt().balanceAfter();
-            }
 
             int faultDelta = Integer.getInteger("labaccess.faultDelta", 8888);
             if (balanceBefore + faultDelta > Receipt.MAX_BALANCE) {
@@ -3363,13 +3599,8 @@ public final class CardGatewayVerify {
                 return;
             }
 
-            ReceiptExpectation expectation = new ReceiptExpectation(
-                    HexFormat.of().parseHex(gateway.status().cardId()), counterBefore + 1,
-                    Receipt.OPERATION_GRANT, null);
-            CardOperationResult fault = gateway.runStateTransaction(journal,
-                    new CardGateway.TransactionPlan(expectation, faultDelta,
-                            balanceBefore + faultDelta),
-                    gateway.grantCommand(adminPin, faultDelta), studentPin);
+            AdminGrantService grant = new AdminGrantService(gateway, journal, backend);
+            CardOperationResult fault = grant.grant(faultDelta, adminPin::clone);
             System.out.println("    GRANT " + faultDelta + " (fault sau commit) -> " + fault.text());
             record("Z01", "fault-after-commit -> PENDING + UNKNOWN, khong retry",
                     !fault.ok() && journal.load().present()
@@ -3377,9 +3608,9 @@ public final class CardGatewayVerify {
                             && gateway.reconciliation().state() == Reconciliation.State.UNKNOWN,
                     true);
 
-            CardOperationResult blocked = gateway.runStateTransaction(journal,
-                    new CardGateway.TransactionPlan(expectation, 1, balanceBefore + 1),
-                    gateway.grantCommand(adminPin, 1), studentPin);
+            CardOperationResult blocked = grant.grant(1, () -> {
+                throw new AssertionError("GRANT PENDING khong duoc lay PIN de gui lai");
+            });
             record("Z02", "sau fault, giao dich moi bi chan truoc khi gui APDU",
                     !blocked.ok(), true);
 
@@ -3395,23 +3626,24 @@ public final class CardGatewayVerify {
                     reloaded.present() && reloaded.valid()
                             && reloaded.status() == PendingJournal.Status.PENDING, true);
 
-            CardOperationResult reconciled = gateway.reconcilePending(journal, studentPin);
+            CardOperationResult reconciled = new AdminGrantRecovery(gateway, journal, backend)
+                    .reconcile(adminPin::clone);
             System.out.println("    RECONCILE -> " + reconciled.text());
             record("Z05", "doi soat EXECUTED + ECDSA PASS + journal xoa",
-                    reconciled.ok() && reconciled.text().contains("ECDSA=PASS")
+                    reconciled.ok() && reconciled.text().contains("kết luận=EXECUTED")
+                            && reconciled.text().contains("ECDSA=PASS")
                             && !journal.load().present()
                             && gateway.reconciliation().state() == Reconciliation.State.KNOWN,
                     true);
 
-            Receipt after = gateway.lastReceipt();
-            record("Z06", "receipt sau fault la cua giao dich da commit (counter +1)",
-                    after != null && after.counterAfter() == counterBefore + 1
-                            && ReceiptVerifier.verifyReceipt(gateway.cardPublicKey(), after).ok(),
+            CardStatus after = gateway.status();
+            record("Z06", "state Admin sau fault khop mot lan GRANT da commit",
+                    after != null && after.stateSource() == CardStatus.StateSource.ADMIN
+                            && after.counter() == counterBefore + 1 && after.balance() == balanceBefore + faultDelta,
                     true);
         } catch (Exception ex) {
             record("Z00", "nhom Z loi khong mong doi: " + ex, false, true);
         } finally {
-            java.util.Arrays.fill(adminPin, (byte) 0);
             clearLiveSecrets();
             if (dir != null) {
                 try {

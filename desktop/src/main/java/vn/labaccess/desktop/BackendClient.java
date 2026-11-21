@@ -33,6 +33,24 @@ final class BackendClient {
     record Enrollment(String cardId, String studentId, String enrolledAt, int httpStatus) {
     }
 
+    record EnrolledCard(String cardId, byte[] publicKey) {
+    }
+
+    EnrolledCard enrolledCard(String cardIdHex) throws Failure {
+        Reply reply = get("enrollments/cards/" + cardIdHex);
+        JsonNode node = parse(reply);
+        String cardId = requireString(node, "cardId", reply.status());
+        String keyHex = requireString(node, "publicKey", reply.status());
+        if (!cardId.equalsIgnoreCase(cardIdHex) || !keyHex.matches("[0-9A-Fa-f]{130}")) {
+            throw invalid(reply, "định danh hoặc khóa đã enroll không hợp lệ");
+        }
+        byte[] key = java.util.HexFormat.of().parseHex(keyHex);
+        if (!ReceiptVerifier.parsePublicKey(key).ok()) {
+            throw invalid(reply, "khóa đã enroll không phải điểm P-256 hợp lệ");
+        }
+        return new EnrolledCard(cardId, key);
+    }
+
     record SavedReceipt(String status, String cardId, long counterAfter, String operation,
             String visitId, int httpStatus) {
     }
@@ -288,6 +306,24 @@ final class BackendClient {
     }
 
     record LedgerSnapshot(String cardId, long lastCounter, int lastBalance, String activeVisitId) {
+    }
+
+    byte[] storedReceiptPayload(String cardId, long counter) throws Failure {
+        Reply reply = get("cards/" + cardId + "/transactions/" + counter);
+        JsonNode node = parse(reply);
+        String hex = requireString(node, "payload", reply.status());
+        if (!requireString(node, "cardId", reply.status()).equalsIgnoreCase(cardId)
+                || requireIntegral(node, "counterAfter", reply.status()) != counter
+                || !hex.matches("[0-9A-Fa-f]{" + (ReceiptCodec.PAYLOAD_LENGTH * 2) + "}")) {
+            throw invalid(reply, "payload ledger không đúng định danh hoặc độ dài canonical");
+        }
+        byte[] payload = java.util.HexFormat.of().parseHex(hex);
+        ReceiptCodec.Parse parsed = ReceiptCodec.parsePayload(payload, new byte[0]);
+        if (!parsed.ok() || !parsed.receipt().cardIdHex().equalsIgnoreCase(cardId)
+                || parsed.receipt().counterAfter() != counter) {
+            throw invalid(reply, "payload ledger không khớp cardId/counter yêu cầu");
+        }
+        return payload;
     }
 
     record HistoryEntry(String id, long counterAfter, String operation, int delta, int balanceAfter,

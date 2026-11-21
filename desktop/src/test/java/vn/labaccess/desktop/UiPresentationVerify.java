@@ -38,6 +38,7 @@ public final class UiPresentationVerify {
                 photoDraftFeedback();
                 pinConfirmation();
                 recoveryGuidance();
+        grantRecoveryDoesNotUseStudentPath();
                 nextStepAfterInputError();
                 copyControls();
                 inputFeedbackLifecycle();
@@ -158,7 +159,7 @@ public final class UiPresentationVerify {
     private static void operatorIdentityAndEffects() {
         CardIdentityPanel identity = new CardIdentityPanel();
         CardStatus status = new CardStatus(1, CardLifecycle.ISSUED, "F04C4142010101", CARD_ID,
-                true, 5, 1, false, "");
+                CardStatus.StateSource.STUDENT, 5, 1, false, "");
         Profile profile = new Profile(1, "SV2024001", "Nguyễn Thị Phương Thảo", 30);
         byte[] photo = new byte[4096];
         identity.show(status, profile, photo, false);
@@ -183,13 +184,16 @@ public final class UiPresentationVerify {
             throw new AssertionError("Preview must not send card commands");
         }, ignored -> { }, new TransactionPanel.Session(() -> true, () -> true,
                 (plan, supplier, pin) -> { throw new AssertionError("Preview must not transact"); },
+                (delta, pin) -> { throw new AssertionError("Preview must not grant"); },
                 () -> { }, () -> { }, ignored -> { }, () -> { }, () -> { }));
         panel.showState(status, true);
         check("START and GRANT show consequences before acting", hasText(panel.node(), "Sau khi mở ca: còn 4 lượt.")
                 && hasText(panel.node(), "Cấp thêm 5 → còn 10 lượt."));
-        panel.showState(new CardStatus(1, 1, status.instanceAid(), CARD_ID, true, 0, 2, false, ""), true);
+        panel.showState(new CardStatus(1, 1, status.instanceAid(), CARD_ID,
+                CardStatus.StateSource.STUDENT, 0, 2, false, ""), true);
         check("empty balance explains prerequisite", hasText(panel.node(), "Thẻ hết lượt. Cấp thêm lượt trước khi mở ca."));
-        panel.showState(new CardStatus(1, 1, status.instanceAid(), CARD_ID, true, 4, 2, true, "11".repeat(16)), true);
+        panel.showState(new CardStatus(1, 1, status.instanceAid(), CARD_ID,
+                CardStatus.StateSource.STUDENT, 4, 2, true, "11".repeat(16)), true);
         check("END explains no additional charge", hasText(panel.node(), "Đóng ca không trừ thêm lượt."));
         panel.showState(status, false);
         check("unknown state hides projections", !hasText(panel.node(), "Cấp thêm 5 → còn 10 lượt.")
@@ -317,7 +321,10 @@ public final class UiPresentationVerify {
     private static void pinConfirmation() {
         int[] submissions = {0};
         PinPanel panel = new PinPanel(new CardGateway("127.0.0.1", 1),
-                (operation, work, callback) -> submissions[0]++, ignored -> { });
+                (operation, work, callback) -> {
+                    submissions[0]++;
+                    return true;
+                }, ignored -> { });
         panel.setEnabled(true, null);
         List<javafx.scene.control.PasswordField> inputs = fields(panel.node());
         check("PIN form has separate confirmation fields", inputs.size() == 7);
@@ -437,7 +444,7 @@ public final class UiPresentationVerify {
         SessionGates.State blocked = new SessionGates.State(false, true, true, false,
                 false, true, false, true, null,
                 new CardStatus(1, CardLifecycle.ISSUED, "F04C4142010101", CARD_ID,
-                        false, -1, -1, false, ""));
+                        CardStatus.StateSource.PUBLIC, -1, -1, false, ""));
         check("recovery state does not claim no pending transaction",
                 SessionGates.of(blocked).reconcile().contains("Hướng dẫn khôi phục"));
         check("blocked transactions point to recovery instead of unavailable state read",
@@ -445,9 +452,56 @@ public final class UiPresentationVerify {
         check("normal state has no recovery notice", !JournalRecoveryView.needed(PendingJournal.Loaded.absent()));
     }
 
+    private static void grantRecoveryDoesNotUseStudentPath() throws Exception {
+        RecoveryCardFixture card = new RecoveryCardFixture();
+        try {
+            CardGateway gateway = card.gateway();
+            PendingJournal.Entry entry = new PendingJournal.Entry(CARD_ID, 2,
+                    Receipt.OPERATION_GRANT, 5, 10, null, 1);
+            PendingJournal.Loaded pending = new PendingJournal.Loaded(true, true, entry,
+                    PendingJournal.Status.PENDING, null);
+            var journal = new java.util.concurrent.atomic.AtomicReference<>(pending);
+            int[] pinReads = {0};
+            int[] attempts = {0};
+            int[] adminPinPrompts = {0};
+            ReceiptPanel.AdminRecovery admin = new ReceiptPanel.AdminRecovery(
+                    () -> { adminPinPrompts[0]++; return false; },
+                    () -> { throw new AssertionError("Admin PIN missing"); }, () -> { },
+                    source -> { throw new AssertionError("GRANT recovery must not start I/O"); },
+                    (proof, pin) -> { throw new AssertionError("No superseded proof"); },
+                    source -> { throw new AssertionError("Manual inspect is not part of pending recovery"); },
+                    (decision, source) -> { throw new AssertionError("Manual confirm is not part of pending recovery"); });
+            ReceiptPanel panel = new ReceiptPanel(gateway,
+                    (label, work, callback) -> { throw new AssertionError("GRANT recovery must not start I/O"); },
+                    ignored -> { }, new ReceiptPanel.Session(() -> true, journal::get,
+                            java.nio.file.Path.of("fixture", "pending-journal.txt"),
+                            () -> { pinReads[0]++; return new char[PersonalizeRequest.STUDENT_PIN_LENGTH]; },
+                            () -> { }, pin -> { attempts[0]++; return CardOperationResult.fail("unexpected"); }, admin,
+                            () -> { }, () -> { }, () -> { }, () -> { }, ignored -> { }, ignored -> { }, () -> { }));
+            panel.applyLock(false, null, null);
+            panel.offerPendingReconciliation();
+            check("automatic GRANT recovery guidance waits for operator action", adminPinPrompts[0] == 0);
+            check("GRANT pending asks for Admin PIN when explicitly requested",
+                    panel.pressReconcile() && adminPinPrompts[0] == 1);
+            check("GRANT pending never asks for Student PIN or dispatches Student recovery",
+                    pinReads[0] == 0 && attempts[0] == 0);
+            for (int operation : new int[] {Receipt.OPERATION_START, Receipt.OPERATION_END}) {
+                int readsBefore = pinReads[0];
+                var studentEntry = new PendingJournal.Entry(CARD_ID, 2, operation,
+                        operation == Receipt.OPERATION_START ? -1 : 0, 4, new byte[16], 1);
+                journal.set(new PendingJournal.Loaded(true, true, studentEntry, PendingJournal.Status.PENDING, null));
+                check("pending " + Receipt.operationText(operation) + " still requests Student PIN",
+                        panel.pressReconcile() && pinReads[0] == readsBefore + 1 && adminPinPrompts[0] == 1
+                                && attempts[0] == 0);
+            }
+        } finally {
+            card.close();
+        }
+    }
+
     private static void nextStepAfterInputError() {
         CardStatus card = new CardStatus(1, CardLifecycle.ISSUED, "F04C4142010101", CARD_ID,
-                true, 5, 1, true, "11".repeat(16));
+                CardStatus.StateSource.STUDENT, 5, 1, true, "11".repeat(16));
         SessionGates.State ready = new SessionGates.State(false, true, true, true,
                 true, false, false, true, null, card);
         SessionGates.NextStep next = SessionGates.nextStep(false, ready, "da-dang-ky", true, App.TAB_CARD);

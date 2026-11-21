@@ -30,7 +30,7 @@ final class CardStatusCodec {
     private CardStatusCodec() {
     }
 
-    static Parsed parse(ResponseAPDU response, byte[] requestedAid) {
+    static Parsed parse(ResponseAPDU response, byte[] requestedAid, CardStatus.StateSource readSource) {
         byte[] data = response.getData();
         int sw = response.getSW();
         if (sw != Sw.OK) {
@@ -41,8 +41,7 @@ final class CardStatusCodec {
                     + " | kết luận: CHƯA SẴN SÀNG", sw, data.length));
         }
         if (!matchesMagic(data)) {
-            return fail("GET_STATUS sai magic: " + CardGateway.hex(Arrays.copyOf(data, MAGIC.length))
-                    + " | kết luận: CHƯA SẴN SÀNG");
+            return fail("GET_STATUS sai magic | kết luận: CHƯA SẴN SÀNG");
         }
         int version = data[OFFSET_PROTOCOL_VERSION] & 0xFF;
         if (version != PROTOCOL_VERSION) {
@@ -62,9 +61,7 @@ final class CardStatusCodec {
         byte[] returnedAid = Arrays.copyOfRange(data, OFFSET_INSTANCE_AID,
                 OFFSET_INSTANCE_AID + aidLength);
         if (!Arrays.equals(returnedAid, requestedAid)) {
-            return fail(String.format("GET_STATUS trả AID=%s khác AID đã yêu cầu=%s"
-                    + " | kết luận: CHƯA SẴN SÀNG", CardGateway.hex(returnedAid),
-                    CardGateway.hex(requestedAid)));
+            return fail("GET_STATUS trả AID khác AID đã yêu cầu | kết luận: CHƯA SẴN SÀNG");
         }
 
         int lifecycle = data[OFFSET_INSTANCE_AID + aidLength] & 0xFF;
@@ -99,8 +96,12 @@ final class CardStatusCodec {
             activeVisit = activeFlag == 1;
             activeVisitId = CardGateway.hex(visitId);
         }
-        return new Parsed(new CardStatus(version, lifecycle, CardGateway.hex(returnedAid),
-                CardGateway.hex(cardId), stateIncluded, balance, counter, activeVisit, activeVisitId), null);
+        if (!stateIncluded && readSource != CardStatus.StateSource.PUBLIC) {
+            return fail("GET_STATUS không trả đủ state xác thực");
+        }
+        CardStatus status = new CardStatus(version, lifecycle, CardGateway.hex(returnedAid),
+                CardGateway.hex(cardId), readSource, balance, counter, activeVisit, activeVisitId);
+        return new Parsed(readSource == CardStatus.StateSource.PUBLIC ? status.publicView() : status, null);
     }
 
     private static String checkLifecycle(int lifecycle, byte[] cardId) {
@@ -110,8 +111,7 @@ final class CardStatusCodec {
         }
         boolean assigned = !isAllZero(cardId);
         if (lifecycle == 0x00 && assigned) {
-            return "lifecycle=00 UNPERSONALIZED nhưng cardId=" + CardGateway.hex(cardId)
-                    + " đã gán | kết luận: CHƯA SẴN SÀNG";
+            return "lifecycle=00 UNPERSONALIZED nhưng cardId đã gán | kết luận: CHƯA SẴN SÀNG";
         }
         if (lifecycle == 0x01 && !assigned) {
             return "lifecycle=01 ISSUED nhưng cardId toàn 00 | kết luận: CHƯA SẴN SÀNG";

@@ -11,6 +11,14 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 final class RecoveryBackendFixture implements AutoCloseable {
+    record Reply(int status, String body) {
+    }
+
+    @FunctionalInterface
+    interface Handler {
+        Reply reply(String request, String body) throws IOException;
+    }
+
     private final ServerSocket server;
     private final CompletableFuture<Void> serving;
     volatile int status = 200;
@@ -18,6 +26,10 @@ final class RecoveryBackendFixture implements AutoCloseable {
     volatile int balance = 5;
 
     RecoveryBackendFixture() throws Exception {
+        this(null);
+    }
+
+    RecoveryBackendFixture(Handler handler) throws Exception {
         server = new ServerSocket(0, 16, InetAddress.getLoopbackAddress());
         serving = CompletableFuture.runAsync(() -> {
             while (!server.isClosed()) {
@@ -33,11 +45,17 @@ final class RecoveryBackendFixture implements AutoCloseable {
                             length = Integer.parseInt(line.substring(line.indexOf(':') + 1).strip());
                         }
                     }
+                    StringBuilder incoming = new StringBuilder(length);
                     for (int index = 0; index < length; index++) {
-                        if (input.read() < 0) throw new IOException("missing request body");
+                        int character = input.read();
+                        if (character < 0) throw new IOException("missing request body");
+                        incoming.append((char) character);
                     }
-                    byte[] body = body(request).getBytes(StandardCharsets.UTF_8);
-                    String headers = "HTTP/1.1 " + status + " Fixture\r\nConnection: close\r\nContent-Type: application/json"
+                    Reply reply = handler == null ? new Reply(status, body(request))
+                            : handler.reply(request, incoming.toString());
+                    if (reply.status() == 0) continue;
+                    byte[] body = reply.body().getBytes(StandardCharsets.UTF_8);
+                    String headers = "HTTP/1.1 " + reply.status() + " Fixture\r\nConnection: close\r\nContent-Type: application/json"
                             + "\r\nContent-Length: " + body.length + "\r\n\r\n";
                     socket.getOutputStream().write(headers.getBytes(StandardCharsets.US_ASCII));
                     socket.getOutputStream().write(body);

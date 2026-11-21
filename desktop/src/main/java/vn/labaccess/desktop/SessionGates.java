@@ -26,7 +26,7 @@ final class SessionGates {
     static Reasons of(State state) {
         String transaction = transaction(state);
         return new Reasons(connect(state), identify(state), identify(state), receipt(state),
-                transaction, start(state, transaction), end(state, transaction),
+                grant(state), start(state, transaction), end(state, transaction),
                 reconcile(state), personalize(state), enroll(state),
                 access(state, "Thiếu quyền đọc hồ sơ — thẻ chưa phát hành."),
                 access(state, "Thiếu quyền ảnh — thẻ chưa phát hành."),
@@ -129,6 +129,20 @@ final class SessionGates {
         return null;
     }
 
+    private static String grant(State state) {
+        if (!state.connected()) {
+            return state.busy() ? App.BUSY_WHY : "chưa kết nối thẻ";
+        }
+        String base = receipt(state);
+        if (base != null) {
+            return base;
+        }
+        if (!state.transactionAllowed()) {
+            return "cần xác minh lại thẻ trước khi giao dịch";
+        }
+        return state.enrollmentProblem() == null ? null : "chưa xác nhận đăng ký thẻ — mở tab Đăng ký thẻ";
+    }
+
     private static String transaction(State state) {
         if (state.busy()) {
             return App.BUSY_WHY;
@@ -185,7 +199,10 @@ final class SessionGates {
         if (!state.ready()) {
             return "chưa nhận diện thẻ";
         }
-        return state.validPending() ? null : "không có giao dịch nào đang chờ đối soát";
+        if (state.validPending() || (!state.journalPresent() && state.transactionAllowed())) {
+            return null;
+        }
+        return "không có giao dịch nào đang chờ đối soát";
     }
 
     private static String journalReason(State state) {

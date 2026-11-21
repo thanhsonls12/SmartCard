@@ -1,5 +1,9 @@
 package vn.labaccess.desktop;
 
+import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.HexFormat;
+
 final class ReceiptCodec {
 
     record Parse(boolean ok, String problem, Receipt receipt) {
@@ -64,8 +68,30 @@ final class ReceiptCodec {
                     data.length, RESPONSE_MIN_LENGTH, RESPONSE_MAX_LENGTH));
         }
 
-        byte[] payload = new byte[PAYLOAD_LENGTH];
-        System.arraycopy(data, 0, payload, 0, PAYLOAD_LENGTH);
+        return parsePayload(Arrays.copyOf(data, PAYLOAD_LENGTH),
+                Arrays.copyOfRange(data, PAYLOAD_LENGTH + LENGTH_FIELD_LENGTH, data.length));
+    }
+
+    static byte[] intentPayload(PendingJournal.Entry entry) {
+        ByteBuffer payload = ByteBuffer.allocate(PAYLOAD_LENGTH);
+        payload.put((byte) RECEIPT_VERSION).put(HexFormat.of().parseHex(entry.cardId()))
+                .putInt((int) entry.expectedCounter()).put((byte) entry.operation())
+                .putShort((short) entry.delta()).putShort((short) entry.expectedBalance());
+        if (entry.visitId() != null) {
+            payload.put(entry.visitId());
+        }
+        return payload.array();
+    }
+
+    static boolean differentReceiptAtOrAfterIntent(PendingJournal.Entry entry, Receipt receipt) {
+        return receipt != null && receipt.counterAfter() >= entry.expectedCounter()
+                && !Arrays.equals(receipt.payload(), intentPayload(entry));
+    }
+
+    static Parse parsePayload(byte[] payload, byte[] signature) {
+        if (payload.length != PAYLOAD_LENGTH) {
+            return Parse.fail("payload không đủ 34 byte");
+        }
 
         int version = payload[OFFSET_VERSION] & 0xFF;
         if (version != RECEIPT_VERSION) {
@@ -94,16 +120,12 @@ final class ReceiptCodec {
 
         byte[] visitId = new byte[Receipt.VISIT_ID_LENGTH];
         System.arraycopy(payload, OFFSET_VISIT_ID, visitId, 0, Receipt.VISIT_ID_LENGTH);
-        if (operation == Receipt.OPERATION_GRANT && !isAllZero(visitId)) {
-            return Parse.fail("GRANT_QUOTA phải dùng visitId toàn 00");
+        if ((operation == Receipt.OPERATION_GRANT) != isAllZero(visitId)) {
+            return Parse.fail("visitId không hợp lệ cho loại giao dịch");
         }
 
         byte[] cardId = new byte[CARD_ID_LENGTH];
         System.arraycopy(payload, OFFSET_CARD_ID, cardId, 0, CARD_ID_LENGTH);
-
-        byte[] signature = new byte[signatureLength];
-        System.arraycopy(data, PAYLOAD_LENGTH + LENGTH_FIELD_LENGTH, signature, 0,
-                signatureLength);
 
         long counterAfter = readCounter(payload, OFFSET_COUNTER);
 
