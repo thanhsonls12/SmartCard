@@ -30,6 +30,12 @@ record PendingJournal(Path file) {
     }
 
     record Loaded(boolean present, boolean valid, Entry entry, Status status, String problem) {
+        String recoverySummary() {
+            return valid
+                    ? "Nhật ký đã đánh dấu hoàn tất nhưng chưa được dọn khỏi máy."
+                    : "Không đọc được nhật ký giao dịch: " + problem + ".";
+        }
+
         static Loaded absent() {
             return new Loaded(false, true, null, null, null);
         }

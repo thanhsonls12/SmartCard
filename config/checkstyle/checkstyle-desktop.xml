@@ -29,8 +29,7 @@
         <property name="ignorePattern" value="^import |^\s*\*|^\s*//"/>
     </module>
 
-    <!-- Q-30: conservative source check, not thread-flow analysis.
-         App.java close-watchdog on a dedicated thread is exempted by check ID. -->
+    <!-- Q-30: conservative source check, not thread-flow analysis. -->
     <module name="RegexpSingleline">
         <property name="id" value="desktopThreadSleep"/>
         <property name="format" value="Thread\.sleep\("/>

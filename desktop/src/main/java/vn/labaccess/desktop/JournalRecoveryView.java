@@ -18,9 +18,7 @@ final class JournalRecoveryView {
     }
 
     static String summary(PendingJournal.Loaded loaded) {
-        return loaded.valid()
-                ? "Nhật ký đã đánh dấu hoàn tất nhưng chưa được dọn khỏi máy."
-                : "Không đọc được nhật ký giao dịch: " + loaded.problem() + ".";
+        return loaded.recoverySummary();
     }
 
     static String instructions(PendingJournal.Loaded loaded, Path file) {

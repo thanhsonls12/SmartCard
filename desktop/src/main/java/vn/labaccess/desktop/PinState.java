@@ -6,6 +6,9 @@ record PinState(String title, String detail) {
         VERIFY, CHANGE, UNBLOCK
     }
 
+    record Outcome(Operation operation, boolean ok, int sw) {
+    }
+
     static PinState unknown() {
         return new PinState("Chưa biết trạng thái PIN", "nhập PIN và bấm Xác thực PIN để kiểm tra");
     }

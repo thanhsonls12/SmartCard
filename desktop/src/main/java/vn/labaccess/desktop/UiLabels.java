@@ -23,10 +23,6 @@ import javafx.scene.input.ClipboardContent;
 import javafx.stage.Window;
 import javafx.util.Duration;
 
-/**
- * Nhãn dùng chung. Cách trình bày nằm trong labaccess.css qua styleClass,
- * không đặt inline style ở đây.
- */
 final class UiLabels {
 
     static final String EMPTY_VALUE = "—";
@@ -48,7 +44,6 @@ final class UiLabels {
         return label;
     }
 
-    /** Chip trạng thái: chỉ dùng cho trạng thái, không dùng cho mọi giá trị. */
     static Label chip() {
         Label label = new Label(EMPTY_VALUE);
         label.getStyleClass().addAll("la-chip", "la-chip--neutral");
@@ -67,7 +62,6 @@ final class UiLabels {
         label.getStyleClass().add(modifier);
     }
 
-    /** Sắc thái của một dòng trạng thái; màu tương ứng nằm trong labaccess.css. */
     enum Tone {
         NEUTRAL, OK, PENDING, ERROR
     }
@@ -85,7 +79,6 @@ final class UiLabels {
         }
     }
 
-    /** Dòng thông báo: nền và chữ đổi theo sắc thái, dùng cùng bộ màu với chip. */
     static void applyNoteTone(Label label, Tone tone) {
         label.getStyleClass().removeAll("la-note--neutral", "la-note--ok",
                 "la-note--pending", "la-note--error");
@@ -97,12 +90,6 @@ final class UiLabels {
         });
     }
 
-    /**
-     * Mã APDU gắn vào control dưới dạng tooltip.
-     *
-     * Nhãn nút dùng ngôn ngữ nghiệp vụ; mã lệnh chỉ còn ở đây và trong log.
-     * Nút bị khoá không nhận input nên tooltip có thể không hiện — log mới là nguồn chính.
-     */
     static void apduHint(Node control, String apdu) {
         Tooltip.install(control, new Tooltip("Lệnh thẻ: " + apdu));
     }
@@ -179,13 +166,26 @@ final class UiLabels {
         return last == '.' || last == '!' || last == '?' ? capitalized : capitalized + ".";
     }
 
+    record ActionReason(String caption, String reason) {
+    }
+
+    static ActionReason actionReason(Button button, String reason) {
+        return new ActionReason(button.getText(), button.isDisable() ? reason : null);
+    }
+
     static String whyLine(Object... pairs) {
-        Map<String, List<String>> grouped = new LinkedHashMap<>();
+        List<ActionReason> reasons = new ArrayList<>();
         for (int i = 0; i + 1 < pairs.length; i += 2) {
-            Button button = (Button) pairs[i];
-            String reason = (String) pairs[i + 1];
-            if (reason != null && button.isDisable()) {
-                grouped.computeIfAbsent(reason, ignored -> new ArrayList<>()).add(button.getText());
+            reasons.add(actionReason((Button) pairs[i], (String) pairs[i + 1]));
+        }
+        return groupedWhy(reasons.toArray(ActionReason[]::new));
+    }
+
+    static String groupedWhy(ActionReason... reasons) {
+        Map<String, List<String>> grouped = new LinkedHashMap<>();
+        for (ActionReason action : reasons) {
+            if (action.reason() != null) {
+                grouped.computeIfAbsent(action.reason(), ignored -> new ArrayList<>()).add(action.caption());
             }
         }
         if (grouped.isEmpty()) {
