@@ -300,3 +300,39 @@ describe('ReceiptsService.listTransactions', () => {
   });
 });
 
+describe('ReceiptsService.readStoredPayload', () => {
+  function stored(payload: Buffer | null) {
+    const findUnique = vi.fn().mockResolvedValue(payload === null ? null : { payload: new Uint8Array(payload) });
+    return { findUnique, service: new ReceiptsService({ transaction: { findUnique } } as unknown as DatabaseService) };
+  }
+
+  it('returns the original 34 bytes with the visit ID from the exact compound key', async () => {
+    const payload = buildGrantPayload(7, -1, 4);
+    payload.writeUInt8(2, 13);
+    Buffer.from('102030405060708090a0b0c0d0e0f001', 'hex').copy(payload, 18);
+    const { service, findUnique } = stored(payload);
+    await expect(service.readStoredPayload(CARD_ID.toString('hex').toUpperCase(), '7')).resolves.toEqual({
+      cardId: CARD_ID.toString('hex'),
+      counterAfter: 7,
+      payload: payload.toString('hex'),
+    });
+    expect(findUnique).toHaveBeenCalledExactlyOnceWith({
+      where: { cardId_counterAfter: { cardId: new Uint8Array(CARD_ID), counterAfter: 7n } },
+      select: { payload: true },
+    });
+  });
+
+  it.each(['0', '4294967296', '1.0'])('rejects invalid counter %s before the database', async (counter) => {
+    const { service, findUnique } = stored(null);
+    await expect(service.readStoredPayload(CARD_ID.toString('hex'), counter)).rejects.toBeInstanceOf(BadRequestException);
+    expect(findUnique).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for a missing record and 409 for inconsistent or malformed stored bytes', async () => {
+    const cardId = CARD_ID.toString('hex');
+    await expect(stored(null).service.readStoredPayload(cardId, '1')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(stored(buildGrantPayload(2)).service.readStoredPayload(cardId, '1')).rejects.toBeInstanceOf(ConflictException);
+    await expect(stored(Buffer.alloc(33)).service.readStoredPayload(cardId, '1')).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+

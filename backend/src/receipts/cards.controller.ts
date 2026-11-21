@@ -1,5 +1,5 @@
 import { Controller, Get, HttpCode, Param } from '@nestjs/common';
-import { ReceiptsService, type TransactionHistory } from './receipts.service.js';
+import { ReceiptsService, type StoredReceiptPayload, type TransactionHistory } from './receipts.service.js';
 
 @Controller('cards')
 export class CardsController {
@@ -9,5 +9,14 @@ export class CardsController {
   @HttpCode(200)
   transactions(@Param('cardId') cardId: string): Promise<TransactionHistory> {
     return this.receipts.listTransactions(cardId);
+  }
+
+  @Get(':cardId/transactions/:counterAfter')
+  @HttpCode(200)
+  storedPayload(
+    @Param('cardId') cardId: string,
+    @Param('counterAfter') counterAfter: string,
+  ): Promise<StoredReceiptPayload> {
+    return this.receipts.readStoredPayload(cardId, counterAfter);
   }
 }

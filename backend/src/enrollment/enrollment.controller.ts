@@ -1,6 +1,6 @@
-import { Body, Controller, Headers, Post } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post } from '@nestjs/common';
 import { AdminSessionService } from './admin-session.service.js';
-import { EnrollmentChallengeResponse, EnrollmentResult, EnrollmentService } from './enrollment.service.js';
+import { type EnrolledCard, EnrollmentChallengeResponse, EnrollmentResult, EnrollmentService } from './enrollment.service.js';
 
 @Controller('enrollments')
 export class EnrollmentController {
@@ -8,6 +8,11 @@ export class EnrollmentController {
     private readonly enrollment: EnrollmentService,
     private readonly adminSessions: AdminSessionService,
   ) {}
+
+  @Get('cards/:cardId')
+  enrolledCard(@Param('cardId') cardId: string): Promise<EnrolledCard> {
+    return this.enrollment.readEnrolledCard(cardId);
+  }
 
   @Post('challenges')
   async createChallenge(

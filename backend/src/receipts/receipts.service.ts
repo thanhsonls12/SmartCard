@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -9,6 +10,7 @@ import { parseBody, parseHexBytes, parseSignatureHex } from '../enrollment/enrol
 import { requireP256PublicKey, verifyEnrollmentSignature } from '../enrollment/enrollment-crypto.js';
 import {
   checkTransition,
+  COUNTER_MAX,
   parseReceipt,
   receiptMessage,
   RECEIPT_PAYLOAD_BYTES,
@@ -47,6 +49,12 @@ export interface TransactionHistoryEntry {
 export interface TransactionHistory {
   cardId: string;
   transactions: TransactionHistoryEntry[];
+}
+
+export interface StoredReceiptPayload {
+  cardId: string;
+  counterAfter: number;
+  payload: string;
 }
 
 function toStoredBytes(value: Buffer): Uint8Array<ArrayBuffer> {
@@ -125,6 +133,38 @@ export class ReceiptsService {
       activeVisitId:
         ledger.activeVisitId === null ? null : storedToBuffer(ledger.activeVisitId).toString('hex'),
     };
+  }
+
+  async readStoredPayload(rawCardId: string, rawCounter: string): Promise<StoredReceiptPayload> {
+    const cardId = parseHexBytes(rawCardId, 8, 'cardId');
+    if (!/^[1-9][0-9]{0,9}$/.test(rawCounter) || Number(rawCounter) > COUNTER_MAX) {
+      throw new BadRequestException('counterAfter must be 1..4294967295');
+    }
+    const counterAfter = Number(rawCounter);
+    const row = await this.database.transaction.findUnique({
+      where: { cardId_counterAfter: { cardId: toStoredBytes(cardId), counterAfter: BigInt(counterAfter) } },
+      select: { payload: true },
+    });
+    if (row === null) {
+      throw new NotFoundException('no receipt stored for cardId and counterAfter');
+    }
+    const payload = storedToBuffer(row.payload);
+    const receipt = this.parseStoredPayload(payload);
+    if (!receipt.cardId.equals(cardId) || receipt.counterAfter !== counterAfter) {
+      throw new ConflictException('stored receipt payload differs from its identity');
+    }
+    return { cardId: cardId.toString('hex'), counterAfter, payload: payload.toString('hex') };
+  }
+
+  private parseStoredPayload(payload: Buffer): Receipt {
+    try {
+      return parseReceipt(payload);
+    } catch (failure) {
+      if (failure instanceof BadRequestException) {
+        throw new ConflictException('stored receipt payload is invalid');
+      }
+      throw failure;
+    }
   }
 
   async listTransactions(rawCardId: string): Promise<TransactionHistory> {

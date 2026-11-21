@@ -12,6 +12,11 @@ export interface EnrollmentChallengeResponse {
   expiresAt: Date;
 }
 
+export interface EnrolledCard {
+  cardId: string;
+  publicKey: string;
+}
+
 export interface EnrollmentResult {
   cardId: string;
   studentId: string;
@@ -30,6 +35,24 @@ function toStoredBytes(value: Buffer): Uint8Array<ArrayBuffer> {
 @Injectable()
 export class EnrollmentService {
   constructor(private readonly database: DatabaseService) {}
+
+  async readEnrolledCard(rawCardId: string): Promise<EnrolledCard> {
+    const cardId = parseHexBytes(rawCardId, CARD_ID_BYTES, 'cardId');
+    const enrolled = await this.database.student.findUnique({
+      where: { cardId: toStoredBytes(cardId) },
+      select: { publicKey: true },
+    });
+    if (enrolled === null) {
+      throw new NotFoundException('cardId is not enrolled');
+    }
+    const publicKey = Buffer.from(enrolled.publicKey);
+    try {
+      requireP256PublicKey(publicKey);
+    } catch {
+      throw new UnprocessableEntityException('enrolled publicKey is not a P-256 point');
+    }
+    return { cardId: cardId.toString('hex'), publicKey: publicKey.toString('hex') };
+  }
 
   async createChallenge(adminSessionId: string, body: unknown): Promise<EnrollmentChallengeResponse> {
     const payload = parseBody(body);
