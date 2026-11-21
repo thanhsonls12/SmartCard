@@ -21,15 +21,17 @@ public final class LabAccessApplet extends Applet {
     private final Personalization personalization;
     private final PhotoStore photos;
     private final ProfileHandler profiles;
+    private final AdminReadHandler adminReads;
 
     private LabAccessApplet(byte[] installParameters, short aidOffset, byte aidLength,
             PinStore pins, CardState state, Personalization personalization, PhotoStore photos,
-            ProfileHandler profiles) {
+            ProfileHandler profiles, AdminReadHandler adminReads) {
         this.pins = pins;
         this.state = state;
         this.personalization = personalization;
         this.photos = photos;
         this.profiles = profiles;
+        this.adminReads = adminReads;
         register(installParameters, aidOffset, aidLength);
     }
 
@@ -44,9 +46,10 @@ public final class LabAccessApplet extends Applet {
         Personalization personalization = new Personalization(cardState, store);
         PhotoStore photoStore = new PhotoStore();
         ProfileHandler profileHandler = new ProfileHandler(cardState, personalization, store);
+        AdminReadHandler adminReadHandler = new AdminReadHandler(cardState, store);
         new LabAccessApplet(installParameters, (short) (offset + 1),
                 installParameters[offset], store, cardState, personalization, photoStore,
-                profileHandler);
+                profileHandler, adminReadHandler);
     }
 
     public void process(APDU apdu) {
@@ -62,6 +65,7 @@ public final class LabAccessApplet extends Applet {
         byte ins = buffer[ISO7816.OFFSET_INS];
         boolean keepStudentAuthorization = false;
         boolean keepUpload = false;
+        boolean responseSent = false;
         if (ins != Protocol.INS_PHOTO_READ_CHUNK) {
             if (photos.readOffset() != (short) 0) {
                 pins.clearStudentAuthorization();
@@ -73,6 +77,14 @@ public final class LabAccessApplet extends Applet {
             if (ins == Protocol.INS_GET_STATUS) {
                 requireGetStatusP1P2(buffer);
                 sendStatus(apdu, buffer);
+                return;
+            }
+            if (ins == Protocol.INS_GET_ADMIN_STATUS) {
+                responseSent = adminReads.handleGetAdminStatus(apdu, buffer);
+                return;
+            }
+            if (ins == Protocol.INS_GET_ADMIN_LAST_RECEIPT) {
+                responseSent = adminReads.handleGetAdminLastReceipt(apdu, buffer);
                 return;
             }
             if (ins == Protocol.INS_VERIFY_STUDENT_PIN) {
@@ -156,7 +168,7 @@ public final class LabAccessApplet extends Applet {
             if (!keepUpload) {
                 photos.closeUpload();
             }
-            if (receivesCommandData(ins)) {
+            if (receivesCommandData(ins) && !responseSent) {
                 clearApduCommandData(buffer);
             }
         }
@@ -169,6 +181,8 @@ public final class LabAccessApplet extends Applet {
                 || ins == Protocol.INS_UNBLOCK_STUDENT_PIN
                 || ins == Protocol.INS_PHOTO_BEGIN
                 || ins == Protocol.INS_PHOTO_WRITE_CHUNK
+                || ins == Protocol.INS_GET_ADMIN_STATUS
+                || ins == Protocol.INS_GET_ADMIN_LAST_RECEIPT
                 || ins == Protocol.INS_SIGN_REGISTRATION_CHALLENGE;
     }
 
@@ -197,63 +211,17 @@ public final class LabAccessApplet extends Applet {
         }
 
         byte aidLength = instanceAid.getBytes(buffer, Protocol.OFFSET_INSTANCE_AID);
-        short publicLength = Protocol.statusResponseLength(aidLength);
         boolean includeStudentState = state.isIssued() && pins.isStudentAuthorized();
-        short responseLength = includeStudentState
-                ? Protocol.authenticatedStatusResponseLength(aidLength)
-                : publicLength;
+        short responseLength = StatusResponse.length(aidLength, includeStudentState);
 
         short ne = apdu.setOutgoing();
         if (ne == (short) 0 || ne < responseLength) {
             ISOException.throwIt(Sw.WRONG_LENGTH);
         }
 
-        Util.arrayCopyNonAtomic(Protocol.MAGIC, (short) 0, buffer,
-                Protocol.OFFSET_MAGIC, Protocol.MAGIC_LENGTH);
-        buffer[Protocol.OFFSET_PROTOCOL_VERSION] = Protocol.PROTOCOL_VERSION;
-        buffer[Protocol.OFFSET_AID_LENGTH] = aidLength;
-
-        short lifecycleOffset = Protocol.lifecycleOffset(aidLength);
-        buffer[lifecycleOffset] = state.lifecycle();
-        Util.arrayCopyNonAtomic(state.cardId(), (short) 0, buffer,
-                Protocol.cardIdOffset(aidLength), Protocol.CARD_ID_LENGTH);
-
-        if (includeStudentState) {
-            Util.setShort(buffer, publicLength, state.quota().balance());
-            state.quota().writeCounter(buffer,
-                    (short) (publicLength + Protocol.STATUS_AUTH_OFFSET_COUNTER));
-            VisitLedger visits = state.visits();
-            buffer[(short) (publicLength + Protocol.STATUS_AUTH_OFFSET_ACTIVE_VISIT)] =
-                    visits.hasActiveVisit() ? Protocol.STATUS_ACTIVE_VISIT_OPEN
-                            : Protocol.STATUS_ACTIVE_VISIT_CLOSED;
-            visits.writeActiveVisitId(buffer,
-                    (short) (publicLength + Protocol.STATUS_AUTH_OFFSET_ACTIVE_VISIT_ID));
-        }
-
+        StatusResponse.write(state, buffer, aidLength, includeStudentState);
         apdu.setOutgoingLength(responseLength);
         apdu.sendBytes((short) 0, responseLength);
-    }
-
-    private short receiveCommandData(APDU apdu, byte[] buffer, byte[] target,
-            short maximumLength) {
-        short received = apdu.setIncomingAndReceive();
-        short lc = apdu.getIncomingLength();
-        if (lc > maximumLength) {
-            ISOException.throwIt(Sw.WRONG_LENGTH);
-        }
-        short cdataOffset = apdu.getOffsetCdata();
-        short total = (short) 0;
-        while (total < lc) {
-            if (received <= (short) 0 || (short) (total + received) > lc) {
-                ISOException.throwIt(Sw.WRONG_LENGTH);
-            }
-            Util.arrayCopyNonAtomic(buffer, cdataOffset, target, total, received);
-            total += received;
-            if (total < lc) {
-                received = apdu.receiveBytes(cdataOffset);
-            }
-        }
-        return lc;
     }
 
     private void requireCase3(APDU apdu) {
@@ -284,8 +252,7 @@ public final class LabAccessApplet extends Applet {
     private void handleVerifyStudentPin(APDU apdu, byte[] buffer) {
         try {
             ApduChecks.requireZeroP1P2(buffer);
-            state.ensureCommandBuffer();
-            short lc = receiveCommandData(apdu, buffer, state.commandData(),
+            short lc = ApduChecks.receiveCommandData(apdu, buffer, state.commandData(),
                     MAX_PIN_COMMAND_DATA);
             requireCase3(apdu);
             if (lc != Protocol.VERIFY_STUDENT_PIN_DATA_LENGTH) {
@@ -307,8 +274,7 @@ public final class LabAccessApplet extends Applet {
         boolean transactionStarted = false;
         try {
             ApduChecks.requireZeroP1P2(buffer);
-            state.ensureCommandBuffer();
-            short lc = receiveCommandData(apdu, buffer, state.commandData(),
+            short lc = ApduChecks.receiveCommandData(apdu, buffer, state.commandData(),
                     MAX_PIN_COMMAND_DATA);
             requireCase3(apdu);
             if (lc != Protocol.CHANGE_STUDENT_PIN_DATA_LENGTH) {
@@ -345,8 +311,7 @@ public final class LabAccessApplet extends Applet {
         boolean transactionStarted = false;
         try {
             ApduChecks.requireZeroP1P2(buffer);
-            state.ensureCommandBuffer();
-            short lc = receiveCommandData(apdu, buffer, state.commandData(),
+            short lc = ApduChecks.receiveCommandData(apdu, buffer, state.commandData(),
                     MAX_PIN_COMMAND_DATA);
             requireCase3(apdu);
             if (lc != Protocol.UNBLOCK_STUDENT_PIN_DATA_LENGTH) {
@@ -398,9 +363,8 @@ public final class LabAccessApplet extends Applet {
                 || buffer[ISO7816.OFFSET_P2] != Protocol.P1P2_ZERO) {
             ISOException.throwIt(Sw.WRONG_P1P2);
         }
-        state.ensureCommandBuffer();
         try {
-            short lc = receiveCommandData(apdu, buffer, state.commandData(),
+            short lc = ApduChecks.receiveCommandData(apdu, buffer, state.commandData(),
                     PersonalizePayload.MAX_LENGTH);
             short ne = apdu.setOutgoing();
             if (ne != PERSONALIZE_EXPECTED_NE) {
@@ -419,8 +383,7 @@ public final class LabAccessApplet extends Applet {
     private void handlePhotoBegin(APDU apdu, byte[] buffer) {
         try {
             ApduChecks.requireZeroP1P2(buffer);
-            state.ensureCommandBuffer();
-            short lc = receiveCommandData(apdu, buffer, state.commandData(),
+            short lc = ApduChecks.receiveCommandData(apdu, buffer, state.commandData(),
                     Protocol.PHOTO_BEGIN_DATA_LENGTH);
             requireCase3(apdu);
             if (lc != Protocol.PHOTO_BEGIN_DATA_LENGTH) {
@@ -466,8 +429,7 @@ public final class LabAccessApplet extends Applet {
             if (!photos.uploadOpen()) {
                 ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
             }
-            state.ensureCommandBuffer();
-            short lc = receiveCommandData(apdu, buffer, state.commandData(),
+            short lc = ApduChecks.receiveCommandData(apdu, buffer, state.commandData(),
                     Protocol.PHOTO_CHUNK_MAX_LENGTH);
             requireCase3(apdu);
             if (lc <= (short) 0 || lc > Protocol.PHOTO_CHUNK_MAX_LENGTH) {
@@ -571,8 +533,7 @@ public final class LabAccessApplet extends Applet {
         boolean responseSent = false;
         try {
             ApduChecks.requireZeroP1P2(buffer);
-            state.ensureCommandBuffer();
-            short lc = receiveCommandData(apdu, buffer, state.commandData(),
+            short lc = ApduChecks.receiveCommandData(apdu, buffer, state.commandData(),
                     Protocol.GRANT_QUOTA_DATA_LENGTH);
             if (lc != Protocol.GRANT_QUOTA_DATA_LENGTH) {
                 ISOException.throwIt(Sw.WRONG_LENGTH);
@@ -679,8 +640,7 @@ public final class LabAccessApplet extends Applet {
         boolean responseSent = false;
         try {
             ApduChecks.requireZeroP1P2(buffer);
-            state.ensureCommandBuffer();
-            short lc = receiveCommandData(apdu, buffer, state.commandData(),
+            short lc = ApduChecks.receiveCommandData(apdu, buffer, state.commandData(),
                     Protocol.VISIT_ID_LENGTH);
             if (lc != Protocol.VISIT_ID_LENGTH) {
                 ISOException.throwIt(Sw.WRONG_LENGTH);
@@ -737,8 +697,7 @@ public final class LabAccessApplet extends Applet {
         boolean responseSent = false;
         try {
             ApduChecks.requireZeroP1P2(buffer);
-            state.ensureCommandBuffer();
-            short lc = receiveCommandData(apdu, buffer, state.commandData(),
+            short lc = ApduChecks.receiveCommandData(apdu, buffer, state.commandData(),
                     Protocol.VISIT_ID_LENGTH);
             if (lc != Protocol.VISIT_ID_LENGTH) {
                 ISOException.throwIt(Sw.WRONG_LENGTH);
@@ -813,8 +772,7 @@ public final class LabAccessApplet extends Applet {
 
     private void handleSignRegistrationChallenge(APDU apdu, byte[] buffer) {
         ApduChecks.requireZeroP1P2(buffer);
-        state.ensureCommandBuffer();
-        short lc = receiveCommandData(apdu, buffer, state.commandData(),
+        short lc = ApduChecks.receiveCommandData(apdu, buffer, state.commandData(),
                 Protocol.ENROLLMENT_NONCE_LENGTH);
         if (lc != Protocol.ENROLLMENT_NONCE_LENGTH) {
             ISOException.throwIt(Sw.WRONG_LENGTH);

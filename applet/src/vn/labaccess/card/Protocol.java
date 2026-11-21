@@ -4,6 +4,7 @@ final class Protocol {
 
     static final byte CLA_APPLICATION = (byte) 0x80;
     static final byte INS_GET_STATUS = (byte) 0x10;
+    static final byte INS_GET_ADMIN_STATUS = (byte) 0x11;
     static final byte INS_VERIFY_STUDENT_PIN = (byte) 0x20;
     static final byte INS_CHANGE_STUDENT_PIN = (byte) 0x21;
     static final byte INS_UNBLOCK_STUDENT_PIN = (byte) 0x23;
@@ -20,6 +21,7 @@ final class Protocol {
     static final byte INS_GET_LAST_RECEIPT = (byte) 0x60;
     static final byte INS_GET_CARD_PUBLIC_KEY = (byte) 0x61;
     static final byte INS_SIGN_REGISTRATION_CHALLENGE = (byte) 0x62;
+    static final byte INS_GET_ADMIN_LAST_RECEIPT = (byte) 0x63;
 
     static final byte PROTOCOL_VERSION = (byte) 0x01;
 

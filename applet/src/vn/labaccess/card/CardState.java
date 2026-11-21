@@ -19,7 +19,7 @@ final class CardState {
     private short profilePlaintextLength;
 
     private byte[] scratch;
-    private byte[] commandData;
+    private final byte[] commandData;
 
     private byte lifecycle;
     private boolean keysReady;
@@ -27,13 +27,8 @@ final class CardState {
     private EnrollmentSigner enrollmentSigner;
 
     CardState() {
-    }
-
-    void ensureCommandBuffer() {
-        if (commandData == null) {
-            commandData = JCSystem.makeTransientByteArray(PersonalizePayload.MAX_LENGTH,
-                    JCSystem.CLEAR_ON_DESELECT);
-        }
+        commandData = JCSystem.makeTransientByteArray(PersonalizePayload.MAX_LENGTH,
+                JCSystem.CLEAR_ON_DESELECT);
     }
 
     byte[] commandData() {
@@ -41,10 +36,8 @@ final class CardState {
     }
 
     void clearCommandData() {
-        if (commandData != null) {
-            Util.arrayFillNonAtomic(commandData, (short) 0,
-                    PersonalizePayload.MAX_LENGTH, (byte) 0);
-        }
+        Util.arrayFillNonAtomic(commandData, (short) 0,
+                PersonalizePayload.MAX_LENGTH, (byte) 0);
     }
 
     void ensureWorkingBuffers() {
