@@ -17,7 +17,6 @@ import javafx.scene.control.ButtonType;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
-import javafx.scene.layout.VBox;
 import javafx.scene.control.TitledPane;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.VBox;
@@ -38,13 +37,52 @@ final class ReceiptPanel {
             BiFunction<StaffManualReconcile.Decision, AdminGrantService.PinSource, CardOperationResult> confirmManual) {
     }
 
+    private sealed interface SessionContext permits Session, StaffSession {
+
+        BooleanSupplier open();
+
+        Supplier<PendingJournal.Loaded> pendingJournal();
+
+        java.nio.file.Path journalFile();
+
+        AdminRecovery adminRecovery();
+
+        Runnable historyInvalidated();
+
+        Runnable historyRemembered();
+
+        Runnable historyPublished();
+
+        Runnable buttonsRefreshed();
+
+        Consumer<Boolean> reconcileFinished();
+    }
+
     record Session(BooleanSupplier open, Supplier<PendingJournal.Loaded> pendingJournal,
             java.nio.file.Path journalFile,
             Supplier<char[]> studentPin, Runnable studentPinCleared,
             PendingReconcile reconcilePending, AdminRecovery adminRecovery, Runnable historyInvalidated,
             Runnable historyRemembered, Runnable historyPublished, Runnable buttonsRefreshed,
             Consumer<Boolean> receiptFinished,
-            Consumer<Boolean> reconcileFinished, Runnable pinRequired) {
+            Consumer<Boolean> reconcileFinished, Runnable pinRequired) implements SessionContext {
+    }
+
+    record StaffSession(BooleanSupplier open, Supplier<PendingJournal.Loaded> pendingJournal,
+            java.nio.file.Path journalFile, AdminRecovery adminRecovery, Runnable historyInvalidated,
+            Runnable historyRemembered, Runnable historyPublished, Runnable buttonsRefreshed,
+            Consumer<Boolean> reconcileFinished) implements SessionContext {
+
+        StaffSession {
+            java.util.Objects.requireNonNull(open);
+            java.util.Objects.requireNonNull(pendingJournal);
+            java.util.Objects.requireNonNull(journalFile);
+            java.util.Objects.requireNonNull(adminRecovery);
+            java.util.Objects.requireNonNull(historyInvalidated);
+            java.util.Objects.requireNonNull(historyRemembered);
+            java.util.Objects.requireNonNull(historyPublished);
+            java.util.Objects.requireNonNull(buttonsRefreshed);
+            java.util.Objects.requireNonNull(reconcileFinished);
+        }
     }
 
     record CardMismatch(String expectedCardId, String actualCardId) {
@@ -68,7 +106,7 @@ final class ReceiptPanel {
     private final CardGateway gateway;
     private final CardOpRunner runner;
     private final Consumer<String> log;
-    private final Session session;
+    private final SessionContext session;
 
     private final Label valueVisitId = UiLabels.value();
     private final Label valueReconcile = UiLabels.chip();
@@ -85,6 +123,16 @@ final class ReceiptPanel {
 
     ReceiptPanel(CardGateway gateway, CardOpRunner runner, Consumer<String> log,
             Session session) {
+        this(gateway, runner, log, (SessionContext) session);
+    }
+
+    ReceiptPanel(CardGateway gateway, CardOpRunner runner, Consumer<String> log,
+            StaffSession session) {
+        this(gateway, runner, log, (SessionContext) session);
+    }
+
+    private ReceiptPanel(CardGateway gateway, CardOpRunner runner, Consumer<String> log,
+            SessionContext session) {
         this.gateway = gateway;
         this.runner = runner;
         this.log = log;
@@ -95,6 +143,9 @@ final class ReceiptPanel {
         btnReconcile.getStyleClass().add("la-action");
         btnReconcile.setOnAction(e -> {
             PendingJournal.Loaded loaded = session.pendingJournal().get();
+            if (rejectStaffPending(loaded) || !session.open().getAsBoolean()) {
+                return;
+            }
             if (JournalRecoveryView.needed(loaded)) {
                 JournalRecoveryView.show(btnReconcile, loaded, session.journalFile());
             } else {
@@ -152,18 +203,52 @@ final class ReceiptPanel {
     }
 
     void applyLock(boolean busy, String whyReadReceipt, String whyReconcile) {
-        canRead = whyReadReceipt == null;
+        canRead = session instanceof Session && !busy && whyReadReceipt == null;
         CardMismatch mismatch = pendingCardMismatch();
+        String operationReason = pendingOperationReason();
         if (mismatch != null) {
             whyReconcile = mismatch.guidance();
+        } else if (operationReason != null) {
+            whyReconcile = operationReason;
         }
         boolean recovery = JournalRecoveryView.needed(session.pendingJournal().get());
         btnReconcile.setText(recovery ? "Hướng dẫn khôi phục" : "Đối soát giao dịch");
         btnReconcile.setTooltip(new javafx.scene.control.Tooltip(recovery
                 ? "Xem nguyên nhân và các bước xử lý nhật ký; không thay đổi dữ liệu"
                 : whyReconcile == null ? "Đọc biên nhận để đối soát giao dịch" : whyReconcile));
-        btnReconcile.setDisable(recovery ? busy : whyReconcile != null);
-        UiLabels.setWhy(why, mismatch == null ? pinNote : mismatch.guidance());
+        btnReconcile.setDisable(busy || !session.open().getAsBoolean() || !recovery && whyReconcile != null);
+        UiLabels.setWhy(why, mismatch != null ? mismatch.guidance()
+                : operationReason != null ? operationReason : pinNote);
+    }
+
+    String pendingOperationReason() {
+        return pendingOperationReason(session.pendingJournal().get());
+    }
+
+    private String pendingOperationReason(PendingJournal.Loaded loaded) {
+        if (!(session instanceof StaffSession) || !loaded.present() || !loaded.valid()
+                || loaded.status() != PendingJournal.Status.PENDING || loaded.entry() == null
+                || loaded.entry().operation() == Receipt.OPERATION_GRANT) {
+            return null;
+        }
+        return "Nhật ký " + Receipt.operationText(loaded.entry().operation())
+                + " thuộc luồng học viên. Mở Kiosk với cùng tệp nhật ký và đúng thẻ để đối soát."
+                + " Giữ nguyên tệp PENDING; không thực hiện lại giao dịch trong StaffApp.";
+    }
+
+    private boolean rejectStaffPending(PendingJournal.Loaded loaded) {
+        String reason = pendingOperationReason(loaded);
+        if (reason == null) {
+            return false;
+        }
+        gateway.markTransactionUnknown(reason);
+        log.accept("[FAIL] RECONCILE_PENDING: " + reason);
+        btnReconcile.setDisable(true);
+        UiLabels.setWhy(why, reason);
+        if (session.open().getAsBoolean()) {
+            session.buttonsRefreshed().run();
+        }
+        return true;
     }
 
     boolean reconcileEnabled() {
@@ -186,10 +271,16 @@ final class ReceiptPanel {
         receiptView.clear("Chưa đọc biên nhận từ thẻ");
     }
 
-    private void showPinMissing() {
+    private String grantPinGuidance() {
+        return session instanceof StaffSession
+                ? "Để đối soát cấp lượt, nhập lại PIN quản trị trong khối Cấp lượt."
+                : GRANT_PIN_GUIDANCE;
+    }
+
+    private void showPinMissing(Session student) {
         pinNote = "Nhập PIN học viên " + PersonalizeRequest.STUDENT_PIN_LENGTH
                 + " chữ số trong khối Vận hành thẻ.";
-        session.pinRequired().run();
+        student.pinRequired().run();
         UiLabels.setWhy(why, pinNote);
     }
 
@@ -205,28 +296,30 @@ final class ReceiptPanel {
         clearPinNote();
     }
 
-    private boolean pinEntered() {
-        char[] studentPin = session.studentPin().get();
+    private boolean pinEntered(Session student) {
+        char[] studentPin = student.studentPin().get();
         boolean ok = App.validPin(studentPin, PersonalizeRequest.STUDENT_PIN_LENGTH);
         App.clearBuffers(studentPin, null);
         if (!ok) {
-            showPinMissing();
+            showPinMissing(student);
         }
         return ok;
     }
 
     void showReceipt() {
-        Receipt receipt = gateway.lastReceipt();
+        boolean staff = session instanceof StaffSession;
+        Receipt receipt = staff ? gateway.verifiedAdminReceipt() : gateway.lastReceipt();
         CardStatus status = gateway.status();
-        boolean authenticated = status != null && status.studentStateAvailable();
+        boolean authenticated = status != null && (status.studentStateAvailable()
+                || session instanceof StaffSession && status.stateSource() == CardStatus.StateSource.ADMIN);
         PendingJournal.Loaded loaded = session.pendingJournal().get();
         boolean ledgerPending = loaded.present()
                 && loaded.status() == PendingJournal.Status.PENDING;
         if (receipt == null) {
             receiptView.clear(authenticated ? "Chưa có biên nhận" : "Chưa đọc biên nhận từ thẻ");
         } else {
-            receiptView.show(receipt, gateway.lastReceiptSignatureChecked(),
-                    gateway.lastReceiptSignatureOk(), ledgerPending);
+            receiptView.show(receipt, staff || gateway.lastReceiptSignatureChecked(),
+                    staff || gateway.lastReceiptSignatureOk(), ledgerPending);
         }
         valueVisitId.setText(authenticated && status.hasActiveVisit()
                 ? status.activeVisitId()
@@ -238,20 +331,24 @@ final class ReceiptPanel {
     }
 
     boolean pressReadReceipt() {
-        if (!canRead) {
+        if (rejectStaffPending(session.pendingJournal().get())
+                || !(session instanceof Session student) || !canRead) {
             return false;
         }
-        readReceipt();
+        readReceipt(student);
         return true;
     }
 
     boolean pressReconcile() {
+        if (rejectStaffPending(session.pendingJournal().get()) || !session.open().getAsBoolean()) {
+            return false;
+        }
         return press(btnReconcile);
     }
 
     void offerPendingReconciliation() {
         PendingJournal.Loaded loaded = session.pendingJournal().get();
-        if (!loaded.present()) {
+        if (rejectStaffPending(loaded) || !loaded.present()) {
             return;
         }
         if (!loaded.valid() || loaded.status() != PendingJournal.Status.PENDING) {
@@ -267,7 +364,7 @@ final class ReceiptPanel {
         }
         gateway.markTransactionUnknown("pending journal chờ operator đối soát");
         if (loaded.entry().operation() == Receipt.OPERATION_GRANT) {
-            pinNote = GRANT_PIN_GUIDANCE;
+            pinNote = grantPinGuidance();
             session.buttonsRefreshed().run();
             return;
         }
@@ -289,7 +386,7 @@ final class ReceiptPanel {
         session.buttonsRefreshed().run();
     }
 
-    private void readReceipt() {
+    private void readReceipt(Session student) {
         if (!session.open().getAsBoolean()) {
             return;
         }
@@ -301,12 +398,12 @@ final class ReceiptPanel {
             session.buttonsRefreshed().run();
             return;
         }
-        if (!pinEntered()) {
+        if (!pinEntered(student)) {
             return;
         }
         clearPinNote();
-        char[] studentPin = session.studentPin().get();
-        session.studentPinCleared().run();
+        char[] studentPin = student.studentPin().get();
+        student.studentPinCleared().run();
         runner.run("VERIFY + GET_LAST_RECEIPT + GET_STATUS state", () -> {
             try {
                 return gateway.readOperatorCard(studentPin);
@@ -314,16 +411,16 @@ final class ReceiptPanel {
                 java.util.Arrays.fill(studentPin, '\0');
             }
         }, ok -> {
-            session.receiptFinished().accept(ok);
+            student.receiptFinished().accept(ok);
             showReceipt();
         });
     }
 
     private void reconcile() {
-        if (!session.open().getAsBoolean()) {
+        PendingJournal.Loaded loaded = session.pendingJournal().get();
+        if (rejectStaffPending(loaded) || !session.open().getAsBoolean()) {
             return;
         }
-        PendingJournal.Loaded loaded = session.pendingJournal().get();
         if (!loaded.present()) {
             reconcileWithoutJournal();
             return;
@@ -343,7 +440,13 @@ final class ReceiptPanel {
             reconcileGrant(entry);
             return;
         }
-        if (!pinEntered()) {
+        if (session instanceof Session student) {
+            reconcileStudent(student, entry);
+        }
+    }
+
+    private void reconcileStudent(Session student, PendingJournal.Entry entry) {
+        if (!pinEntered(student)) {
             return;
         }
         if (!confirmReconcile(entry)) {
@@ -351,13 +454,13 @@ final class ReceiptPanel {
             return;
         }
         clearPinNote();
-        char[] studentPin = session.studentPin().get();
-        session.studentPinCleared().run();
+        char[] studentPin = student.studentPin().get();
+        student.studentPinCleared().run();
         AtomicReference<SupersededProof> proof = new AtomicReference<>();
         runner.run("RECONCILE_PENDING", () -> {
             session.historyInvalidated().run();
             try {
-                CardOperationResult reconciled = session.reconcilePending().reconcile(studentPin);
+                CardOperationResult reconciled = student.reconcilePending().reconcile(studentPin);
                 proof.set(reconciled.superseded());
                 if (!reconciled.ok()) {
                     return reconciled;
@@ -372,14 +475,20 @@ final class ReceiptPanel {
     }
 
     private void reconcileWithoutJournal() {
+        int revision = cardSessionRevision;
         AdminRecovery admin = session.adminRecovery();
         if (!admin.requirePin().getAsBoolean()) {
-            pinNote = GRANT_PIN_GUIDANCE;
+            pinNote = grantPinGuidance();
             UiLabels.setWhy(why, pinNote);
             return;
         }
+        if (!session.open().getAsBoolean() || cardSessionRevision != revision
+                || rejectStaffPending(session.pendingJournal().get())) {
+            admin.clearPin().run();
+            return;
+        }
         AtomicReference<StaffManualReconcile.Decision> decision = new AtomicReference<>();
-        runner.run("ĐỐI SOÁT TAY", () -> {
+        boolean accepted = runner.run("ĐỐI SOÁT TAY", () -> {
             StaffManualReconcile.Decision found = admin.inspectManual().apply(admin.pin());
             decision.set(found);
             if (found.kind() == StaffManualReconcile.Kind.REJECTED) {
@@ -387,6 +496,10 @@ final class ReceiptPanel {
             }
             return CardOperationResult.ok(found.detail());
         }, ok -> {
+            if (cardSessionRevision != revision || rejectStaffPending(session.pendingJournal().get())) {
+                admin.clearPin().run();
+                return;
+            }
             StaffManualReconcile.Decision found = decision.get();
             if (found == null || found.kind() != StaffManualReconcile.Kind.NEEDS_CONFIRMATION) {
                 admin.clearPin().run();
@@ -399,18 +512,28 @@ final class ReceiptPanel {
                 return;
             }
             Platform.runLater(() -> {
-                boolean accepted = runner.run("GHI SỔ ĐỐI SOÁT TAY",
+                if (!session.open().getAsBoolean() || cardSessionRevision != revision
+                        || rejectStaffPending(session.pendingJournal().get())) {
+                    again.clear();
+                    return;
+                }
+                boolean posting = runner.run("GHI SỔ ĐỐI SOÁT TAY",
                         () -> admin.confirmManual().apply(found, () -> copyConfirmPin(again)),
                         posted -> {
                             again.clear();
-                            finishReconcile(posted);
+                            if (cardSessionRevision == revision) {
+                                finishReconcile(posted);
+                            }
                         });
-                if (!accepted) {
+                if (!posting) {
                     again.clear();
                     log.accept("[INFO] Đối soát tay: không nhận tác vụ, đã xóa PIN");
                 }
             });
         });
+        if (!accepted) {
+            admin.clearPin().run();
+        }
     }
 
     private static char[] copyConfirmPin(PasswordField pin) {
@@ -464,10 +587,16 @@ final class ReceiptPanel {
     }
 
     private void reconcileGrant(PendingJournal.Entry entry) {
+        int revision = cardSessionRevision;
         AdminRecovery admin = session.adminRecovery();
         if (!admin.requirePin().getAsBoolean()) {
-            pinNote = GRANT_PIN_GUIDANCE;
+            pinNote = grantPinGuidance();
             UiLabels.setWhy(why, pinNote);
+            return;
+        }
+        if (!session.open().getAsBoolean() || cardSessionRevision != revision
+                || rejectStaffPending(session.pendingJournal().get())) {
+            admin.clearPin().run();
             return;
         }
         if (!confirmReconcile(entry)) {
@@ -475,13 +604,14 @@ final class ReceiptPanel {
             log.accept("[INFO] RECONCILE_PENDING: operator chưa xác nhận, journal vẫn được giữ");
             return;
         }
-        if (!session.open().getAsBoolean()) {
+        if (!session.open().getAsBoolean() || cardSessionRevision != revision
+                || rejectStaffPending(session.pendingJournal().get())) {
             admin.clearPin().run();
             return;
         }
         clearPinNote();
         AtomicReference<SupersededProof> proof = new AtomicReference<>();
-        runner.run("RECONCILE_PENDING", () -> {
+        boolean accepted = runner.run("RECONCILE_PENDING", () -> {
             session.historyInvalidated().run();
             CardOperationResult result = admin.reconcile().apply(admin.pin());
             proof.set(result.superseded());
@@ -491,19 +621,29 @@ final class ReceiptPanel {
             return result;
         }, ok -> {
             admin.clearPin().run();
-            finishReconcile(ok, proof.get());
+            if (cardSessionRevision == revision) {
+                finishReconcile(ok, proof.get());
+            }
         });
+        if (!accepted) {
+            admin.clearPin().run();
+        }
     }
 
     private void finishReconcile(boolean ok, SupersededProof proof) {
         finishReconcile(ok);
         if (proof != null) {
-            Platform.runLater(() -> confirmSuperseded(proof));
+            int revision = cardSessionRevision;
+            Platform.runLater(() -> {
+                if (cardSessionRevision == revision) {
+                    confirmSuperseded(proof);
+                }
+            });
         }
     }
 
     private void confirmSuperseded(SupersededProof proof) {
-        if (!session.open().getAsBoolean()) {
+        if (rejectStaffPending(session.pendingJournal().get()) || !session.open().getAsBoolean()) {
             return;
         }
         int revision = cardSessionRevision;
@@ -512,12 +652,13 @@ final class ReceiptPanel {
             log.accept("[INFO] Nhân viên chưa xác nhận SUPERSEDED, journal được giữ");
             return;
         }
-        if (!session.open().getAsBoolean() || cardSessionRevision != revision) {
+        if (!session.open().getAsBoolean() || cardSessionRevision != revision
+                || rejectStaffPending(session.pendingJournal().get())) {
             Arrays.fill(pin, '\0');
             return;
         }
         AtomicReference<SupersededRecovery.Confirmation> confirmed = new AtomicReference<>();
-        runner.run("RECONCILE_PENDING", () -> {
+        boolean accepted = runner.run("RECONCILE_PENDING", () -> {
             SupersededRecovery.Confirmation attempt = session.adminRecovery().confirmSuperseded().apply(proof, pin);
             confirmed.set(attempt);
             return attempt.result();
@@ -528,8 +669,13 @@ final class ReceiptPanel {
                     && current.publicView().equals(proof.state().publicView())) {
                 attempt.adminStatusWord().ifPresent(this::rememberAdminPinRetries);
             }
-            finishReconcile(ok);
+            if (cardSessionRevision == revision) {
+                finishReconcile(ok);
+            }
         });
+        if (!accepted) {
+            Arrays.fill(pin, '\0');
+        }
     }
 
     private void rememberAdminPinRetries(int sw) {

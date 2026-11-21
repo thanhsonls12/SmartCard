@@ -14,18 +14,14 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>25</maven.compiler.release>
         <javafx.version>25</javafx.version>
-        <!-- AtlantaFX 2.1.0 duoc build bang Java 21 va JavaFX 23: chay tren JavaFX 25
-             vi JavaFX giu tuong thich API ve sau. Khong dung 3.0.0 vi ban do build
-             bang JavaFX 27, co the goi API chua co trong 25. -->
+        <labaccess.mainClass>vn.labaccess.desktop/vn.labaccess.desktop.App</labaccess.mainClass>
+        <labaccess.host>127.0.0.1</labaccess.host>
+        <labaccess.journal>${user.home}/.labaccess/pending-journal.txt</labaccess.journal>
         <atlantafx.version>2.1.0</atlantafx.version>
         <ikonli.version>12.4.0</ikonli.version>
         <jackson.version>2.17.2</jackson.version>
-        <!-- Chi dung cho kiem thu giao dien: bat che do tu bam nut de chup anh.
-             Mac dinh false; chay that thi bo qua. -->
         <labaccess.demo>false</labaccess.demo>
-        <!-- Cong simulator; doi duoc khi can test (vi du tro vao mot cong treo). -->
         <labaccess.port>9025</labaccess.port>
-        <!-- Chon kich ban demo nao chay khi bat labaccess.demo. -->
         <labaccess.demo.transactions>false</labaccess.demo.transactions>
         <labaccess.demo.history>false</labaccess.demo.history>
         <labaccess.demo.history.ready>false</labaccess.demo.history.ready>
@@ -42,22 +38,18 @@
     </properties>
 
     <dependencies>
-        <!-- JavaFX 25: controls keo theo graphics + base tuong ung -->
         <dependency>
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-controls</artifactId>
             <version>${javafx.version}</version>
         </dependency>
 
-        <!-- AtlantaFX: nen theme + control phu. Chi dung atlantafx-base,
-             khong keo module decorations/spins de giu dependency gon. -->
         <dependency>
             <groupId>io.github.mkpaz</groupId>
             <artifactId>atlantafx-base</artifactId>
             <version>${atlantafx.version}</version>
         </dependency>
 
-        <!-- Ikonli: icon vector trong JavaFX; pack Feather cho bo icon toi gian. -->
         <dependency>
             <groupId>org.kordamp.ikonli</groupId>
             <artifactId>ikonli-javafx</artifactId>
@@ -69,16 +61,12 @@
             <version>${ikonli.version}</version>
         </dependency>
 
-        <!-- Jackson: parse phan hoi Backend theo JSON that, khong doan bang regex.
-             Chi dung databind; core va annotations di kem. -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
             <version>${jackson.version}</version>
         </dependency>
 
-        <!-- JAR Oracle da cai vao local repo bang install:install-file.
-             KHONG phai artifact tren Maven Central. -->
         <dependency>
             <groupId>local.oracle.javacard</groupId>
             <artifactId>socketprovider</artifactId>
@@ -93,9 +81,7 @@
                 <artifactId>javafx-maven-plugin</artifactId>
                 <version>0.0.8</version>
                 <configuration>
-                    <mainClass>vn.labaccess.desktop/vn.labaccess.desktop.App</mainClass>
-                    <!-- javafx:run fork JVM rieng, nen -D cua Maven khong tu sang.
-                         Chuyen tiep tuong minh qua <options>. -->
+                    <mainClass>${labaccess.mainClass}</mainClass>
                     <options>
                         <option>-Dlabaccess.demo=${labaccess.demo}</option>
                         <option>-Dlabaccess.demo.transactions=${labaccess.demo.transactions}</option>
@@ -111,6 +97,8 @@
                         <option>-Dlabaccess.demo.cardId=${labaccess.demo.cardId}</option>
                         <option>-Dlabaccess.demo.studentId=${labaccess.demo.studentId}</option>
                         <option>-Dlabaccess.backend=${labaccess.backend}</option>
+                        <option>-Dlabaccess.host=${labaccess.host}</option>
+                        <option>-Dlabaccess.journal=${labaccess.journal}</option>
                         <option>-Dstdout.encoding=UTF-8</option>
                         <option>-Dstderr.encoding=UTF-8</option>
                         <option>-Dlabaccess.port=${labaccess.port}</option>
@@ -121,8 +109,20 @@
     </build>
 
     <profiles>
-        <!-- Chạy khi cần: mvn -Pquality checkstyle:check
-             Không gắn vào build thường để `javafx:run` không bị chặn bởi lint. -->
+        <profile>
+            <id>kiosk</id>
+            <properties>
+                <labaccess.mainClass>vn.labaccess.desktop/vn.labaccess.desktop.KioskApp</labaccess.mainClass>
+                <labaccess.journal>${user.home}/.labaccess/kiosk-journal.txt</labaccess.journal>
+            </properties>
+        </profile>
+        <profile>
+            <id>staff</id>
+            <properties>
+                <labaccess.mainClass>vn.labaccess.desktop/vn.labaccess.desktop.StaffApp</labaccess.mainClass>
+                <labaccess.journal>${user.home}/.labaccess/staff-journal.txt</labaccess.journal>
+            </properties>
+        </profile>
         <profile>
             <id>quality</id>
             <build>

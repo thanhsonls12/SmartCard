@@ -23,6 +23,7 @@ final class CardAdminCommands {
 
     private final CardTransport transport;
     private final IntConsumer responseSwSink;
+    private Receipt verifiedReceipt;
 
     CardAdminCommands(CardTransport transport, IntConsumer responseSwSink) {
         this.transport = transport;
@@ -57,6 +58,7 @@ final class CardAdminCommands {
 
     ReceiptRead readLastReceipt(char[] adminPin, CardStatus selected, String enrolledCardId,
             byte[] enrolledPublicKey) throws CardException {
+        verifiedReceipt = null;
         responseSwSink.accept(-1);
         String label = "GET_ADMIN_LAST_RECEIPT";
         String problem = inputProblem(adminPin, selected);
@@ -88,8 +90,18 @@ final class CardAdminCommands {
         if (!verified.ok()) {
             return receiptFailure(detail + " | ECDSA=FAIL (" + verified.problem() + ")", true);
         }
+        verifiedReceipt = receipt;
         return new ReceiptRead(CardOperationResult.ok(detail + " | nguồn=ADMIN ECDSA=PASS | " + receipt),
                 receipt, true);
+    }
+
+    Receipt verifiedReceipt(CardStatus current) {
+        return current != null && verifiedReceipt != null
+                && current.cardId().equals(verifiedReceipt.cardIdHex()) ? verifiedReceipt : null;
+    }
+
+    void clearVerifiedReceipt() {
+        verifiedReceipt = null;
     }
 
     private ResponseAPDU transmit(int ins, char[] adminPin) throws CardException {

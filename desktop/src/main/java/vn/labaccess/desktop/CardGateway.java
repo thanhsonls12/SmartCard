@@ -91,6 +91,7 @@ final class CardGateway {
     }
 
     private void resetSession(String enrollmentDetail) {
+        adminCommands.clearVerifiedReceipt();
         ready = false;
         status = null;
         lastReceipt = null;
@@ -113,6 +114,7 @@ final class CardGateway {
 
     CardOperationResult identifyWith(byte[] instanceAid) throws CardException {
         transport.requireConnected();
+        adminCommands.clearVerifiedReceipt();
         adminReceiptRead = null;
         ready = false;
         status = null;
@@ -381,6 +383,10 @@ final class CardGateway {
         }
     }
 
+    Receipt verifiedAdminReceipt() {
+        return adminCommands.verifiedReceipt(isReady() ? status : null);
+    }
+
     void clearAuthenticatedStatus() {
         CardStatus current = status;
         if (current != null) {
@@ -463,6 +469,7 @@ final class CardGateway {
     int lastPinSw() {
         return pinCommands.lastPinSw();
     }
+    void resetPinResult() { pinCommands.reset(); }
 
     java.security.PublicKey cardPublicKey() {
         return cardPublicKey;

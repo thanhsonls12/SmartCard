@@ -22,15 +22,20 @@ final class CardSession {
             Integer.getInteger("labaccess.port", 9025));
     private final BackendClient backend = new BackendClient(
             System.getProperty("labaccess.backend", "http://127.0.0.1:3100"));
-    private final PendingJournal journal = new PendingJournal(
-            Path.of(System.getProperty("labaccess.journal",
-                    System.getProperty("user.home") + "/.labaccess/pending-journal.txt")));
+    private final PendingJournal journal;
     private final CardConnectionService connection;
-    private final SupersededRecovery superseded = new SupersededRecovery(gateway, journal, backend);
+    private final SupersededRecovery superseded;
     private final StaffManualReconcile manual = new StaffManualReconcile(gateway, backend);
     private boolean snapshotKnown;
 
     CardSession(Consumer<String> diagnostics) {
+        this(Path.of(System.getProperty("labaccess.journal",
+                System.getProperty("user.home") + "/.labaccess/pending-journal.txt")), diagnostics);
+    }
+
+    CardSession(Path journalFile, Consumer<String> diagnostics) {
+        journal = new PendingJournal(journalFile);
+        superseded = new SupersededRecovery(gateway, journal, backend);
         connection = new CardConnectionService(gateway, backend, diagnostics);
         gateway.setDiagnostics(diagnostics);
         gateway.setReceiptSink(new CardGateway.ReceiptSink() {

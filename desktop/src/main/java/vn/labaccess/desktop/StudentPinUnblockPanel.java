@@ -22,6 +22,9 @@ final class StudentPinUnblockPanel {
     private final Label confirmUnblockError = UiLabels.fieldError();
     private final Button btnUnblock = new Button("Mở khóa PIN");
     private final FlowPane node;
+    private static final String READY_NOTE =
+            "Chưa mở khóa — nhập PIN quản trị và PIN học viên mới để thực hiện.";
+    private final Label feedback = UiLabels.caption(READY_NOTE);
 
     StudentPinUnblockPanel(CardGateway gateway, CardOpRunner runner, Consumer<String> log,
             Consumer<PinState.Outcome> finished) {
@@ -37,6 +40,9 @@ final class StudentPinUnblockPanel {
         btnUnblock.setOnAction(event -> unblock());
         UiLabels.apduHint(btnUnblock, "UNBLOCK_STUDENT_PIN");
         btnUnblock.getStyleClass().add("la-action");
+        feedback.getStyleClass().add("la-note");
+        feedback.setWrapText(true);
+        UiLabels.applyNoteTone(feedback, UiLabels.Tone.NEUTRAL);
         node = UiRows.wrapping(
                 UiRows.field("PIN quản trị", fieldAdminPin, adminError),
                 UiRows.field("PIN mới sau mở khóa", fieldUnblockPin, unblockError),
@@ -45,6 +51,15 @@ final class StudentPinUnblockPanel {
 
     Node node() {
         return node;
+    }
+
+    Node feedbackNode() {
+        return feedback;
+    }
+
+    void resetFeedback() {
+        feedback.setText(READY_NOTE);
+        UiLabels.applyNoteTone(feedback, UiLabels.Tone.NEUTRAL);
     }
 
     void setEnabled(boolean enabled) {
@@ -94,13 +109,22 @@ final class StudentPinUnblockPanel {
         fieldAdminPin.clear();
         fieldUnblockPin.clear();
         fieldConfirmUnblockPin.clear();
-        runner.run("UNBLOCK_STUDENT_PIN", () -> {
+        boolean accepted = runner.run("UNBLOCK_STUDENT_PIN", () -> {
             try {
                 return gateway.unblockStudentPin(adminPin, newPin);
             } finally {
                 Arrays.fill(adminPin, '\0');
                 Arrays.fill(newPin, '\0');
             }
-        }, ok -> finished.accept(new PinState.Outcome(PinState.Operation.UNBLOCK, ok, gateway.lastPinSw())));
+        }, ok -> {
+            PinState.Outcome outcome = new PinState.Outcome(PinState.Operation.UNBLOCK, ok, gateway.lastPinSw());
+            feedback.setText(PinState.of(outcome.operation(), outcome.ok(), outcome.sw()).text());
+            UiLabels.applyNoteTone(feedback, PinState.tone(outcome.ok(), outcome.sw()));
+            finished.accept(outcome);
+        });
+        if (!accepted) {
+            Arrays.fill(adminPin, '\0');
+            Arrays.fill(newPin, '\0');
+        }
     }
 }
