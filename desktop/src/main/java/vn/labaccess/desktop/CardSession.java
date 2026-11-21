@@ -1,5 +1,7 @@
 package vn.labaccess.desktop;
 
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.security.NoSuchAlgorithmException;
 import java.security.NoSuchProviderException;
@@ -22,7 +24,19 @@ final class CardSession {
             Integer.getInteger("labaccess.port", 9025));
     private final BackendClient backend = new BackendClient(
             System.getProperty("labaccess.backend", "http://127.0.0.1:3100"));
+    enum Role {
+        STAFF("staff-journal.txt"), KIOSK("kiosk-journal.txt");
+
+        private final String journalName;
+
+        Role(String journalName) {
+            this.journalName = journalName;
+        }
+    }
+
     private final PendingJournal journal;
+    private final Path legacyFile;
+    private final Role role;
     private final CardConnectionService connection;
     private final SupersededRecovery superseded;
     private final StaffManualReconcile manual = new StaffManualReconcile(gateway, backend);
@@ -34,6 +48,19 @@ final class CardSession {
     }
 
     CardSession(Path journalFile, Consumer<String> diagnostics) {
+        this(journalFile, null, null, diagnostics);
+    }
+
+    static CardSession forRole(Role role, Consumer<String> diagnostics) {
+        Path directory = Path.of(System.getProperty("user.home"), ".labaccess").toAbsolutePath().normalize();
+        Path file = Path.of(System.getProperty("labaccess.journal", directory.resolve(role.journalName).toString()));
+        return new CardSession(file.toAbsolutePath().normalize(), directory.resolve("pending-journal.txt"),
+                role, diagnostics);
+    }
+
+    private CardSession(Path journalFile, Path legacyFile, Role role, Consumer<String> diagnostics) {
+        this.legacyFile = legacyFile;
+        this.role = role;
         journal = new PendingJournal(journalFile);
         superseded = new SupersededRecovery(gateway, journal, backend);
         connection = new CardConnectionService(gateway, backend, diagnostics);
@@ -67,7 +94,48 @@ final class CardSession {
         return journal.load();
     }
 
+    private boolean legacySelected() {
+        return legacyFile != null && journal.file().equals(legacyFile);
+    }
+
+    private boolean legacyPresent() {
+        return legacyFile != null && !Files.notExists(legacyFile, LinkOption.NOFOLLOW_LINKS);
+    }
+
+    String newTransactionProblem() {
+        if (legacySelected() && !legacyPresent()) {
+            return "Đóng ứng dụng và mở lại với journal mặc định trước khi thực hiện giao dịch mới.";
+        }
+        if (!legacyPresent()) {
+            return null;
+        }
+        return legacySelected() ? "Đang mở journal cũ chỉ để đối soát; không thực hiện giao dịch mới."
+                : "Còn journal cũ " + legacyFile + ". Đóng ứng dụng; mở Staff cho GRANT hoặc Kiosk cho START/END"
+                        + " với -Dlabaccess.journal trỏ đúng tệp cũ để đối soát tại chỗ.";
+    }
+
+    String recoveryProblem() {
+        if (!legacySelected() || !legacyPresent()) {
+            return newTransactionProblem();
+        }
+        if (!Files.isRegularFile(legacyFile, LinkOption.NOFOLLOW_LINKS)) {
+            return "Journal cũ không phải tệp thường. Giữ nguyên và kiểm tra tệp trước khi đối soát.";
+        }
+        PendingJournal.Loaded loaded = journal.load();
+        if (!loaded.present() || !loaded.valid() || loaded.status() != PendingJournal.Status.PENDING) {
+            return loaded.present() ? loaded.recoverySummary() : "Không đọc được journal cũ. Giữ nguyên tệp.";
+        }
+        boolean grant = loaded.entry().operation() == Receipt.OPERATION_GRANT;
+        return grant == (role == Role.STAFF) ? null
+                : "Sai ứng dụng cho journal cũ. Mở " + (grant ? "Staff cho GRANT" : "Kiosk cho START/END")
+                        + " với cùng tệp để đối soát; giữ nguyên journal.";
+    }
+
     StartupJournal blockOnStartupJournal() {
+        String restricted = recoveryProblem();
+        if (restricted != null) {
+            return new StartupJournal(legacyPresent(), "[INFO] Khởi động: " + restricted);
+        }
         PendingJournal.Loaded loaded = journal.load();
         if (!loaded.present()) {
             return new StartupJournal(false, "Khởi động: không có pending journal");
@@ -128,32 +196,50 @@ final class CardSession {
 
     CardOperationResult runStateTransaction(CardGateway.TransactionPlan plan,
             CardGateway.CommandSupplier supplier, char[] studentPin) throws CardException {
-        return gateway.runStateTransaction(journal, plan, supplier, studentPin);
+        String problem = newTransactionProblem();
+        return problem == null ? gateway.runStateTransaction(journal, plan, supplier, studentPin)
+                : CardOperationResult.fail(problem);
     }
 
     CardOperationResult grant(int delta, AdminGrantService.PinSource pinSource) {
-        return new AdminGrantService(gateway, journal, backend).grant(delta, pinSource);
+        String problem = newTransactionProblem();
+        return problem == null ? new AdminGrantService(gateway, journal, backend).grant(delta, pinSource)
+                : CardOperationResult.fail(problem);
     }
 
     CardOperationResult reconcilePending(char[] studentPin) throws CardException {
-        return gateway.reconcilePending(journal, studentPin, superseded::studentEvidence);
+        String problem = recoveryProblem();
+        return problem == null ? gateway.reconcilePending(journal, studentPin, superseded::studentEvidence)
+                : CardOperationResult.fail(problem);
     }
 
     CardOperationResult reconcileAdminGrant(AdminGrantService.PinSource pinSource) {
-        return new AdminGrantRecovery(gateway, journal, backend).reconcile(pinSource);
+        String problem = recoveryProblem();
+        return problem == null ? new AdminGrantRecovery(gateway, journal, backend).reconcile(pinSource)
+                : CardOperationResult.fail(problem);
     }
 
     SupersededRecovery.Confirmation confirmSuperseded(CardOperationResult.SupersededProof proof, char[] adminPin) {
-        return superseded.confirm(proof, adminPin);
+        String problem = recoveryProblem();
+        if (problem == null) {
+            return superseded.confirm(proof, adminPin);
+        }
+        if (adminPin != null) {
+            java.util.Arrays.fill(adminPin, (char) 0);
+        }
+        return SupersededRecovery.Confirmation.withoutAdminResponse(CardOperationResult.fail(problem));
     }
 
     StaffManualReconcile.Decision inspectManualReconcile(AdminGrantService.PinSource pinSource) {
-        return manual.inspect(pinSource);
+        String problem = newTransactionProblem();
+        return problem == null ? manual.inspect(pinSource)
+                : new StaffManualReconcile.Decision(StaffManualReconcile.Kind.REJECTED, null, null, problem);
     }
 
     CardOperationResult confirmManualReconcile(StaffManualReconcile.Decision preview,
             AdminGrantService.PinSource pinSource) {
-        return manual.confirm(preview, pinSource);
+        String problem = newTransactionProblem();
+        return problem == null ? manual.confirm(preview, pinSource) : CardOperationResult.fail(problem);
     }
 
     History loadHistory() {

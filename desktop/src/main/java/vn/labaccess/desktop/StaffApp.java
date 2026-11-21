@@ -1,6 +1,5 @@
 package vn.labaccess.desktop;
 
-import java.nio.file.Path;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 import javafx.application.Application;
@@ -16,9 +15,7 @@ public final class StaffApp extends Application {
 
     @Override
     public void start(Stage stage) {
-        Path journal = Path.of(System.getProperty("labaccess.journal",
-                System.getProperty("user.home") + "/.labaccess/staff-journal.txt"));
-        session = new CardSession(journal, this::log);
+        session = CardSession.forRole(CardSession.Role.STAFF, this::log);
         workspace = new StaffWorkspace(session, tasks, this::runCardOperation, this::runBackendOperation);
         Scene scene = new Scene(workspace.node(),
                 Math.min(1180, Screen.getPrimary().getVisualBounds().getWidth() - UiScale.SPACE_5 * 2),

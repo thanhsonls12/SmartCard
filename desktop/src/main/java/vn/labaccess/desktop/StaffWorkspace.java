@@ -77,7 +77,7 @@ final class StaffWorkspace {
             }
         });
         receipts = new ReceiptPanel(gateway, cardOps, this::log, new ReceiptPanel.StaffSession(
-                this::open, session::pendingJournal, session.journalFile(),
+                () -> open() && session.recoveryProblem() == null, session::pendingJournal, session.journalFile(),
                 new ReceiptPanel.AdminRecovery(() -> {
                     tabsSelect(OPERATIONS);
                     return grants.requirePin();
@@ -191,7 +191,7 @@ final class StaffWorkspace {
             resetViews();
             if (ok && session.gateway().isReady()) {
                 synchronizeConnection();
-                Platform.runLater(receipts::offerPendingReconciliation);
+                Platform.runLater(this::offerPendingReconciliation);
             }
         });
     }
@@ -204,9 +204,15 @@ final class StaffWorkspace {
             session.invalidateSnapshot();
             if (ok) {
                 synchronizeConnection();
-                Platform.runLater(receipts::offerPendingReconciliation);
+                Platform.runLater(this::offerPendingReconciliation);
             }
         });
+    }
+
+    private void offerPendingReconciliation() {
+        if (session.recoveryProblem() == null) {
+            receipts.offerPendingReconciliation();
+        }
     }
 
     private void disconnect() {
@@ -347,7 +353,9 @@ final class StaffWorkspace {
         boolean issued = status != null && status.lifecycle() == CardLifecycle.ISSUED;
         String base = busy ? "đang xử lý thao tác khác" : gateway.needsReconnect() ? "cần ngắt và kết nối lại thẻ"
                 : !gateway.isConnected() ? "chưa kết nối thẻ" : !ready ? "chưa nhận diện thẻ" : null;
-        String journalWhy = !loaded.present() ? null : !loaded.valid()
+        String legacyProblem = session.newTransactionProblem();
+        String recoveryProblem = session.recoveryProblem();
+        String journalWhy = legacyProblem != null ? legacyProblem : !loaded.present() ? null : !loaded.valid()
                 || loaded.status() != PendingJournal.Status.PENDING ? "nhật ký cần xử lý thủ công"
                 : "có giao dịch đang chờ đối soát";
         String mutation = base != null ? base : journalWhy != null ? journalWhy
@@ -387,7 +395,8 @@ final class StaffWorkspace {
         lifecycle.setText(status == null ? "Chưa rõ" : CardLifecycle.caption(status.lifecycle()));
         boolean confirmed = ready && session.snapshotKnown() && !loaded.present()
                 && gateway.reconciliation().transactionAllowed() && status.stateAvailable();
-        boolean unresolved = loaded.present() || gateway.reconciliation().state() == Reconciliation.State.UNKNOWN;
+        boolean unresolved = loaded.present() || legacyProblem != null
+                || gateway.reconciliation().state() == Reconciliation.State.UNKNOWN;
         stateOrigin.setText(CardDisplayState.of(status, confirmed, unresolved,
                 awaitingReadCard != null || gateway.reconciliation().receiptUnverified(), busy));
         quota.setText(unresolved || busy ? "Chưa rõ kết quả"
@@ -398,7 +407,8 @@ final class StaffWorkspace {
         grants.markPrimary(primary);
         personalize.setIssuePrimary(tabs.getSelectionModel().getSelectedIndex() == ISSUANCE && issuance == null);
         photos.setUploadPrimary(tabs.getSelectionModel().getSelectedIndex() == PHOTOS && mutation == null);
-        String next = loaded.present() ? receipts.pendingOperationReason() != null ? receipts.pendingOperationReason()
+        String next = recoveryProblem != null ? recoveryProblem
+                : loaded.present() ? receipts.pendingOperationReason() != null ? receipts.pendingOperationReason()
                 : loaded.valid() && loaded.status() == PendingJournal.Status.PENDING
                 ? "Đối soát journal trước; không thực hiện lại giao dịch." : loaded.recoverySummary()
                 : base != null ? base : !issued ? "Phát hành thẻ tại Phát hành & mở khóa."

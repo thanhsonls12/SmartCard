@@ -242,7 +242,7 @@ public final class RoleLedgerDisplayVerify {
                 + " journal=" + value.get("journal"));
     }
 
-    private static final class Window implements AutoCloseable {
+    static final class Window implements AutoCloseable {
         final Object app;
         final Object workspace;
         final CardSession session;
@@ -252,10 +252,15 @@ public final class RoleLedgerDisplayVerify {
         final char[] pin;
 
         Window(boolean staff, String name, Fixture fixture, String url) throws Exception {
+            this(staff, name, fixture, url, evidence.resolve(name + "-journal.txt"));
+        }
+
+        Window(boolean staff, String name, Fixture fixture, String url, Path override) throws Exception {
             this.staff = staff;
             pin = RecoveryCardFixture.pin(staff ? 8 : 6);
             System.setProperty("labaccess.backend", url);
-            System.setProperty("labaccess.journal", evidence.resolve(name + "-journal.txt").toString());
+            if (override == null) System.clearProperty("labaccess.journal");
+            else System.setProperty("labaccess.journal", override.toString());
             app = staff ? new StaffApp() : new KioskApp();
             stage = fx(() -> {
                 Stage result = new Stage();
@@ -314,7 +319,7 @@ public final class RoleLedgerDisplayVerify {
         }
     }
 
-    private static final class Fixture extends CardChannel implements AutoCloseable {
+    static final class Fixture extends CardChannel implements AutoCloseable {
         final RecoveryCardFixture card = new RecoveryCardFixture();
         final List<Integer> ins = new java.util.concurrent.CopyOnWriteArrayList<>();
         final CountDownLatch postEntered = new CountDownLatch(1);
@@ -323,6 +328,7 @@ public final class RoleLedgerDisplayVerify {
         volatile int ledgerBalance = 5;
         volatile String ledgerVisit;
         volatile int posts;
+        volatile int requests;
         volatile boolean hold;
         volatile boolean reject;
         volatile boolean failRefresh;
@@ -361,7 +367,7 @@ public final class RoleLedgerDisplayVerify {
             }
             if (instruction == 0x60 || instruction == 0x63) {
                 adminReceipt = instruction == 0x63;
-                return RecoveryCardFixture.response(receipt(), Sw.OK);
+                return RecoveryCardFixture.response(card.receiptMode == 1 ? new byte[] {1} : receipt(), Sw.OK);
             }
             if (instruction == 0x50 || instruction == 0x51 || instruction == 0x52) {
                 card.counter++;
@@ -392,6 +398,7 @@ public final class RoleLedgerDisplayVerify {
         }
 
         RecoveryBackendFixture.Reply reply(String request, String body) throws java.io.IOException {
+            requests++;
             String route = request.split(" ")[1];
             var result = JSON.createObjectNode().put("cardId", card.cardId);
             if (route.startsWith("/enrollments/cards/")) {
@@ -426,13 +433,13 @@ public final class RoleLedgerDisplayVerify {
         @Override public void close() { release.countDown(); }
     }
 
-    private static <T> T fx(Callable<T> action) throws Exception {
+    static <T> T fx(Callable<T> action) throws Exception {
         FutureTask<T> task = new FutureTask<>(action);
         Platform.runLater(task);
         return task.get(15, TimeUnit.SECONDS);
     }
 
-    private static Object field(Object owner, String name) throws Exception {
+    static Object field(Object owner, String name) throws Exception {
         Field value = owner.getClass().getDeclaredField(name);
         value.setAccessible(true);
         return value.get(owner);

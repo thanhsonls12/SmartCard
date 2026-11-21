@@ -176,7 +176,8 @@ final class KioskWorkspace {
         if (action == KioskOperations.Action.RECONCILE) {
             return session.pendingJournal().present() && operations.pendingProblem() == null;
         }
-        return !session.pendingJournal().present() && operations.permitsReceiptState(action);
+        return session.newTransactionProblem() == null && !session.pendingJournal().present()
+                && operations.permitsReceiptState(action);
     }
 
     private void choose(KioskOperations.Action action) {
@@ -398,7 +399,9 @@ final class KioskWorkspace {
         prompt.setBusy(busy);
         history.setEnabled(!busy && authenticatedCard != null && gateway.isReady(), "Cần xác thực thẻ hiện tại.");
         PendingJournal.Loaded loaded = session.pendingJournal();
-        boolean unresolved = loaded.present() || gateway.reconciliation().state() == Reconciliation.State.UNKNOWN;
+        String legacyProblem = session.newTransactionProblem();
+        boolean unresolved = loaded.present() || legacyProblem != null
+                || gateway.reconciliation().state() == Reconciliation.State.UNKNOWN;
         stateOrigin.setText(CardDisplayState.of(gateway.status(), authenticatedCard != null && gateway.isReady(),
                 unresolved, needsReread || gateway.reconciliation().receiptUnverified(), busy));
         if (unresolved || busy) {
@@ -411,7 +414,7 @@ final class KioskWorkspace {
         }
         pendingNote.setText(loaded.present() ? operations.pendingProblem() != null ? operations.pendingProblem()
                 : "Còn PENDING — chỉ đối soát, không thực hiện lại giao dịch."
-                : operations.blocked() ? "PIN đã khóa — gặp nhân viên." : "");
+                : legacyProblem != null ? legacyProblem : operations.blocked() ? "PIN đã khóa — gặp nhân viên." : "");
     }
 
     void closing() {

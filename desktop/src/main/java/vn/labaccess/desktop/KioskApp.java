@@ -1,6 +1,5 @@
 package vn.labaccess.desktop;
 
-import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
@@ -17,8 +16,7 @@ public final class KioskApp extends Application {
 
     @Override
     public void start(Stage stage) {
-        session = new CardSession(Path.of(System.getProperty("labaccess.journal",
-                System.getProperty("user.home") + "/.labaccess/kiosk-journal.txt")), this::log);
+        session = CardSession.forRole(CardSession.Role.KIOSK, this::log);
         KioskOperations operations = new KioskOperations(session);
         workspace = new KioskWorkspace(session, operations, tasks, this::runCard, this::runStudent,
                 this::confirmOperator, this::runBackend);
@@ -32,7 +30,10 @@ public final class KioskApp extends Application {
         stage.setScene(scene);
         stage.setOnCloseRequest(event -> {
             event.consume();
-            tasks.close(workspace::closing, session::disconnect, result -> {
+            tasks.close(() -> {
+                workspace.closing();
+                log("Đóng cửa sổ Kiosk — khóa thao tác, xếp ngắt kết nối sau worker");
+            }, session::disconnect, result -> {
                 log(result.failure() == null ? "[OK] Kiosk ngắt kết nối" : "[ERROR] Kiosk lỗi ngắt kết nối");
                 log("Kiosk — thoát");
             }, () -> log("Kiosk — watchdog 5s; chưa xác nhận cleanup hoàn tất"));

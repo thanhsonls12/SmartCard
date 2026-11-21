@@ -45,6 +45,10 @@ final class KioskOperations {
     }
 
     String pendingProblem() {
+        String restriction = session.recoveryProblem();
+        if (restriction != null) {
+            return restriction;
+        }
         PendingJournal.Loaded loaded = session.pendingJournal();
         if (!loaded.present()) {
             return null;
@@ -117,6 +121,10 @@ final class KioskOperations {
                 return "Không có journal PENDING để đối soát.";
             }
             return pendingProblem();
+        }
+        String restriction = session.newTransactionProblem();
+        if (restriction != null) {
+            return restriction;
         }
         if (loaded.present()) {
             return "Còn nhật ký cần đối soát; không thực hiện giao dịch mới.";
