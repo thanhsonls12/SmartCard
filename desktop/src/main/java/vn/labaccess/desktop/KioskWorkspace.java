@@ -38,6 +38,8 @@ final class KioskWorkspace {
     private final Label cardId = UiLabels.caption("Chưa nhận diện thẻ");
     private final Label feedback = UiLabels.caption("Kết nối thẻ, chọn thao tác rồi nhập PIN một lần.");
     private final Label quota = UiLabels.value();
+    private final Label stateOrigin = UiLabels.chip();
+    private boolean needsReread;
     private final Label visit = UiLabels.value();
     private final Label name = UiLabels.caption("");
     private final Label studentId = UiLabels.caption("");
@@ -83,7 +85,7 @@ final class KioskWorkspace {
         photo.setPreserveRatio(true);
         Label brand = new Label("LabAccess · Kiosk học viên");
         brand.getStyleClass().add("la-brand");
-        VBox header = new VBox(UiScale.SPACE_3, brand, UiRows.wrapping(connection, cardId),
+        VBox header = new VBox(UiScale.SPACE_3, brand, UiRows.wrapping(connection, cardId, stateOrigin),
                 UiRows.wrapping(connect, identify, disconnect), feedback, pendingNote);
         header.setPadding(UiScale.headerInsets());
         header.getStyleClass().add("la-header");
@@ -205,6 +207,7 @@ final class KioskWorkspace {
     }
 
     private void clearView() {
+        needsReread = false;
         authenticatedCard = null;
         quota.setText("Chưa xác thực");
         visit.setText("Chưa xác thực");
@@ -231,6 +234,10 @@ final class KioskWorkspace {
     void sessionChanged(CardTaskRunner.Outcome<KioskOperations.Outcome> outcome) {
         clearView();
         String warning = outcome.value() == null ? null : outcome.value().result().warning();
+        needsReread = warning != null && outcome.value().result().ok();
+        if (needsReread) {
+            quota.setText("Cần đọc lại");
+        }
         feedback.setText(warning != null ? warning
                 : "Phiên thẻ đã đổi hoặc mất kết nối. Không thực hiện lại giao dịch; kết nối và nhận diện lại.");
         refresh();
@@ -246,6 +253,10 @@ final class KioskWorkspace {
         KioskOperations.Outcome value = outcome.value();
         CardOperationResult result = value.result();
         clearView();
+        needsReread = result.ok() && result.warning() != null;
+        if (needsReread) {
+            quota.setText("Cần đọc lại");
+        }
         String message = result.ok() ? value.action().label() + " hoàn tất."
                 : result.superseded() != null ? "Cần nhân viên xác nhận bằng chứng SUPERSEDED." : result.text();
         if ((value.pinSw() & 0xFFF0) == 0x63C0) {
@@ -387,6 +398,17 @@ final class KioskWorkspace {
         prompt.setBusy(busy);
         history.setEnabled(!busy && authenticatedCard != null && gateway.isReady(), "Cần xác thực thẻ hiện tại.");
         PendingJournal.Loaded loaded = session.pendingJournal();
+        boolean unresolved = loaded.present() || gateway.reconciliation().state() == Reconciliation.State.UNKNOWN;
+        stateOrigin.setText(CardDisplayState.of(gateway.status(), authenticatedCard != null && gateway.isReady(),
+                unresolved, needsReread || gateway.reconciliation().receiptUnverified(), busy));
+        if (unresolved || busy) {
+            quota.setText("Chưa rõ kết quả");
+        } else if (needsReread) {
+            quota.setText("Cần đọc lại");
+        } else if (authenticatedCard != null && gateway.isReady() && gateway.status() != null
+                && gateway.status().studentStateAvailable() && authenticatedCard.equals(gateway.status().cardId())) {
+            quota.setText(gateway.status().balance() + " lượt · STUDENT");
+        }
         pendingNote.setText(loaded.present() ? operations.pendingProblem() != null ? operations.pendingProblem()
                 : "Còn PENDING — chỉ đối soát, không thực hiện lại giao dịch."
                 : operations.blocked() ? "PIN đã khóa — gặp nhân viên." : "");

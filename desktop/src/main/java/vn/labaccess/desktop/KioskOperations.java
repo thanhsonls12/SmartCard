@@ -76,7 +76,7 @@ final class KioskOperations {
             session.invalidateSnapshot();
             CardOperationResult result = switch (request.action()) {
                 case START, END -> visit(request.action(), selected, request.pin());
-                case INFO -> gateway.readOperatorCard(request.pin());
+                case INFO -> info(selected, request.pin());
                 case CHANGE -> change(selected, request.pin(), request.newPin());
                 case RECONCILE -> recover(request.pin());
             };
@@ -129,6 +129,21 @@ final class KioskOperations {
         return state.transactionAllowed() || (action == Action.INFO && state.receiptUnverified());
     }
 
+    private CardOperationResult info(String selected, char[] pin) throws CardException {
+        CardGateway gateway = session.gateway();
+        CardOperationResult read = gateway.readOperatorCard(pin);
+        if (!read.ok()) {
+            return read;
+        }
+        CardStatus state = gateway.status();
+        if (state == null || !state.studentStateAvailable() || !selected.equals(state.cardId())) {
+            return CardOperationResult.fail("Thẻ đã đổi sau khi xác thực. Số lượt chưa được xác minh.");
+        }
+        CardOperationResult ledger = checkLedger(state);
+        return ledger == null ? read
+                : CardOperationResult.fail("Số lượt chưa được xác minh. " + ledger.text());
+    }
+
     private CardOperationResult visit(Action action, String selected, char[] pin) throws CardException {
         CardGateway gateway = session.gateway();
         CardOperationResult read = gateway.readAuthenticatedStatus(pin);
@@ -139,6 +154,10 @@ final class KioskOperations {
         if (state == null || !state.studentStateAvailable() || !selected.equals(state.cardId())) {
             return CardOperationResult.fail(
                     "Thẻ đã đổi sau khi xác thực; không ghi journal, không gửi lệnh đổi trạng thái.");
+        }
+        CardOperationResult ledger = checkLedger(state);
+        if (ledger != null) {
+            return ledger;
         }
         boolean start = action == Action.START;
         if (state.counter() >= Receipt.COUNTER_MASK) {
@@ -161,6 +180,21 @@ final class KioskOperations {
         CardOperationResult result = session.runStateTransaction(plan,
                 gateway.visitCommand((byte) (start ? 0x51 : 0x52), visit), pin);
         return result.ok() ? ConfirmedOperationRefresh.read(gateway, result, pin) : result;
+    }
+
+    private CardOperationResult checkLedger(CardStatus state) {
+        try {
+            BackendClient.LedgerSnapshot ledger = session.backend().ledgerOf(state.cardId());
+            if (!LedgerAlignment.matches(state, CardStatus.StateSource.STUDENT, ledger.cardId(),
+                    ledger.lastCounter(), ledger.lastBalance(), ledger.activeVisitId())) {
+                return CardOperationResult.fail(LedgerAlignment.mismatch(state, ledger.cardId(),
+                        ledger.lastCounter(), ledger.lastBalance(), ledger.activeVisitId()));
+            }
+            return null;
+        } catch (BackendClient.Failure failure) {
+            return CardOperationResult.fail("Không đọc được ledger: " + failure.getMessage()
+                    + ". Không ghi journal, không gửi lệnh đổi trạng thái.");
+        }
     }
 
     private CardOperationResult change(String selected, char[] pin, char[] newPin) throws CardException {

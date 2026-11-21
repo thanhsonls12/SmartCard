@@ -21,7 +21,6 @@ final class AdminGrantService {
         this.backend = backend;
     }
 
-    /** Nguồn PIN: chỉ được gọi sau khi mọi preflight (kể cả HTTP) đã xong. */
     @FunctionalInterface
     interface PinSource {
 
@@ -56,7 +55,8 @@ final class AdminGrantService {
             CardStatus state = gateway.status();
             if (!matchesLedger(state, ledger)) {
                 gateway.clearAuthenticatedStatus();
-                return CardOperationResult.fail("GRANT_QUOTA: state Admin khác ledger — cần đối soát; không gửi GRANT");
+                return CardOperationResult.fail("GRANT_QUOTA: " + LedgerAlignment.mismatch(state,
+                        ledger.cardId(), ledger.lastCounter(), ledger.lastBalance(), ledger.activeVisitId()));
             }
             if (state.counter() >= Receipt.COUNTER_MASK || delta > Receipt.MAX_BALANCE - state.balance()) {
                 return CardOperationResult.fail("GRANT_QUOTA: số lượt hoặc counter vượt giới hạn; không gửi GRANT");

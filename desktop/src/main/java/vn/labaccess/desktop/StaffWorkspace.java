@@ -46,6 +46,7 @@ final class StaffWorkspace {
     private final Label cardId = UiLabels.value();
     private final Label lifecycle = UiLabels.chip();
     private final Label quota = UiLabels.value();
+    private final Label stateOrigin = UiLabels.chip();
     private final Label feedback = UiLabels.caption("Chưa có thao tác");
     private final Label guidance = UiLabels.caption("Kết nối thẻ để bắt đầu.");
     private final TextArea logArea = new TextArea();
@@ -137,7 +138,7 @@ final class StaffWorkspace {
         FlowPane summary = UiRows.wrapping(brand, UiRows.pair(UiLabels.caption("Kết nối"), connection),
                 UiRows.pair(UiLabels.caption("Mã thẻ"), UiRows.pair(cardId, UiLabels.copyButton(cardId, "mã thẻ"))),
                 UiRows.pair(UiLabels.caption("Vòng đời"), lifecycle),
-                UiRows.pair(UiLabels.caption("Số lượt"), quota),
+                UiRows.pair(UiLabels.caption("Số lượt"), quota), stateOrigin,
                 UiRows.pair(UiLabels.caption("Đối soát"), receipts.reconcileStatus()), system.statusNode());
         for (Button button : new Button[] {connect, identify, disconnect}) {
             button.getStyleClass().add("la-action");
@@ -272,7 +273,8 @@ final class StaffWorkspace {
             boolean confirmation = result.superseded() != null;
             showFeedback(confirmation ? "Chờ nhân viên xác nhận." : result.warning() != null
                     ? UiLabels.completedAction(label) + ". " + result.warning()
-                    : result.ok() ? UiLabels.outcome(true, label) : UiLabels.failureMessage(label, result.text(), null),
+                    : result.ok() ? UiLabels.outcome(true, label) : "GRANT_QUOTA".equals(label)
+                            ? result.text() : UiLabels.failureMessage(label, result.text(), null),
                     result.warning() != null || confirmation ? UiLabels.Tone.PENDING
                             : result.ok() ? UiLabels.Tone.OK : UiLabels.Tone.ERROR);
         }
@@ -385,7 +387,11 @@ final class StaffWorkspace {
         lifecycle.setText(status == null ? "Chưa rõ" : CardLifecycle.caption(status.lifecycle()));
         boolean confirmed = ready && session.snapshotKnown() && !loaded.present()
                 && gateway.reconciliation().transactionAllowed() && status.stateAvailable();
-        quota.setText(confirmed ? status.balance() + " lượt · " + status.stateSource()
+        boolean unresolved = loaded.present() || gateway.reconciliation().state() == Reconciliation.State.UNKNOWN;
+        stateOrigin.setText(CardDisplayState.of(status, confirmed, unresolved,
+                awaitingReadCard != null || gateway.reconciliation().receiptUnverified(), busy));
+        quota.setText(unresolved || busy ? "Chưa rõ kết quả"
+                : confirmed ? status.balance() + " lượt · " + status.stateSource()
                 : awaitingReadCard != null ? "Đã cấp — cần đọc lại" : "Chưa xác nhận");
         showGrantEffects();
         boolean primary = tabs.getSelectionModel().getSelectedIndex() == OPERATIONS;
