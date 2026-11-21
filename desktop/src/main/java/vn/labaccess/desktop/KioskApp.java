@@ -25,8 +25,8 @@ public final class KioskApp extends Application {
                 Math.min(800, Screen.getPrimary().getVisualBounds().getHeight() - 80));
         UiTheme.apply(scene);
         stage.setTitle("LabAccess — Kiosk học viên");
-        stage.setMinWidth(720);
-        stage.setMinHeight(600);
+        stage.setMinWidth(480);
+        stage.setMinHeight(360);
         stage.setScene(scene);
         stage.setOnCloseRequest(event -> {
             event.consume();

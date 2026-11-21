@@ -76,12 +76,16 @@ final class HistoryPanel {
         currentCardId = normalizeCardId(cardId.get());
         table.setId("history-table");
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        table.widthProperty().addListener((observable, previous, width) -> table.setColumnResizePolicy(
+                width.doubleValue() < 420
+                        ? TableView.UNCONSTRAINED_RESIZE_POLICY
+                        : TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN));
         table.setPlaceholder(placeholder);
-        table.getColumns().add(column("Ghi nhận lúc", entry -> DISPLAY_TIME.format(entry.recordedAt())));
-        table.getColumns().add(column("Thao tác", entry -> operationLabel(entry.operation())));
-        table.getColumns().add(column("Thay đổi", entry -> deltaLabel(entry.delta())));
-        table.getColumns().add(column("Lượt còn lại", entry -> String.valueOf(entry.balanceAfter())));
-        table.getColumns().add(column("Xác minh", entry -> verifyLabel(entry.verifyStatus())));
+        table.getColumns().add(column("Ghi nhận lúc", 68, entry -> DISPLAY_TIME.format(entry.recordedAt())));
+        table.getColumns().add(column("Thao tác", 104, entry -> operationLabel(entry.operation())));
+        table.getColumns().add(column("Thay đổi", 104, entry -> deltaLabel(entry.delta())));
+        table.getColumns().add(column("Lượt còn lại", 48, entry -> String.valueOf(entry.balanceAfter())));
+        table.getColumns().add(column("Xác minh", 57, entry -> verifyLabel(entry.verifyStatus())));
         table.setMinHeight(UiScale.SPACE_5 * 8);
         table.setPrefHeight(UiScale.SPACE_5 * 8);
         reload.setId("history-reload");
@@ -342,8 +346,9 @@ final class HistoryPanel {
     }
 
     private static TableColumn<BackendClient.HistoryEntry, String> column(
-            String title, java.util.function.Function<BackendClient.HistoryEntry, String> value) {
+            String title, double minWidth, java.util.function.Function<BackendClient.HistoryEntry, String> value) {
         TableColumn<BackendClient.HistoryEntry, String> column = new TableColumn<>(title);
+        column.setMinWidth(minWidth);
         column.setCellValueFactory(cell -> new SimpleStringProperty(value.apply(cell.getValue())));
         column.setSortable(false);
         return column;

@@ -8,6 +8,7 @@ import javafx.application.Platform;
 import javafx.scene.Parent;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TitledPane;
@@ -52,6 +53,7 @@ final class StaffWorkspace {
     private final TextArea logArea = new TextArea();
     private final TabPane tabs;
     private final BorderPane root = new BorderPane();
+    private final ScrollPane viewport = UiSection.scroll(root);
     private String shownCard;
     private String awaitingReadCard;
     private CardSession.History stagedHistory;
@@ -105,6 +107,9 @@ final class StaffWorkspace {
                 tab("Đăng ký thẻ", enrollment.node()),
                 tab("Ảnh", photos.node()));
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        tabs.setMinHeight(260);
+        viewport.setFitToHeight(true);
+        root.setMinWidth(0);
         root.setTop(header());
         root.setCenter(tabs);
         logArea.setEditable(false);
@@ -129,7 +134,7 @@ final class StaffWorkspace {
     }
 
     Parent node() {
-        return root;
+        return viewport;
     }
 
     private VBox header() {
@@ -148,9 +153,16 @@ final class StaffWorkspace {
         GridPane details = new GridPane();
         details.setHgap(UiScale.SPACE_3);
         details.setVgap(UiScale.SPACE_1);
-        details.addRow(0, UiLabels.caption("Backend"), UiLabels.caption(session.backend().baseUrl()));
-        details.addRow(1, UiLabels.caption("Journal Staff"), UiLabels.caption(session.journalFile().toString()));
-        details.addRow(2, UiLabels.caption("PID"), UiLabels.caption(Long.toString(ProcessHandle.current().pid())));
+        String[][] values = {{"Backend", session.backend().baseUrl()},
+                {"Journal Staff", session.journalFile().toString()},
+                {"PID", Long.toString(ProcessHandle.current().pid())}};
+        for (int index = 0; index < values.length; index++) {
+            Label value = UiLabels.caption(values[index][1]);
+            value.setWrapText(true);
+            value.setMinWidth(0);
+            GridPane.setHgrow(value, Priority.ALWAYS);
+            details.addRow(index, UiLabels.caption(values[index][0]), value);
+        }
         details.setManaged(false);
         details.setVisible(false);
         technical.selectedProperty().addListener((observable, was, now) -> {

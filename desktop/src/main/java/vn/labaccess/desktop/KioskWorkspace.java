@@ -48,6 +48,7 @@ final class KioskWorkspace {
     private final ImageView photo = new ImageView();
     private final TextArea logArea = new TextArea();
     private final BorderPane root = new BorderPane();
+    private final ScrollPane viewport = UiSection.scroll(root);
     private String shownCard;
     private String authenticatedCard;
     private long revision;
@@ -76,6 +77,10 @@ final class KioskWorkspace {
         done.setOnAction(event -> endSession());
         for (Button button : new Button[] {connect, identify, disconnect, start, end, info, change, reconcile, done}) {
             button.getStyleClass().add("la-action");
+            button.setWrapText(true);
+        }
+        for (Button button : new Button[] {start, end, info}) {
+            button.getStyleClass().add("la-kiosk-main");
         }
         start.getStyleClass().add("la-primary");
         feedback.setWrapText(true);
@@ -100,8 +105,11 @@ final class KioskWorkspace {
                         name, studentId, photo, photoNote, done),
                 UiRows.wrapping(reconcile), history.node());
         content.setPadding(UiScale.centerInsets());
-        ScrollPane scroll = new ScrollPane(content);
-        scroll.setFitToWidth(true);
+        ScrollPane scroll = UiSection.scroll(content);
+        scroll.setMinHeight(200);
+        viewport.setFitToHeight(true);
+        viewport.getStyleClass().add("la-kiosk");
+        root.setMinWidth(0);
         root.setCenter(scroll);
         logArea.setEditable(false);
         logArea.setWrapText(true);
@@ -112,7 +120,7 @@ final class KioskWorkspace {
         clearView();
     }
 
-    Parent node() { return root; }
+    Parent node() { return viewport; }
 
     KioskOperations operations() { return operations; }
 
@@ -162,6 +170,19 @@ final class KioskWorkspace {
             operations.resetSession();
             adminTries = -1;
             shownCard = next;
+            long expectedRevision = revision;
+            if (next != null) {
+                Platform.runLater(() -> {
+                    if (open() && revision == expectedRevision && !prompt.isOpen()) {
+                        viewport.setVvalue(0);
+                        ((ScrollPane) root.getCenter()).setVvalue(0);
+                        Button action = !reconcile.isDisabled() ? reconcile : !start.isDisabled() ? start : info;
+                        if (!action.isDisabled()) {
+                            action.requestFocus();
+                        }
+                    }
+                });
+            }
         }
     }
 

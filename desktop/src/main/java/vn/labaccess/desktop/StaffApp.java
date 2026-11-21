@@ -22,8 +22,8 @@ public final class StaffApp extends Application {
                 Math.min(800, Screen.getPrimary().getVisualBounds().getHeight() - UiScale.SPACE_5 * 2));
         UiTheme.apply(scene);
         stage.setTitle("LabAccess — Công cụ nhân viên");
-        stage.setMinWidth(900);
-        stage.setMinHeight(600);
+        stage.setMinWidth(640);
+        stage.setMinHeight(360);
         stage.setScene(scene);
         stage.setOnCloseRequest(event -> {
             event.consume();

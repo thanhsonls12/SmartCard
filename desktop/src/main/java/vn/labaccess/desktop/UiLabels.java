@@ -249,19 +249,7 @@ final class UiLabels {
             }
             field.getScene().getRoot().applyCss();
             field.getScene().getRoot().layout();
-            for (Node parent = field.getParent(); parent != null; parent = parent.getParent()) {
-                if (parent instanceof javafx.scene.control.ScrollPane scroll) {
-                    Node target = field.getParent();
-                    var bounds = scroll.getContent().sceneToLocal(target.localToScene(target.getBoundsInLocal()));
-                    double viewport = scroll.getViewportBounds().getHeight();
-                    double excess = scroll.getContent().getLayoutBounds().getHeight() - viewport;
-                    double top = scroll.getVvalue() * Math.max(0, excess);
-                    if (excess > 0 && (bounds.getMinY() < top || bounds.getMaxY() > top + viewport)) {
-                        scroll.setVvalue(Math.max(0, Math.min(1, (bounds.getMinY() - viewport / 3) / excess)));
-                    }
-                    break;
-                }
-            }
+            UiSection.reveal(field.getParent());
         });
     }
 
@@ -281,7 +269,52 @@ final class UiLabels {
         if (owner != null) {
             dialog.initOwner(owner);
         }
-        dialog.getDialogPane().getStylesheets().addAll(ownerNode.getScene().getStylesheets());
+        var pane = dialog.getDialogPane();
+        pane.getStylesheets().addAll(ownerNode.getScene().getStylesheets());
+        if (owner == null) {
+            return;
+        }
+        var screens = javafx.stage.Screen.getScreensForRectangle(owner.getX(), owner.getY(),
+                owner.getWidth(), owner.getHeight());
+        var screen = (screens.isEmpty() ? javafx.stage.Screen.getPrimary() : screens.getFirst()).getVisualBounds();
+        double width = Math.max(280, Math.min(560, Math.min(owner.getWidth() - 32, screen.getWidth() - 48)));
+        double height = Math.max(80, Math.min(320, Math.min(owner.getHeight() - 200, screen.getHeight() - 240)));
+        pane.setMinWidth(0);
+        pane.setPrefWidth(width);
+        if (pane.getScene() != null) {
+            UiTheme.followFocus(pane.getScene());
+        } else {
+            pane.sceneProperty().addListener((observable, was, now) -> {
+                if (now != null) {
+                    UiTheme.followFocus(now);
+                }
+            });
+        }
+        dialog.setResizable(true);
+        if (ownerNode.getScene().getRoot().getStyleClass().contains("la-kiosk")) {
+            pane.getStyleClass().add("la-kiosk");
+        }
+        if (pane.getContent() == null && pane.getContentText() != null) {
+            Label message = new Label(pane.getContentText());
+            message.setWrapText(true);
+            message.setMinWidth(0);
+            pane.setContent(message);
+        }
+        Node content = pane.getContent();
+        if (content != null) {
+            var scroll = UiSection.scroll(content);
+            scroll.setPrefViewportWidth(width - 48);
+            scroll.setMaxHeight(height);
+            pane.setContent(scroll);
+            var showing = dialog.getOnShowing();
+            dialog.setOnShowing(event -> {
+                if (showing != null) {
+                    showing.handle(event);
+                }
+                pane.applyCss();
+                scroll.setPrefViewportHeight(Math.min(height, content.prefHeight(width - 48)));
+            });
+        }
     }
 
     static String failureMessage(String operation, String detail, Throwable failure) {

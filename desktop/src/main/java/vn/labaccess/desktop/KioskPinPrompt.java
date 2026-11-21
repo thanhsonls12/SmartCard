@@ -47,9 +47,16 @@ final class KioskPinPrompt {
         pin.setOnAction(event -> fireSubmit());
         newPin.setOnAction(event -> fireSubmit());
         confirmation.setOnAction(event -> fireSubmit());
+        actionTitle.setWrapText(true);
         root = UiSection.of("PIN học viên", actionTitle,
                 UiRows.field("PIN sinh viên", pin, pinError), newPinRow, confirmationRow,
                 UiRows.wrapping(submit, cancel));
+        root.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, event -> {
+            if (event.getCode() == javafx.scene.input.KeyCode.ESCAPE && !cancel.isDisabled()) {
+                cancel.fire();
+                event.consume();
+            }
+        });
         clear();
     }
 
@@ -68,7 +75,11 @@ final class KioskPinPrompt {
         confirmationRow.setManaged(changingPin);
         root.setVisible(true);
         root.setManaged(true);
-        pin.requestFocus();
+        javafx.application.Platform.runLater(() -> {
+            if (isOpen() && !pin.isDisabled()) {
+                pin.requestFocus();
+            }
+        });
     }
 
     void clear() {

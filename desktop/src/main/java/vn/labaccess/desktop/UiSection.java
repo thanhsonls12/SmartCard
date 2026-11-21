@@ -25,14 +25,40 @@ final class UiSection {
     static Tab tab(String title, Node... content) {
         VBox body = new VBox(UiScale.SPACE_4, content);
         body.getStyleClass().add("la-tab-body");
-        ScrollPane scroll = new ScrollPane(body);
+        Tab tab = new Tab(title, scroll(body));
+        tab.setClosable(false);
+        return tab;
+    }
+
+    static ScrollPane scroll(Node content) {
+        ScrollPane scroll = new ScrollPane(content);
         scroll.setFitToWidth(true);
+        scroll.setFocusTraversable(false);
         scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         scroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
         scroll.getStyleClass().add("la-scroll");
         scroll.setMinHeight(0);
-        Tab tab = new Tab(title, scroll);
-        tab.setClosable(false);
-        return tab;
+        return scroll;
+    }
+
+    static void reveal(Node target) {
+        for (Node parent = target.getParent(); parent != null; parent = parent.getParent()) {
+            if (parent instanceof ScrollPane scroll && scroll.getContent() != null) {
+                var bounds = scroll.getContent().sceneToLocal(target.localToScene(target.getBoundsInLocal()));
+                double height = scroll.getViewportBounds().getHeight();
+                double excess = scroll.getContent().getLayoutBounds().getHeight() - height;
+                double range = scroll.getVmax() - scroll.getVmin();
+                if (height <= 0 || excess <= 0 || range <= 0) {
+                    continue;
+                }
+                double top = (scroll.getVvalue() - scroll.getVmin()) / range * excess;
+                double next = bounds.getMinY() < top || bounds.getHeight() > height
+                        ? bounds.getMinY() - UiScale.SPACE_2
+                        : bounds.getMaxY() > top + height
+                        ? bounds.getMaxY() - height + UiScale.SPACE_2 : top;
+                scroll.setVvalue(scroll.getVmin() + Math.max(0, Math.min(1, next / excess)) * range);
+                scroll.layout();
+            }
+        }
     }
 }
