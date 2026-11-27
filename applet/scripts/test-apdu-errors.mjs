@@ -82,7 +82,7 @@ async function freePort() {
 
 try {
   const sourceDir = path.join(root, 'applet/src/vn/labaccess/card');
-  const sources = fs.readdirSync(sourceDir).filter(name => name.endsWith('.java')).sort().map(name => path.join(sourceDir, name));
+  const sources = fs.readdirSync(sourceDir, { recursive: true }).filter(name => name.endsWith('.java')).sort().map(name => path.join(sourceDir, name));
   const harnessSources = ['PersonalizeSelfTest.java', 'ApduErrorCases.java', 'ApduTransportCases.java', 'GatewayTransportCases.java']
     .map(name => path.join(root, 'applet/scripts', name));
   const gatewaySources = ['CardGateway', 'CardLifecycle', 'CardOperationResult', 'CardPhotoCommands', 'CardPinCommands',
@@ -136,7 +136,7 @@ try {
       const mode = label.replace('-deliverables', '');
       const definition = buildSource.match(new RegExp(`Name = '${mode}'[\\s\\S]*?Lines = @\\('([^']+)'\\)`));
       assert(definition, `Missing ${mode} injection in build.ps1`);
-      const original = fs.readFileSync(path.join(sourceDir, 'ProfileCrypto.java'), 'utf8');
+      const original = fs.readFileSync(path.join(sourceDir, 'crypto/ProfileCrypto.java'), 'utf8');
       const anchor = '        target[(short) 0] = PROFILE_RECORD_VERSION;';
       assert.equal(original.split(anchor).length, 2);
       const instrumented = original.replace(anchor, `${definition[1]}\n${anchor}`);

@@ -156,25 +156,25 @@ $recordHeaderAnchor = '        target[(short) 0] = PROFILE_RECORD_VERSION;'
 $variants = @(
     [pscustomobject]@{
         Name = 'ciphertext'
-        Target = 'vn/labaccess/card/ProfileCrypto.java'
+        Target = 'vn/labaccess/card/crypto/ProfileCrypto.java'
         Anchor = $recordHeaderAnchor
         Lines = @('        target[RECORD_HEADER_LENGTH] = (byte) (target[RECORD_HEADER_LENGTH] ^ 0x01);')
     },
     [pscustomobject]@{
         Name = 'tag'
-        Target = 'vn/labaccess/card/ProfileCrypto.java'
+        Target = 'vn/labaccess/card/crypto/ProfileCrypto.java'
         Anchor = $recordHeaderAnchor
         Lines = @('        target[(short) (RECORD_HEADER_LENGTH + ciphertextLength)] = (byte) (target[(short) (RECORD_HEADER_LENGTH + ciphertextLength)] ^ 0x01);')
     },
     [pscustomobject]@{
         Name = 'nonce'
-        Target = 'vn/labaccess/card/ProfileCrypto.java'
+        Target = 'vn/labaccess/card/crypto/ProfileCrypto.java'
         Anchor = $recordHeaderAnchor
         Lines = @('        target[RECORD_HEADER_OFFSET_NONCE] = (byte) (target[RECORD_HEADER_OFFSET_NONCE] ^ 0x01);')
     },
     [pscustomobject]@{
         Name = 'counter-near-max'
-        Target = 'vn/labaccess/card/QuotaLedger.java'
+        Target = 'vn/labaccess/card/transaction/QuotaLedger.java'
         Anchor = '        counter3 = (byte) 0;'
         Occurrence = 1
         After = $true
@@ -208,7 +208,7 @@ $variants = @(
     },
     [pscustomobject]@{
         Name = 'visit-counter-near-max'
-        Target = 'vn/labaccess/card/QuotaLedger.java'
+        Target = 'vn/labaccess/card/transaction/QuotaLedger.java'
         Anchor = '        counter3 = (byte) 0;'
         Occurrence = 1
         After = $true
@@ -263,7 +263,7 @@ $variants = @(
     },
     [pscustomobject]@{
         Name = 'photo-finish-after-length-fault'
-        Target = 'vn/labaccess/card/PhotoStore.java'
+        Target = 'vn/labaccess/card/photo/PhotoStore.java'
         Anchor = '        photoLength = total;'
         After = $true
         Lines = @(
@@ -274,7 +274,7 @@ $variants = @(
     },
     [pscustomobject]@{
         Name = 'receipt-signature-too-long'
-        Target = 'vn/labaccess/card/Receipt.java'
+        Target = 'vn/labaccess/card/transaction/Receipt.java'
         Anchor = '        if (stagedSignatureLength <= (short) 0'
         Lines = @(
             '        stagedSignatureLength = (short) 73;'
