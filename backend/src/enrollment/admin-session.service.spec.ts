@@ -14,6 +14,7 @@ import { AdminSessionService } from './admin-session.service.js';
 const CARD_ID = Buffer.from('a1b2c3d41122ef07', 'hex');
 const OTHER_CARD_ID = Buffer.from('b1b2c3d41122ef07', 'hex');
 const SESSION_ID = '22222222-2222-4222-8222-222222222222';
+const STAFF_SESSION_ID = '33333333-3333-4333-8333-333333333333';
 const SESSION_NONCE = Buffer.from('bb'.repeat(32), 'hex');
 const PROFILE_HASH = Buffer.from('ee'.repeat(32), 'hex');
 
@@ -33,6 +34,7 @@ const otherKey = makeCardKey();
 
 interface SessionRow {
   id: string;
+  staffSessionId: string;
   nonce: Uint8Array;
   cardId: Uint8Array | null;
   activatedAt: Date | null;
@@ -43,6 +45,7 @@ interface SessionRow {
 function sessionRow(overrides: Partial<SessionRow> = {}): SessionRow {
   return {
     id: SESSION_ID,
+    staffSessionId: STAFF_SESSION_ID,
     nonce: new Uint8Array(SESSION_NONCE),
     cardId: null,
     activatedAt: null,
@@ -100,7 +103,7 @@ describe('AdminSessionService.issueSession', () => {
   it('issues a session with a fresh 32-byte challenge nonce', async () => {
     const db = makeDb();
 
-    const issued = await db.service.issueSession();
+    const issued = await db.service.issueSession(STAFF_SESSION_ID);
 
     expect(issued.sessionId).toBe(SESSION_ID);
     expect(issued.nonce).toMatch(/^[0-9a-f]{64}$/);
@@ -114,7 +117,7 @@ describe('AdminSessionService.activateSession', () => {
     const row = sessionRow();
     const db = makeDb({ rows: [row] });
 
-    await expect(db.service.activateSession(SESSION_ID, activationBody())).resolves.toMatchObject({
+    await expect(db.service.activateSession(SESSION_ID, activationBody(), STAFF_SESSION_ID)).resolves.toMatchObject({
       sessionId: SESSION_ID,
       cardId: CARD_ID.toString('hex'),
     });
@@ -129,7 +132,7 @@ describe('AdminSessionService.activateSession', () => {
     await expect(
       db.service.activateSession(SESSION_ID, activationBody({
         signature: signActivation(CARD_ID, SESSION_NONCE, otherKey),
-      })),
+      }), STAFF_SESSION_ID),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
     expect(row.activatedAt).toBeNull();
     expect(row.cardId).toBeNull();
@@ -140,7 +143,7 @@ describe('AdminSessionService.activateSession', () => {
     const db = makeDb({ rows: [row] });
 
     await expect(
-      db.service.activateSession(SESSION_ID, activationBody({ profileHash: 'dd'.repeat(32) })),
+      db.service.activateSession(SESSION_ID, activationBody({ profileHash: 'dd'.repeat(32) }), STAFF_SESSION_ID),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
     expect(row.activatedAt).toBeNull();
   });
@@ -148,23 +151,23 @@ describe('AdminSessionService.activateSession', () => {
   it('rejects a card that is not enrolled', async () => {
     const db = makeDb({ rows: [sessionRow()], publicKey: null });
 
-    await expect(db.service.activateSession(SESSION_ID, activationBody())).rejects.toBeInstanceOf(NotFoundException);
+    await expect(db.service.activateSession(SESSION_ID, activationBody(), STAFF_SESSION_ID)).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('rejects a second activation of the same session', async () => {
     const row = sessionRow({ activatedAt: new Date(), cardId: new Uint8Array(CARD_ID) });
     const db = makeDb({ rows: [row] });
 
-    await expect(db.service.activateSession(SESSION_ID, activationBody())).rejects.toBeInstanceOf(ConflictException);
+    await expect(db.service.activateSession(SESSION_ID, activationBody(), STAFF_SESSION_ID)).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('rejects an unknown or expired session before verifying anything', async () => {
     const db = makeDb();
 
-    await expect(db.service.activateSession(SESSION_ID, activationBody())).rejects.toBeInstanceOf(
+    await expect(db.service.activateSession(SESSION_ID, activationBody(), STAFF_SESSION_ID)).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
-    await expect(db.service.activateSession('not-a-uuid', activationBody())).rejects.toBeInstanceOf(
+    await expect(db.service.activateSession('not-a-uuid', activationBody(), STAFF_SESSION_ID)).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
     expect(db.student.findUnique).not.toHaveBeenCalled();
@@ -175,13 +178,13 @@ describe('AdminSessionService.requireCardSession', () => {
   it('accepts an activated session bound to the same card', async () => {
     const db = makeDb({ rows: [sessionRow({ activatedAt: new Date(), cardId: new Uint8Array(CARD_ID) })] });
 
-    await expect(db.service.requireCardSession(SESSION_ID, CARD_ID.toString('hex'))).resolves.toBe(SESSION_ID);
+    await expect(db.service.requireCardSession(SESSION_ID, CARD_ID.toString('hex'), STAFF_SESSION_ID)).resolves.toBe(SESSION_ID);
   });
 
   it('refuses a session that has not been activated by a card', async () => {
     const db = makeDb({ rows: [sessionRow()] });
 
-    await expect(db.service.requireCardSession(SESSION_ID, CARD_ID.toString('hex'))).rejects.toBeInstanceOf(
+    await expect(db.service.requireCardSession(SESSION_ID, CARD_ID.toString('hex'), STAFF_SESSION_ID)).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
   });
@@ -189,19 +192,19 @@ describe('AdminSessionService.requireCardSession', () => {
   it('refuses a session activated by another card', async () => {
     const db = makeDb({ rows: [sessionRow({ activatedAt: new Date(), cardId: new Uint8Array(OTHER_CARD_ID) })] });
 
-    await expect(db.service.requireCardSession(SESSION_ID, CARD_ID.toString('hex'))).rejects.toBeInstanceOf(
+    await expect(db.service.requireCardSession(SESSION_ID, CARD_ID.toString('hex'), STAFF_SESSION_ID)).rejects.toBeInstanceOf(
       ForbiddenException,
     );
   });
 
   it('refuses a revoked or expired session', async () => {
     const revoked = makeDb({ rows: [sessionRow({ activatedAt: new Date(), cardId: new Uint8Array(CARD_ID), revokedAt: new Date() })] });
-    await expect(revoked.service.requireCardSession(SESSION_ID, CARD_ID.toString('hex'))).rejects.toBeInstanceOf(
+    await expect(revoked.service.requireCardSession(SESSION_ID, CARD_ID.toString('hex'), STAFF_SESSION_ID)).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
 
     const expired = makeDb({ rows: [sessionRow({ activatedAt: new Date(), cardId: new Uint8Array(CARD_ID), expiresAt: new Date(Date.now() - 1000) })] });
-    await expect(expired.service.requireCardSession(SESSION_ID, CARD_ID.toString('hex'))).rejects.toBeInstanceOf(
+    await expect(expired.service.requireCardSession(SESSION_ID, CARD_ID.toString('hex'), STAFF_SESSION_ID)).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
   });

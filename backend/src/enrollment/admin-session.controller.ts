@@ -1,4 +1,6 @@
-import { Body, Controller, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Param, Post, UseGuards } from '@nestjs/common';
+import { CurrentStaff, StaffAuthGuard } from '../staff-auth/staff-auth.guard.js';
+import type { StaffActor } from '../staff-auth/staff-auth.service.js';
 import {
   ActivatedAdminSession,
   AdminSessionService,
@@ -6,12 +8,13 @@ import {
 } from './admin-session.service.js';
 
 @Controller('admin')
+@UseGuards(StaffAuthGuard)
 export class AdminSessionController {
   constructor(private readonly adminSessions: AdminSessionService) {}
 
   @Post('sessions')
-  issueSession(): Promise<IssuedAdminSession> {
-    return this.adminSessions.issueSession();
+  issueSession(@CurrentStaff() actor: StaffActor): Promise<IssuedAdminSession> {
+    return this.adminSessions.issueSession(actor.sessionId);
   }
 
   @Post('sessions/:sessionId/activate')
@@ -19,7 +22,8 @@ export class AdminSessionController {
   activateSession(
     @Param('sessionId') sessionId: string,
     @Body() body: unknown,
+    @CurrentStaff() actor: StaffActor,
   ): Promise<ActivatedAdminSession> {
-    return this.adminSessions.activateSession(sessionId, body);
+    return this.adminSessions.activateSession(sessionId, body, actor.sessionId);
   }
 }

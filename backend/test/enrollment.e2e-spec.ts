@@ -6,6 +6,7 @@ import { createHash, generateKeyPairSync, randomBytes, sign, type KeyObject } fr
 import { AppModule } from './../src/app.module.js';
 import { DatabaseService } from './../src/database/database.service.js';
 import { buildEnrollmentMessage } from './../src/enrollment/enrollment-message.js';
+import { hashPassword } from './../src/staff-auth/password.js';
 
 const STUDENT_ID = 'SVENROLL01';
 
@@ -39,6 +40,8 @@ function signChallenge(privateKey: KeyObject, cardIdHex: string, pointHex: strin
 describe('Enrollment (e2e)', () => {
   let app: INestApplication<App>;
   let database: DatabaseService;
+  let staffId: string;
+  let authorization: string;
   const sessionIds: string[] = [];
   const cardIds: string[] = [];
 
@@ -55,6 +58,15 @@ describe('Enrollment (e2e)', () => {
     app = moduleFixture.createNestApplication();
     await app.init();
     database = app.get(DatabaseService);
+    const suffix = randomBytes(8).toString('hex');
+    const username = 'e2e-' + suffix;
+    const password = randomBytes(24).toString('base64url');
+    const staff = await database.staff.create({ data: {
+      staffCode: 'T' + suffix, username, displayName: 'Test staff', passwordHash: await hashPassword(password),
+    } });
+    staffId = staff.id;
+    const login = await request(app.getHttpServer()).post('/staff/auth/login').send({ username, password }).expect(200);
+    authorization = 'Bearer ' + login.body.token;
     sessionIds.length = 0;
     cardIds.length = 0;
   });
@@ -65,11 +77,13 @@ describe('Enrollment (e2e)', () => {
     await database.student.deleteMany({ where: { cardId: { in: cards } } });
     await database.enrollmentChallenge.deleteMany({ where: { adminSessionId: { in: sessionIds } } });
     await database.adminSession.deleteMany({ where: { id: { in: sessionIds } } });
+    await database.staffSession.deleteMany({ where: { staffId } });
+    await database.staff.delete({ where: { id: staffId } });
     await app.close();
   });
 
   async function issueSession(): Promise<string> {
-    const response = await request(app.getHttpServer()).post('/admin/sessions').expect(201);
+    const response = await request(app.getHttpServer()).post('/admin/sessions').set('Authorization', authorization).expect(201);
     sessionIds.push(response.body.sessionId);
     return response.body.sessionId;
   }
@@ -78,6 +92,7 @@ describe('Enrollment (e2e)', () => {
     cardIds.push(cardIdHex);
     return request(app.getHttpServer())
       .post('/enrollments/challenges')
+      .set('Authorization', authorization)
       .set('x-admin-session', sessionId)
       .send({ cardId: cardIdHex, studentId: STUDENT_ID.toLowerCase(), publicKey: card.pointHex, ...extras });
   }
@@ -85,6 +100,7 @@ describe('Enrollment (e2e)', () => {
   function completeChallenge(sessionId: string, challengeId: string, signature: string, extras: Record<string, unknown> = {}) {
     return request(app.getHttpServer())
       .post('/enrollments/complete')
+      .set('Authorization', authorization)
       .set('x-admin-session', sessionId)
       .send({ challengeId, signature, ...extras });
   }
@@ -103,7 +119,7 @@ describe('Enrollment (e2e)', () => {
   }
 
   it('issues an admin session with a thirty minute ttl', async () => {
-    const response = await request(app.getHttpServer()).post('/admin/sessions').expect(201);
+    const response = await request(app.getHttpServer()).post('/admin/sessions').set('Authorization', authorization).expect(201);
     sessionIds.push(response.body.sessionId);
 
     expect(response.body.sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
@@ -383,6 +399,7 @@ describe('Enrollment (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/enrollments/challenges')
+      .set('Authorization', authorization)
       .send({ cardId: cardIdHex, studentId: STUDENT_ID, publicKey: card.pointHex })
       .expect(401);
 
@@ -427,6 +444,7 @@ describe('Enrollment (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/enrollments/challenges')
+      .set('Authorization', authorization)
       .set('x-admin-session', sessionId)
       .send({ cardId: cardIdHex, studentId: STUDENT_ID, publicKey: '04'.repeat(32) })
       .expect(400);
@@ -460,6 +478,7 @@ describe('Enrollment (e2e)', () => {
     });
     await request(app.getHttpServer())
       .post('/enrollments/challenges')
+      .set('Authorization', authorization)
       .set('x-admin-session', expiredSessionId)
       .send(body)
       .expect(401);
@@ -471,12 +490,14 @@ describe('Enrollment (e2e)', () => {
     });
     await request(app.getHttpServer())
       .post('/enrollments/challenges')
+      .set('Authorization', authorization)
       .set('x-admin-session', revokedSessionId)
       .send(body)
       .expect(401);
 
     await request(app.getHttpServer())
       .post('/enrollments/challenges')
+      .set('Authorization', authorization)
       .set('x-admin-session', 'not-a-uuid')
       .send(body)
       .expect(401);
@@ -490,6 +511,7 @@ describe('Enrollment (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/enrollments/challenges')
+      .set('Authorization', authorization)
       .set('x-admin-session', '00000000-0000-4000-8000-000000000000')
       .send({ cardId: cardIdHex, studentId: STUDENT_ID, publicKey: card.pointHex })
       .expect(401);

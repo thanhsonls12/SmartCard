@@ -32,18 +32,18 @@ const SESSION_TTL_MS = 30 * 60 * 1000;
 export class AdminSessionService {
   constructor(private readonly database: DatabaseService) {}
 
-  async issueSession(): Promise<IssuedAdminSession> {
+  async issueSession(staffSessionId: string): Promise<IssuedAdminSession> {
     const nonce = randomBytes(NONCE_BYTES);
     const session = await this.database.adminSession.create({
-      data: { nonce: toStoredBytes(nonce), expiresAt: new Date(Date.now() + SESSION_TTL_MS) },
+      data: { nonce: toStoredBytes(nonce), expiresAt: new Date(Date.now() + SESSION_TTL_MS), staffSessionId },
       select: { id: true, expiresAt: true },
     });
 
     return { sessionId: session.id, nonce: nonce.toString('hex'), expiresAt: session.expiresAt };
   }
 
-  async activateSession(sessionId: unknown, body: unknown): Promise<ActivatedAdminSession> {
-    const session = await this.requireSessionRow(sessionId);
+  async activateSession(sessionId: unknown, body: unknown, staffSessionId: string): Promise<ActivatedAdminSession> {
+    const session = await this.requireSessionRow(sessionId, staffSessionId);
     if (session.activatedAt !== null) {
       throw new ConflictException('admin session is already activated');
     }
@@ -89,13 +89,13 @@ export class AdminSessionService {
     return { sessionId: session.id, cardId: cardId.toString('hex'), expiresAt: session.expiresAt };
   }
 
-  async requireActiveSession(headerValue: unknown): Promise<string> {
-    const session = await this.requireSessionRow(headerValue);
+  async requireActiveSession(headerValue: unknown, staffSessionId: string): Promise<string> {
+    const session = await this.requireSessionRow(headerValue, staffSessionId);
     return session.id;
   }
 
-  async requireCardSession(headerValue: unknown, rawCardId: string): Promise<string> {
-    const session = await this.requireSessionRow(headerValue);
+  async requireCardSession(headerValue: unknown, rawCardId: string, staffSessionId: string): Promise<string> {
+    const session = await this.requireSessionRow(headerValue, staffSessionId);
     if (session.activatedAt === null || session.cardId === null) {
       throw new UnauthorizedException('admin session is not activated with a card');
     }
@@ -107,7 +107,7 @@ export class AdminSessionService {
     return session.id;
   }
 
-  private async requireSessionRow(rawSessionId: unknown) {
+  private async requireSessionRow(rawSessionId: unknown, staffSessionId: string) {
     if (!isUuid(rawSessionId)) {
       throw new UnauthorizedException('admin session must be a uuid');
     }
@@ -121,11 +121,15 @@ export class AdminSessionService {
         activatedAt: true,
         expiresAt: true,
         revokedAt: true,
+        staffSessionId: true,
       },
     });
 
     if (session === null || session.revokedAt !== null || session.expiresAt.getTime() <= Date.now()) {
       throw new UnauthorizedException('admin session is not active');
+    }
+    if (session.staffSessionId !== staffSessionId) {
+      throw new ForbiddenException('admin session belongs to another staff session');
     }
     return session;
   }

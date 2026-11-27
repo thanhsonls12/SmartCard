@@ -7,6 +7,37 @@ datasource db {
   provider = "postgresql"
 }
 
+model Staff {
+  id           String   @id @default(uuid()) @db.Uuid
+  staffCode    String   @unique @db.VarChar(20)
+  username     String   @unique @db.VarChar(64)
+  passwordHash String
+  displayName  String   @db.VarChar(100)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
+
+  sessions StaffSession[]
+
+  @@map("staff")
+}
+
+model StaffSession {
+  id         String    @id @default(uuid()) @db.Uuid
+  staffId    String    @db.Uuid
+  tokenHash  String    @unique @db.VarChar(64)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(6)
+  expiresAt  DateTime  @db.Timestamptz(6)
+  revokedAt  DateTime? @db.Timestamptz(6)
+
+  staff Staff @relation(fields: [staffId], references: [id], onDelete: Restrict)
+  adminSessions AdminSession[]
+
+  @@index([staffId])
+  @@index([expiresAt])
+  @@map("staff_sessions")
+}
+
 model AdminSession {
   id          String    @id @default(uuid()) @db.Uuid
   nonce       Bytes     @db.ByteA
@@ -15,10 +46,13 @@ model AdminSession {
   createdAt   DateTime  @default(now()) @db.Timestamptz(6)
   expiresAt   DateTime  @db.Timestamptz(6)
   revokedAt   DateTime? @db.Timestamptz(6)
+  staffSessionId String? @db.Uuid
+  staffSession StaffSession? @relation(fields: [staffSessionId], references: [id], onDelete: Restrict)
 
   enrollmentChallenges EnrollmentChallenge[]
   profileUpdates       ProfileUpdate[]
 
+  @@index([staffSessionId])
   @@map("admin_sessions")
 }
 
