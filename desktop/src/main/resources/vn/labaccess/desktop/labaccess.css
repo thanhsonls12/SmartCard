@@ -820,6 +820,176 @@
     -fx-alignment: center;
 }
 
+.la-reader .label,
+.la-reader .button,
+.la-reader .combo-box {
+    -fx-font-family: 'Segoe UI';
+}
+
+.la-reader .la-reader-brand {
+    -fx-font-size: 0.8571em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -la-accent-strong;
+}
+
+.la-reader .la-reader-title {
+    -fx-font-size: 1.7143em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -la-fg;
+}
+
+.la-reader .la-reader-description {
+    -fx-font-size: 1em;
+    -fx-text-fill: -la-fg-muted;
+}
+
+.la-reader .la-reader-section-title {
+    -fx-font-size: 1.2857em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -la-fg;
+}
+
+.la-reader .la-reader-mark {
+    -fx-background-color: -la-accent-soft;
+    -fx-background-radius: 0.8571em;
+    -fx-min-width: 4em;
+    -fx-pref-width: 4em;
+    -fx-min-height: 4em;
+    -fx-pref-height: 4em;
+    -fx-alignment: center;
+}
+
+.la-reader .la-reader-mark .la-icon {
+    -fx-icon-size: 28;
+    -fx-icon-color: -la-accent-strong;
+}
+
+.la-reader .la-reader-slot,
+.la-reader .la-reader-library {
+    -fx-background-color: -la-surface-raised;
+    -fx-background-radius: 0.8571em;
+    -fx-border-color: -la-border-soft;
+    -fx-border-width: 0.0714em;
+    -fx-border-radius: 0.8571em;
+    -fx-padding: 1.1429em;
+}
+
+.la-reader .la-reader-slot-mark {
+    -fx-background-color: -la-accent-soft;
+    -fx-background-radius: 0.5714em;
+    -fx-min-width: 2.8571em;
+    -fx-pref-width: 2.8571em;
+    -fx-min-height: 2.8571em;
+    -fx-pref-height: 2.8571em;
+    -fx-alignment: center;
+}
+
+.la-reader .la-reader-slot-mark .la-icon {
+    -fx-icon-size: 20;
+    -fx-icon-color: -la-accent-strong;
+}
+
+.la-reader .la-reader-current {
+    -fx-background-color: -la-surface;
+    -fx-background-radius: 0.5714em;
+    -fx-padding: 0.8571em;
+}
+
+.la-reader .la-reader-current .la-icon {
+    -fx-icon-size: 22;
+    -fx-icon-color: -la-fg-muted;
+}
+
+.la-reader .la-reader-card-name {
+    -fx-font-size: 1.1429em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -la-fg;
+}
+
+.la-reader .la-reader-current .la-reader-description {
+    -fx-font-size: 0.8571em;
+}
+
+.la-reader .combo-box,
+.la-reader .la-action {
+    -fx-min-height: 3.1429em;
+    -fx-pref-height: 3.1429em;
+}
+
+.la-reader .combo-box {
+    -fx-background-color: -la-surface-raised;
+    -fx-border-color: -la-border;
+    -fx-border-width: 0.0714em;
+    -fx-background-radius: 0.5714em;
+    -fx-border-radius: 0.5714em;
+}
+
+.la-reader .combo-box:hover {
+    -fx-background-color: -la-surface-hover;
+    -fx-border-color: -la-border-strong;
+}
+
+.la-reader .combo-box:pressed {
+    -fx-background-color: -la-surface-pressed;
+    -fx-border-color: -la-accent;
+}
+
+.la-reader .combo-box:focused {
+    -fx-border-color: -la-accent;
+    -fx-border-width: 0.1429em;
+    -fx-border-insets: 0.1429em;
+}
+
+.la-reader .combo-box:disabled {
+    -fx-background-color: -la-surface-sunken;
+    -fx-border-color: -la-border-soft;
+    -fx-opacity: 0.65;
+}
+
+.la-reader .combo-box:disabled .list-cell {
+    -fx-text-fill: -la-fg-subtle;
+}
+
+.la-reader .la-action {
+    -fx-graphic-text-gap: 0.5714em;
+    -fx-cursor: hand;
+}
+
+.la-reader .la-action:disabled {
+    -fx-cursor: default;
+}
+
+.la-reader .la-reader-warning {
+    -fx-font-size: 0.8571em;
+    -fx-text-fill: -la-pending;
+    -fx-background-color: -la-pending-soft;
+    -fx-background-radius: 0.5714em;
+    -fx-padding: 0.8571em;
+}
+
+.la-reader .la-reader-feedback {
+    -fx-background-color: -la-accent-soft;
+    -fx-background-radius: 0.5714em;
+    -fx-padding: 1.1429em;
+}
+
+.la-reader .la-reader-feedback .label {
+    -fx-text-fill: -la-accent-strong;
+}
+
+.la-reader .la-reader-feedback--error {
+    -fx-background-color: -la-danger-soft;
+}
+
+.la-reader .la-reader-feedback--error .label {
+    -fx-text-fill: -la-danger;
+}
+
+.la-reader .la-reader-help {
+    -fx-font-size: 0.8571em;
+    -fx-text-fill: -la-fg-muted;
+}
+
 .la-kiosk {
     -fx-font-size: 1.3333em;
 }
@@ -997,3 +1167,4 @@
     -fx-wrap-text: true;
     -fx-min-width: 0;
 }
+
