@@ -1,5 +1,6 @@
 package vn.labaccess.card;
 
+import javacard.framework.ISOException;
 import javacard.framework.JCSystem;
 import javacard.framework.Util;
 
@@ -14,6 +15,7 @@ final class CardState {
     private final Receipt receipt = new Receipt();
     private final byte[] profileCiphertext = new byte[PROFILE_CIPHERTEXT_MAX];
     private short profileCiphertextLength;
+    private final byte[] profileNonce = new byte[ProfileCrypto.GCM_NONCE_LENGTH];
 
     private byte[] profilePlaintext;
     private short profilePlaintextLength;
@@ -24,10 +26,10 @@ final class CardState {
     private byte lifecycle;
     private boolean keysReady;
     private ReceiptSigner receiptSigner;
-    private EnrollmentSigner enrollmentSigner;
+    private CardSigner cardSigner;
 
     CardState() {
-        commandData = JCSystem.makeTransientByteArray(PersonalizePayload.MAX_LENGTH,
+        commandData = JCSystem.makeTransientByteArray(Protocol.COMMAND_DATA_MAX_LENGTH,
                 JCSystem.CLEAR_ON_DESELECT);
     }
 
@@ -37,7 +39,7 @@ final class CardState {
 
     void clearCommandData() {
         Util.arrayFillNonAtomic(commandData, (short) 0,
-                PersonalizePayload.MAX_LENGTH, (byte) 0);
+                Protocol.COMMAND_DATA_MAX_LENGTH, (byte) 0);
     }
 
     void ensureWorkingBuffers() {
@@ -60,6 +62,8 @@ final class CardState {
         Util.arrayFillNonAtomic(cardId, (short) 0, Protocol.CARD_ID_LENGTH,
                 Protocol.CARD_ID_UNASSIGNED);
         Util.arrayFillNonAtomic(profileCiphertext, (short) 0, PROFILE_CIPHERTEXT_MAX,
+                (byte) 0);
+        Util.arrayFillNonAtomic(profileNonce, (short) 0, ProfileCrypto.GCM_NONCE_LENGTH,
                 (byte) 0);
         clearWorkingBuffers();
     }
@@ -116,12 +120,12 @@ final class CardState {
         receiptSigner = signer;
     }
 
-    EnrollmentSigner enrollmentSigner() {
-        return enrollmentSigner;
+    CardSigner cardSigner() {
+        return cardSigner;
     }
 
-    void setEnrollmentSigner(EnrollmentSigner signer) {
-        enrollmentSigner = signer;
+    void setCardSigner(CardSigner signer) {
+        cardSigner = signer;
     }
 
     void setCardId(byte[] source, short offset) {
@@ -139,6 +143,32 @@ final class CardState {
     void setProfileCiphertext(byte[] source, short offset, short length) {
         Util.arrayCopyNonAtomic(source, offset, profileCiphertext, (short) 0, length);
         profileCiphertextLength = length;
+    }
+
+    void setProfileCiphertextAtomic(byte[] source, short offset, short length) {
+        Util.arrayCopy(source, offset, profileCiphertext, (short) 0, length);
+        profileCiphertextLength = length;
+    }
+
+    byte[] profileNonce() {
+        return profileNonce;
+    }
+
+    void setProfileNonce(byte[] source, short offset) {
+        Util.arrayCopyNonAtomic(source, offset, profileNonce, (short) 0,
+                ProfileCrypto.GCM_NONCE_LENGTH);
+    }
+
+    void advanceProfileNonce() {
+        for (short index = (short) (ProfileCrypto.GCM_NONCE_LENGTH - 1); index >= (short) 0;
+                index--) {
+            byte next = (byte) (profileNonce[index] + (byte) 1);
+            profileNonce[index] = next;
+            if (next != (byte) 0) {
+                return;
+            }
+        }
+        ISOException.throwIt(Sw.INTERNAL_ERROR);
     }
 
     byte[] profilePlaintext() {

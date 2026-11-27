@@ -1589,6 +1589,7 @@ public final class PersonalizeSelfTest {
         payload = validPayload(adminPin, studentPin);
         int nameLengthOffset = studentPinOffset + 6;
         payload[nameLengthOffset] = 0;
+        payload = Arrays.copyOf(payload, nameLengthOffset + 1);
         record("T07", "displayNameLength bang 0", SW_WRONG_DATA,
                 transmit(channel, personalizeCommand(payload)).getSW());
         clear(payload);

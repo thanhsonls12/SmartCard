@@ -9,6 +9,10 @@ final class ProfileCodec {
     private ProfileCodec() {
     }
 
+    static short studentIdLength(byte[] plaintext) {
+        return StudentIdFormat.length(plaintext, Protocol.PROFILE_OFFSET_STUDENT_ID_LENGTH);
+    }
+
     static void requireSchemaV1(byte[] plaintext, short plaintextLength) {
         if (plaintextLength < Protocol.PROFILE_MIN_LENGTH
                 || plaintextLength > Protocol.PROFILE_MAX_LENGTH) {
@@ -17,8 +21,7 @@ final class ProfileCodec {
         if (plaintext[Protocol.PROFILE_OFFSET_SCHEMA_VERSION] != ProfileCrypto.PROFILE_SCHEMA_VERSION) {
             ISOException.throwIt(Sw.INTERNAL_ERROR);
         }
-        short studentIdLength = (short) (plaintext[Protocol.PROFILE_OFFSET_STUDENT_ID_LENGTH]
-                & UNSIGNED_BYTE_MASK);
+        short studentIdLength = studentIdLength(plaintext);
         if (studentIdLength < (short) 1 || studentIdLength > Protocol.STUDENT_ID_MAX_LENGTH) {
             ISOException.throwIt(Sw.INTERNAL_ERROR);
         }

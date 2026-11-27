@@ -25,9 +25,10 @@ public final class InstallApplet {
 
     private static final String ISD_AID = "aid:A000000151000000";
 
-    private static final String PKG_HEX = "F04C414201";
-    private static final String APPLET_HEX = "F04C4142010101";
-    private static final String INST_HEX = "F04C4142010101";
+    private static String pkgHex = "F04C414201";
+    private static String appletHex = "F04C4142010101";
+    private static String instHex = "F04C4142010101";
+    private static boolean skipVerify;
 
     private static final byte[] MAGIC = {
             'L', 'A', 'B', 'A', 'C', 'C', 'E', 'S', 'S'
@@ -78,6 +79,14 @@ public final class InstallApplet {
                 capPath = a.substring(5);
             } else if (a.startsWith("-props=")) {
                 propsPath = a.substring(7);
+            } else if (a.startsWith("-pkg=")) {
+                pkgHex = a.substring(5);
+            } else if (a.startsWith("-applet=")) {
+                appletHex = a.substring(8);
+            } else if (a.startsWith("-inst=")) {
+                instHex = a.substring(6);
+            } else if (a.equals("-skip-verify")) {
+                skipVerify = true;
             }
         }
 
@@ -99,7 +108,7 @@ public final class InstallApplet {
         log("CAP    : " + capPath);
         log("PROPS  : " + propsPath);
         log("HOST   : " + host + ":" + port);
-        log("Package: " + PKG_HEX + "   Applet: " + APPLET_HEX + "   Instance: " + INST_HEX);
+        log("Package: " + pkgHex + "   Applet: " + appletHex + "   Instance: " + instHex);
         log("Che do : " + mode + (mode.equals("replace")
                 ? "  (SE XOA instance + package truoc khi cai)"
                 : "  (khong xoa gi)"));
@@ -141,7 +150,7 @@ public final class InstallApplet {
         log("");
 
         if (instanceAlive && !mode.equals("replace")) {
-            log("[DUNG] Instance " + INST_HEX + " da ton tai va dang phan hoi.");
+            log("[DUNG] Instance " + instHex + " da ton tai va dang phan hoi.");
             log("       Khong tu xoa instance co the dang chua du lieu.");
             log("       Muon ghi de, chay lai voi -mode=replace (thao tac pha huy).");
             return EXIT_INSTANCE_EXISTS;
@@ -160,7 +169,7 @@ public final class InstallApplet {
 
         if (!stepLoad(capPath, propsPath, channel)) {
             log("");
-            log("Goi y: neu package " + PKG_HEX + " da duoc load tu lan truoc,");
+            log("Goi y: neu package " + pkgHex + " da duoc load tu lan truoc,");
             log("       dung -mode=replace de go truoc khi cai lai.");
             return EXIT_FAILED;
         }
@@ -168,6 +177,11 @@ public final class InstallApplet {
             return EXIT_FAILED;
         }
 
+        if (skipVerify) {
+            log("[4] Bo qua kiem lai schema (applet khong phai LabAccess)");
+            log("");
+            return EXIT_OK;
+        }
         log("[4] Kiem lai sau khi cai");
         boolean after = probeInstance(channel);
         record("instance phan hoi dung schema sau khi cai", after, "");
@@ -203,11 +217,11 @@ public final class InstallApplet {
 
     private static boolean stepLoad(String capPath, String propsPath, CardChannel channel)
             throws IOException, java.security.NoSuchProviderException {
-        log("[2/3] LOAD package " + PKG_HEX);
+        log("[2/3] LOAD package " + pkgHex);
         CAPFile capFile = CAPFile.from(capPath);
         AMService ams = openService(propsPath);
         AMSession session = ams.openSession(ISD_AID)
-                .load("aid:" + PKG_HEX, capFile.getBytes())
+                .load("aid:" + pkgHex, capFile.getBytes())
                 .close();
         List<ResponseAPDU> responses;
         boolean ok;
@@ -219,14 +233,14 @@ public final class InstallApplet {
             ok = false;
             log("    load package: DUNG vi response khac 9000");
         }
-        record("load package " + PKG_HEX, ok, "");
+        record("load package " + pkgHex, ok, "");
         log("");
         return ok;
     }
 
     private static boolean stepInstall(String propsPath, CardChannel channel, byte[] adminPin)
             throws IOException, java.security.NoSuchProviderException {
-        log("[3/3] INSTALL instance " + INST_HEX);
+        log("[3/3] INSTALL instance " + instHex);
         boolean ok;
         byte[] payload = provisioningPayload(adminPin);
         try {
@@ -234,13 +248,13 @@ public final class InstallApplet {
                     payload[0], payload[1]));
             AMService ams = openService(propsPath);
             AMSession session = ams.openSession(ISD_AID)
-                    .install("aid:" + PKG_HEX, "aid:" + APPLET_HEX, "aid:" + INST_HEX, payload)
+                    .install("aid:" + pkgHex, "aid:" + appletHex, "aid:" + instHex, payload)
                     .close();
             ok = runScript(session, channel, "install instance");
         } finally {
             java.util.Arrays.fill(payload, (byte) 0);
         }
-        record("install instance " + INST_HEX, ok, "");
+        record("install instance " + instHex, ok, "");
         log("");
         return ok;
     }
@@ -291,16 +305,16 @@ public final class InstallApplet {
             throws IOException, java.security.NoSuchProviderException {
         log("    xoa instance");
         AMService ams = openService(propsPath);
-        AMSession session = ams.openSession(ISD_AID).uninstall("aid:" + INST_HEX).close();
-        return runRemoval(session, channel, "uninstall instance", INST_HEX);
+        AMSession session = ams.openSession(ISD_AID).uninstall("aid:" + instHex).close();
+        return runRemoval(session, channel, "uninstall instance", instHex);
     }
 
     private static boolean removePackage(String propsPath, CardChannel channel)
             throws IOException, java.security.NoSuchProviderException {
         log("    xoa package");
         AMService ams = openService(propsPath);
-        AMSession session = ams.openSession(ISD_AID).unload("aid:" + PKG_HEX).close();
-        return runRemoval(session, channel, "unload package", PKG_HEX);
+        AMSession session = ams.openSession(ISD_AID).unload("aid:" + pkgHex).close();
+        return runRemoval(session, channel, "unload package", pkgHex);
     }
 
     private static boolean runRemoval(AMSession session, CardChannel channel, String label,
@@ -391,8 +405,8 @@ public final class InstallApplet {
 
     private static boolean probeInstance(CardChannel channel) throws Exception {
         ResponseAPDU select = channel.transmit(
-                new CommandAPDU(0x00, 0xA4, 0x04, 0x00, hex(INST_HEX), 256));
-        log(String.format("    SELECT %s -> SW=%04X", INST_HEX, select.getSW()));
+                new CommandAPDU(0x00, 0xA4, 0x04, 0x00, hex(instHex), 256));
+        log(String.format("    SELECT %s -> SW=%04X", instHex, select.getSW()));
         if (select.getSW() != SW_OK) {
             return false;
         }
@@ -430,7 +444,7 @@ public final class InstallApplet {
         }
         String returnedAid = hexOf(data, 11, aidLength);
         log("    instance AID tra ve: " + returnedAid);
-        if (!INST_HEX.equalsIgnoreCase(returnedAid)) {
+        if (!instHex.equalsIgnoreCase(returnedAid)) {
             log("    schema: AID tra ve khac AID da yeu cau");
             return false;
         }

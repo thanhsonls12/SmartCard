@@ -187,7 +187,7 @@ $variants = @(
     },
     [pscustomobject]@{
         Name = 'quota-fault-before-commit'
-        Target = 'vn/labaccess/card/LabAccessApplet.java'
+        Target = 'vn/labaccess/card/transaction/StateTransactionHandler.java'
         Anchor = '            ledger.setBalance(balanceAfter);'
         Lines = @(
             '            if (delta == (short) 7777) {',
@@ -197,7 +197,7 @@ $variants = @(
     },
     [pscustomobject]@{
         Name = 'quota-fault-after-commit'
-        Target = 'vn/labaccess/card/LabAccessApplet.java'
+        Target = 'vn/labaccess/card/transaction/StateTransactionHandler.java'
         Anchor = '            started = false;'
         After = $true
         Lines = @(
@@ -221,7 +221,7 @@ $variants = @(
     },
     [pscustomobject]@{
         Name = 'visit-fault-before-commit'
-        Target = 'vn/labaccess/card/LabAccessApplet.java'
+        Target = 'vn/labaccess/card/transaction/StateTransactionHandler.java'
         Anchor = '                visits.open(visitId, visitIdOffset);'
         After = $true
         Lines = @(
@@ -232,7 +232,7 @@ $variants = @(
     },
     [pscustomobject]@{
         Name = 'visit-fault-after-close-before-commit'
-        Target = 'vn/labaccess/card/LabAccessApplet.java'
+        Target = 'vn/labaccess/card/transaction/StateTransactionHandler.java'
         Anchor = '                visits.close();'
         After = $true
         Lines = @(
@@ -241,7 +241,7 @@ $variants = @(
     },
     [pscustomobject]@{
         Name = 'visit-fault-after-commit'
-        Target = 'vn/labaccess/card/LabAccessApplet.java'
+        Target = 'vn/labaccess/card/transaction/StateTransactionHandler.java'
         Anchor = '            writeStateResponse(ledger, buffer);'
         Occurrence = 2
         Lines = @(
@@ -252,7 +252,7 @@ $variants = @(
     },
     [pscustomobject]@{
         Name = 'receipt-fault-before-commit'
-        Target = 'vn/labaccess/card/LabAccessApplet.java'
+        Target = 'vn/labaccess/card/transaction/StateTransactionHandler.java'
         Anchor = '            receipt.store();'
         After = $true
         Lines = @(
@@ -264,12 +264,88 @@ $variants = @(
     [pscustomobject]@{
         Name = 'photo-finish-after-length-fault'
         Target = 'vn/labaccess/card/photo/PhotoStore.java'
-        Anchor = '        photoLength = total;'
+        Anchor = '            photoLength = total;'
         After = $true
         Lines = @(
-            '        if (buffer[(short) 0] == (byte) 0xA5) {',
+            '        if (plaintext[(short) 0] == (byte) 0xA5) {',
             '            javacard.framework.ISOException.throwIt(Sw.INTERNAL_ERROR);',
             '        }'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'photo-length-zero-tamper'
+        Target = 'vn/labaccess/card/photo/PhotoStore.java'
+        Anchor = '            photoLength = total;'
+        After = $true
+        Lines = @(
+            '        photoLength = (short) 0;'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'photo-metadata-version-tamper'
+        Target = 'vn/labaccess/card/photo/PhotoStore.java'
+        Anchor = '            recordVersion = RECORD_VERSION;'
+        After = $true
+        Lines = @(
+            '        recordVersion = (byte) 0x02;'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'photo-metadata-algorithm-tamper'
+        Target = 'vn/labaccess/card/photo/PhotoStore.java'
+        Anchor = '            algorithmId = ALGORITHM_ID_GCM;'
+        After = $true
+        Lines = @(
+            '        algorithmId = (byte) 0x02;'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'photo-tag-tamper'
+        Target = 'vn/labaccess/card/photo/PhotoStore.java'
+        Anchor = '        gcm.retrieveTag(tagOf(slot), (short) 0, ProfileCrypto.GCM_TAG_LENGTH);'
+        After = $true
+        Lines = @(
+            '        tagOf(slot)[(short) 0] = (byte) (tagOf(slot)[(short) 0] ^ 0x01);'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'photo-ciphertext-tamper'
+        Target = 'vn/labaccess/card/photo/PhotoStore.java'
+        Anchor = '        gcm.doFinal(plaintext, (short) 0, Protocol.PHOTO_LENGTH, target, (short) 0);'
+        After = $true
+        Lines = @(
+            '        target[(short) 0] = (byte) (target[(short) 0] ^ 0x01);'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'photo-wipe-check'
+        Target = 'vn/labaccess/card/photo/PhotoStore.java'
+        Anchor = '    void loadForRead() {'
+        After = $true
+        Lines = @(
+            '        for (short index = (short) 0; index < Protocol.PHOTO_LENGTH; index++) {',
+            '            if (plaintext[index] != (byte) 0) {',
+            '                javacard.framework.ISOException.throwIt(Sw.WRONG_DATA);',
+            '            }',
+            '        }'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'memory-report'
+        Target = 'vn/labaccess/card/LabAccessApplet.java'
+        Anchor = '            ISOException.throwIt(Sw.INS_NOT_SUPPORTED);'
+        Lines = @(
+            '            if (ins == (byte) 0x7F) {',
+            '                short offset = (short) 0;',
+            '                javacard.framework.JCSystem.getAvailableMemory(buffer, offset, javacard.framework.JCSystem.MEMORY_TYPE_PERSISTENT);',
+            '                offset += (short) 2;',
+            '                javacard.framework.JCSystem.getAvailableMemory(buffer, offset, javacard.framework.JCSystem.MEMORY_TYPE_TRANSIENT_RESET);',
+            '                offset += (short) 2;',
+            '                javacard.framework.JCSystem.getAvailableMemory(buffer, offset, javacard.framework.JCSystem.MEMORY_TYPE_TRANSIENT_DESELECT);',
+            '                offset += (short) 2;',
+            '                apdu.setOutgoingAndSend((short) 0, offset);',
+            '                return;',
+            '            }'
         )
     },
     [pscustomobject]@{
@@ -278,6 +354,16 @@ $variants = @(
         Anchor = '        if (stagedSignatureLength <= (short) 0'
         Lines = @(
             '        stagedSignatureLength = (short) 73;'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'profile-update-fault'
+        Target = 'vn/labaccess/card/enrollment/Personalization.java'
+        Anchor = '            state.setProfileCiphertextAtomic(state.scratch(), (short) 0, recordLength);'
+        Lines = @(
+            '        if (data[nameOffset] == (byte) 0x7E) {',
+            '            javacard.framework.ISOException.throwIt(Sw.INTERNAL_ERROR);',
+            '        }'
         )
     }
 )

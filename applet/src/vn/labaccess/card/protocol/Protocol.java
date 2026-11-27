@@ -11,6 +11,10 @@ final class Protocol {
     static final byte INS_PERSONALIZE = (byte) 0x30;
     static final byte INS_GET_PROFILE = (byte) 0x31;
     static final byte INS_GET_PROFILE_CRYPTO_META = (byte) 0x40;
+    static final byte INS_UPDATE_PROFILE = (byte) 0x41;
+    static final byte INS_UPDATE_IDENTITY = (byte) 0x42;
+    static final byte INS_PHOTO_REPLACE_BEGIN = (byte) 0x36;
+    static final byte INS_SIGN_PROFILE_CHALLENGE = (byte) 0x64;
     static final byte INS_PHOTO_BEGIN = (byte) 0x32;
     static final byte INS_PHOTO_WRITE_CHUNK = (byte) 0x33;
     static final byte INS_PHOTO_READ_CHUNK = (byte) 0x34;
@@ -65,6 +69,27 @@ final class Protocol {
     static final short PROFILE_META_CIPHERTEXT_HASH_LENGTH = (short) 32;
     static final short PROFILE_META_RESPONSE_LENGTH =
             (short) (PROFILE_META_OFFSET_CIPHERTEXT_HASH + PROFILE_META_CIPHERTEXT_HASH_LENGTH);
+
+    static final short UPDATE_PROFILE_OFFSET_ADMIN_PIN = (short) 0;
+    static final short UPDATE_PROFILE_OFFSET_NAME_LENGTH = (short) ADMIN_PIN_LENGTH;
+    static final short UPDATE_PROFILE_OFFSET_NAME =
+            (short) (UPDATE_PROFILE_OFFSET_NAME_LENGTH + 1);
+    static final short UPDATE_PROFILE_MIN_LENGTH = (short) (UPDATE_PROFILE_OFFSET_NAME + 1);
+    static final short UPDATE_PROFILE_MAX_LENGTH =
+            (short) (UPDATE_PROFILE_OFFSET_NAME + DISPLAY_NAME_MAX_LENGTH);
+
+    static final short UPDATE_IDENTITY_OFFSET_ADMIN_PIN = (short) 0;
+    static final short UPDATE_IDENTITY_OFFSET_VERSION = (short) ADMIN_PIN_LENGTH;
+    static final short UPDATE_IDENTITY_OFFSET_STUDENT_ID_LENGTH =
+            (short) (UPDATE_IDENTITY_OFFSET_VERSION + ProfileCrypto.GCM_NONCE_LENGTH);
+    static final short UPDATE_IDENTITY_OFFSET_STUDENT_ID =
+            (short) (UPDATE_IDENTITY_OFFSET_STUDENT_ID_LENGTH + 1);
+    static final short UPDATE_IDENTITY_MIN_LENGTH =
+            (short) (UPDATE_IDENTITY_OFFSET_STUDENT_ID + 1 + 1 + 1);
+    static final short UPDATE_IDENTITY_MAX_LENGTH =
+            (short) (UPDATE_IDENTITY_OFFSET_STUDENT_ID + STUDENT_ID_MAX_LENGTH + 1
+                    + DISPLAY_NAME_MAX_LENGTH);
+    static final short COMMAND_DATA_MAX_LENGTH = UPDATE_IDENTITY_MAX_LENGTH;
 
     static final short MAX_BALANCE = (short) 9999;
 
@@ -156,6 +181,29 @@ final class Protocol {
     static final short ENROLLMENT_MESSAGE_LENGTH =
             (short) (ENROLLMENT_OFFSET_NONCE + ENROLLMENT_NONCE_LENGTH);
     static final byte CARD_ID_UNASSIGNED = (byte) 0x00;
+
+    static final short PROFILE_SIGN_OFFSET_ADMIN_PIN = (short) 0;
+    static final short PROFILE_SIGN_OFFSET_NONCE = (short) ADMIN_PIN_LENGTH;
+    static final short PROFILE_SIGN_DATA_LENGTH =
+            (short) (PROFILE_SIGN_OFFSET_NONCE + ENROLLMENT_NONCE_LENGTH);
+    static final short PROFILE_SIGN_MIN_LE = (short) 72;
+    static final short PROFILE_HASH_LENGTH = (short) 32;
+    static final byte[] PROFILE_DOMAIN = {
+            (byte) 'L', (byte) 'A', (byte) 'B', (byte) 'A', (byte) 'C', (byte) 'C',
+            (byte) 'E', (byte) 'S', (byte) 'S', (byte) '-', (byte) 'P', (byte) 'R',
+            (byte) 'O', (byte) 'F', (byte) 'I', (byte) 'L', (byte) 'E', (byte) '-',
+            (byte) 'v', (byte) '1'
+    };
+    static final short PROFILE_DOMAIN_LENGTH = (short) 20;
+    static final short PROFILE_OFFSET_CARD_ID = PROFILE_DOMAIN_LENGTH;
+    static final short PROFILE_OFFSET_PUBLIC_KEY_HASH =
+            (short) (PROFILE_OFFSET_CARD_ID + CARD_ID_LENGTH);
+    static final short PROFILE_OFFSET_NONCE =
+            (short) (PROFILE_OFFSET_PUBLIC_KEY_HASH + ENROLLMENT_PUBLIC_KEY_HASH_LENGTH);
+    static final short PROFILE_OFFSET_HASH =
+            (short) (PROFILE_OFFSET_NONCE + ENROLLMENT_NONCE_LENGTH);
+    static final short PROFILE_MESSAGE_LENGTH =
+            (short) (PROFILE_OFFSET_HASH + PROFILE_HASH_LENGTH);
 
     static final short OFFSET_MAGIC = (short) 0;
     static final short OFFSET_PROTOCOL_VERSION = (short) 9;

@@ -7,6 +7,10 @@ param(
     [int]$Port = 9025,
     [string]$JavaHome = $env:JAVA_HOME,
     [string]$JcHomeSimulator = $env:JC_HOME_SIMULATOR,
+    [string]$PackageAid,
+    [string]$AppletAid,
+    [string]$InstanceAid,
+    [switch]$SkipVerify,
     [switch]$PinStdin
 )
 
@@ -106,14 +110,22 @@ if ($adminPin -notmatch '^[0-9]{8}$') {
     Stop-Install "Admin PIN phai la dung 8 chu so ASCII tu 0 den 9."
 }
 
-$log = Join-Path $logDir 'install.log'
+$log = Join-Path $logDir ('install-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '.log')
+$capHash = (Get-FileHash -LiteralPath $CapPath -Algorithm SHA256).Hash
+"CAP SHA256: $capHash" | Set-Content -LiteralPath $log -Encoding UTF8
+$aidArgs = @()
+if ($PackageAid) { $aidArgs += "-pkg=$PackageAid" }
+if ($AppletAid) { $aidArgs += "-applet=$AppletAid" }
+if ($InstanceAid) { $aidArgs += "-inst=$InstanceAid" }
+if ($SkipVerify) { $aidArgs += '-skip-verify' }
 $r = Invoke-Native {
     $adminPin | & $java --module-path "$amserviceJar;$socketJar" --add-modules ALL-MODULE-PATH `
         -cp $toolsOut InstallApplet `
-        "-mode=$Mode" "-cap=$CapPath" "-host=$HostAddress`:$Port" "-props=$propsFile"
+        "-mode=$Mode" "-cap=$CapPath" "-host=$HostAddress`:$Port" "-props=$propsFile" @aidArgs
 }
 $adminPin = $null
-$r.Output | Tee-Object -FilePath $log | ForEach-Object { Write-Host $_ }
+$r.Output | Out-File -LiteralPath $log -Append -Encoding UTF8
+$r.Output | ForEach-Object { Write-Host $_ }
 
 Write-Host ""
 Write-Host "Log: $log"

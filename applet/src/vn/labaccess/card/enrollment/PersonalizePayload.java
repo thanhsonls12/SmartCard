@@ -15,21 +15,13 @@ final class PersonalizePayload {
 
     static final byte ADMIN_PIN_LENGTH_FIELD = (byte) 8;
 
-    private static final short STUDENT_ID_MIN_LENGTH = (short) 8;
-    private static final short STUDENT_ID_MAX_LENGTH = (short) 10;
     private static final short UNSIGNED_BYTE_MASK = 0x00FF;
-
-    private static final byte ASCII_UPPER_A = (byte) 'A';
-    private static final byte ASCII_UPPER_Z = (byte) 'Z';
-    private static final byte ASCII_LOWER_A = (byte) 'a';
-    private static final byte ASCII_LOWER_Z = (byte) 'z';
-    private static final byte ASCII_CASE_OFFSET = (byte) ('a' - 'A');
 
     private PersonalizePayload() {
     }
 
     static short studentIdLength(byte[] buffer) {
-        return (short) (buffer[OFFSET_STUDENT_ID_LENGTH] & UNSIGNED_BYTE_MASK);
+        return StudentIdFormat.length(buffer, OFFSET_STUDENT_ID_LENGTH);
     }
 
     static short studentPinOffset(byte[] buffer) {
@@ -71,9 +63,7 @@ final class PersonalizePayload {
         }
         requireNonZeroCardId(buffer);
         short studentIdLength = studentIdLength(buffer);
-        if (studentIdLength < STUDENT_ID_MIN_LENGTH || studentIdLength > STUDENT_ID_MAX_LENGTH) {
-            ISOException.throwIt(Sw.WRONG_DATA);
-        }
+        StudentIdFormat.requireValid(buffer, OFFSET_STUDENT_ID, studentIdLength);
         short studentPinOffset = studentPinOffset(buffer);
         short nameLengthOffset = (short) (studentPinOffset + Protocol.STUDENT_PIN_LENGTH);
         short displayNameLength = (short) (buffer[nameLengthOffset] & UNSIGNED_BYTE_MASK);
@@ -82,7 +72,6 @@ final class PersonalizePayload {
             ISOException.throwIt(Sw.WRONG_DATA);
         }
         PinFormat.requireDigits(buffer, OFFSET_ADMIN_PIN, Protocol.ADMIN_PIN_LENGTH);
-        normalizeStudentId(buffer, studentIdLength);
         PinFormat.requireDigits(buffer, studentPinOffset, Protocol.STUDENT_PIN_LENGTH);
     }
 
@@ -93,23 +82,6 @@ final class PersonalizePayload {
             }
         }
         ISOException.throwIt(Sw.WRONG_DATA);
-    }
-
-    private static void normalizeStudentId(byte[] buffer, short length) {
-        for (short index = (short) 0; index < length; index++) {
-            short offset = (short) (OFFSET_STUDENT_ID + index);
-            byte value = buffer[offset];
-            if (value >= ASCII_LOWER_A && value <= ASCII_LOWER_Z) {
-                value = (byte) (value - ASCII_CASE_OFFSET);
-                buffer[offset] = value;
-            }
-            boolean allowed = (value >= ASCII_UPPER_A && value <= ASCII_UPPER_Z)
-                    || (value >= Protocol.ASCII_DIGIT_ZERO
-                            && value <= Protocol.ASCII_DIGIT_NINE);
-            if (!allowed) {
-                ISOException.throwIt(Sw.WRONG_DATA);
-            }
-        }
     }
 
 }

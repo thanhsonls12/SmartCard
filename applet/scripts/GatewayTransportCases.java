@@ -6,6 +6,13 @@ import java.util.Arrays;
 import java.util.HexFormat;
 import javax.smartcardio.ResponseAPDU;
 
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptExpectation;
+import vn.labaccess.desktop.card.Reconciliation;
+
 public final class GatewayTransportCases {
     private GatewayTransportCases() {
     }

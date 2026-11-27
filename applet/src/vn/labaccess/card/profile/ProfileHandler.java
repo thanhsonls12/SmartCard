@@ -43,6 +43,79 @@ final class ProfileHandler {
         }
     }
 
+    void handleUpdateProfile(APDU apdu, byte[] buffer) {
+        byte[] data = state.commandData();
+        try {
+            ApduChecks.requireZeroP1P2(buffer);
+            short lc = ApduChecks.receiveCommandData(apdu, buffer, data,
+                    Protocol.UPDATE_PROFILE_MAX_LENGTH);
+            ApduChecks.requireCase3(apdu);
+            short nameLength = UpdateProfilePayload.requireValid(data, lc);
+            if (!state.isIssued()) {
+                ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            AdminPinVerifier.verify(pins.admin(), data, Protocol.UPDATE_PROFILE_OFFSET_ADMIN_PIN);
+            personalization.updateDisplayName(data, Protocol.UPDATE_PROFILE_OFFSET_NAME, nameLength);
+        } finally {
+            pins.admin().reset();
+            ApduChecks.clearApduCommandData(buffer);
+            state.clearCommandData();
+            state.clearWorkingBuffers();
+        }
+    }
+
+    void handleUpdateIdentity(APDU apdu, byte[] buffer) {
+        byte[] data = state.commandData();
+        try {
+            ApduChecks.requireZeroP1P2(buffer);
+            short lc = ApduChecks.receiveCommandData(apdu, buffer, data,
+                    Protocol.UPDATE_IDENTITY_MAX_LENGTH);
+            ApduChecks.requireCase3(apdu);
+            short nameLength = UpdateIdentityPayload.requireValid(data, lc);
+            if (!state.isIssued()) {
+                ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            AdminPinVerifier.verify(pins.admin(), data,
+                    Protocol.UPDATE_IDENTITY_OFFSET_ADMIN_PIN);
+            personalization.updateIdentity(data, Protocol.UPDATE_IDENTITY_OFFSET_VERSION,
+                    nameLength);
+        } finally {
+            pins.admin().reset();
+            ApduChecks.clearApduCommandData(buffer);
+            state.clearCommandData();
+            state.clearWorkingBuffers();
+        }
+    }
+
+    void handleSignProfileChallenge(APDU apdu, byte[] buffer) {
+        byte[] data = state.commandData();
+        try {
+            ApduChecks.requireZeroP1P2(buffer);
+            short lc = ApduChecks.receiveCommandData(apdu, buffer, data,
+                    Protocol.PROFILE_SIGN_DATA_LENGTH);
+            if (lc != Protocol.PROFILE_SIGN_DATA_LENGTH) {
+                ISOException.throwIt(Sw.WRONG_LENGTH);
+            }
+            short ne = apdu.setOutgoing();
+            if (ne < Protocol.PROFILE_SIGN_MIN_LE) {
+                ISOException.throwIt(Sw.WRONG_LENGTH);
+            }
+            if (!state.isIssued() || !state.keysReady()) {
+                ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
+            }
+            AdminPinVerifier.verify(pins.admin(), data, Protocol.PROFILE_SIGN_OFFSET_ADMIN_PIN);
+            short length = personalization.signProfileChallenge(data,
+                    Protocol.PROFILE_SIGN_OFFSET_NONCE);
+            apdu.setOutgoingLength(length);
+            apdu.sendBytesLong(personalization.signature(), (short) 0, length);
+        } finally {
+            pins.admin().reset();
+            ApduChecks.clearApduCommandData(buffer);
+            state.clearCommandData();
+            state.clearWorkingBuffers();
+        }
+    }
+
     void handleGetProfileCryptoMeta(APDU apdu, byte[] buffer) {
         try {
             ApduChecks.requireZeroP1P2(buffer);

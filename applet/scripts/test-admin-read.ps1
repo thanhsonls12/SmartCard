@@ -117,12 +117,16 @@ try {
     Write-Host "      test CAP $($baseline.test.sha256) ($($baseline.test.bytes) byte)"
 
     Write-Host "[3/6] compile harness"
-    $desktopClasses = @('CardGateway', 'CardLifecycle', 'CardOperationResult', 'CardPhotoCommands',
-        'CardPinCommands', 'CardProfileCommands', 'CardProtocol', 'CardStatus', 'CardStatusCodec',
-        'CardTransport', 'PendingJournal', 'PersonalizeRequest', 'PhotoImage', 'Profile', 'ProfileCodec',
-        'ProfileCryptoMeta', 'ProfileMetaCodec', 'Receipt', 'ReceiptCodec', 'ReceiptExpectation',
-        'ReceiptVerifier', 'Reconciliation', 'SimulatorConnection', 'Sw', 'ReceiptReadRecovery',
-        'CardOverviewReader', 'CardAdminCommands', 'StudentLedgerGate', 'LedgerAlignment')
+    $desktopClasses = @('card/CardGateway', 'card/CardLifecycle', 'card/CardOperationResult', 'card/CardPhotoCommands',
+        'card/CardPinCommands', 'card/CardProfileCommands', 'card/CardProtocol', 'card/CardStatus', 'card/CardStatusCodec',
+        'transport/CardTransport', 'card/PendingJournal', 'card/PersonalizeRequest', 'validation/PinFormat', 'card/PhotoImage', 'card/Profile', 'card/ProfileCodec',
+        'card/ProfileCryptoMeta', 'card/ProfileMetaCodec', 'card/Receipt', 'card/ReceiptCodec', 'card/ReceiptExpectation',
+        'card/ReceiptVerifier', 'card/Reconciliation', 'transport/SimulatorConnection', 'card/Sw', 'card/ReceiptReadRecovery',
+        'card/CardOverviewReader', 'card/CardAdminCommands', 'card/StudentLedgerGate', 'card/LedgerAlignment',
+        'card/CardPersonalizationCommands', 'card/CardEnrollmentCommands', 'card/CardProfileUpdateCommands', 'validation/ClassCode',
+        'card/ProfileEditRequest', 'card/StateTransactionFlow', 'card/ReconciliationFlow',
+        'virtualreader/protocol/VirtualReaderProtocol',
+        'virtualreader/protocol/VirtualReaderSession')
     $sources = @('PersonalizeSelfTest.java', 'ApduErrorCases.java', 'ApduTransportCases.java',
         'GatewayTransportCases.java') | ForEach-Object { Join-Path $repoRoot "applet/scripts/$_" }
     $sources += $desktopClasses | ForEach-Object { Join-Path $repoRoot "desktop/src/main/java/vn/labaccess/desktop/$_.java" }

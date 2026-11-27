@@ -11,17 +11,22 @@ $buildDir = Join-Path $appletRoot 'build'
 $toolsOut = Join-Path $buildDir 'tools'
 $buildLogDir = Join-Path $buildDir 'logs'
 $logDir = Join-Path $repoRoot 'logs'
+$scanStart = Get-Date
 $source = Join-Path $PSScriptRoot 'PersonalizeSelfTest.java'
 $apduCasesSource = Join-Path $PSScriptRoot 'ApduErrorCases.java'
 $transportCasesSource = Join-Path $PSScriptRoot 'ApduTransportCases.java'
-$transportSource = Join-Path $PSScriptRoot '../../desktop/src/main/java/vn/labaccess/desktop/CardTransport.java'
+$transportSource = Join-Path $PSScriptRoot '../../desktop/src/main/java/vn/labaccess/desktop/transport/CardTransport.java'
 $gatewayCasesSource = Join-Path $PSScriptRoot 'GatewayTransportCases.java'
-$gatewayNames = @('CardGateway', 'CardLifecycle', 'CardOperationResult', 'CardPhotoCommands', 'CardPinCommands',
-    'CardProfileCommands', 'CardProtocol', 'CardStatus', 'CardStatusCodec', 'PendingJournal', 'PersonalizeRequest',
-    'PhotoImage', 'Profile', 'ProfileCodec', 'ProfileCryptoMeta', 'ProfileMetaCodec', 'Receipt', 'ReceiptCodec',
-    'ReceiptExpectation', 'ReceiptVerifier', 'Reconciliation', 'SimulatorConnection', 'Sw',
-    'CardAdminCommands', 'ReceiptReadRecovery', 'CardOverviewReader', 'StudentLedgerGate',
-    'LedgerAlignment')
+$gatewayNames = @('card/CardGateway', 'card/CardLifecycle', 'card/CardOperationResult', 'card/CardPhotoCommands', 'card/CardPinCommands',
+    'card/CardProfileCommands', 'card/CardProtocol', 'card/CardStatus', 'card/CardStatusCodec', 'card/PendingJournal', 'card/PersonalizeRequest', 'validation/PinFormat',
+    'card/PhotoImage', 'card/Profile', 'card/ProfileCodec', 'card/ProfileCryptoMeta', 'card/ProfileMetaCodec', 'card/Receipt', 'card/ReceiptCodec',
+    'card/ReceiptExpectation', 'card/ReceiptVerifier', 'card/Reconciliation', 'transport/SimulatorConnection', 'card/Sw',
+    'card/CardAdminCommands', 'card/ReceiptReadRecovery', 'card/CardOverviewReader', 'card/StudentLedgerGate',
+    'card/LedgerAlignment',
+    'card/CardPersonalizationCommands', 'card/CardEnrollmentCommands', 'card/CardProfileUpdateCommands', 'validation/ClassCode',
+    'card/ProfileEditRequest', 'card/StateTransactionFlow', 'card/ReconciliationFlow',
+        'virtualreader/protocol/VirtualReaderProtocol',
+        'virtualreader/protocol/VirtualReaderSession')
 $gatewaySources = $gatewayNames | ForEach-Object { Join-Path $PSScriptRoot "../../desktop/src/main/java/vn/labaccess/desktop/$_.java" }
 
 function Stop-Test {
@@ -157,7 +162,8 @@ foreach ($root in @((Join-Path $repoRoot 'logs'), $buildLogDir)) {
         Stop-Test "Required log directory missing: $root"
     }
     try {
-        $files = @(Get-ChildItem -LiteralPath $root -File -Recurse -ErrorAction Stop)
+        $files = @(Get-ChildItem -LiteralPath $root -File -Recurse -ErrorAction Stop |
+            Where-Object { $_.LastWriteTime -ge $scanStart })
     } catch {
         Stop-Test "Cannot enumerate log directory: $root"
     }
@@ -190,7 +196,7 @@ if ($readErrors.Count -gt 0) {
 if ($leaks.Count -gt 0) {
     Stop-Test "PIN material found in log file(s): $($leaks -join '; ')"
 }
-Write-Host "      Scanned $scanCount log files; no PIN leak found"
+Write-Host "      Scanned $scanCount log files written since $($scanStart.ToString('yyyy-MM-dd HH:mm:ss')); no PIN leak found"
 Write-Host "Log: $logFile"
 if ($nodeResult.ExitCode -ne 0) {
     Write-Host "      Node receipt verification FAILED (exit $($nodeResult.ExitCode))"

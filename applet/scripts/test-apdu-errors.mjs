@@ -85,13 +85,16 @@ try {
   const sources = fs.readdirSync(sourceDir, { recursive: true }).filter(name => name.endsWith('.java')).sort().map(name => path.join(sourceDir, name));
   const harnessSources = ['PersonalizeSelfTest.java', 'ApduErrorCases.java', 'ApduTransportCases.java', 'GatewayTransportCases.java']
     .map(name => path.join(root, 'applet/scripts', name));
-  const gatewaySources = ['CardGateway', 'CardLifecycle', 'CardOperationResult', 'CardPhotoCommands', 'CardPinCommands',
-    'CardProfileCommands', 'CardProtocol', 'CardStatus', 'CardStatusCodec', 'CardTransport', 'PendingJournal',
-    'PersonalizeRequest', 'PhotoImage', 'Profile', 'ProfileCodec', 'ProfileCryptoMeta', 'ProfileMetaCodec',
-    'Receipt', 'ReceiptCodec', 'ReceiptExpectation', 'ReceiptVerifier', 'Reconciliation', 'SimulatorConnection', 'Sw',
-    'ReceiptReadRecovery', 'CardOverviewReader', 'CardAdminCommands', 'StudentLedgerGate',
-    'LedgerAlignment'];
-  harnessSources.push(...gatewaySources.map(name => name === 'CardTransport' && options['baseline-transport']
+  const gatewaySources = ['card/CardGateway', 'card/CardLifecycle', 'card/CardOperationResult', 'card/CardPhotoCommands', 'card/CardPinCommands',
+    'card/CardProfileCommands', 'card/CardProtocol', 'card/CardStatus', 'card/CardStatusCodec', 'transport/CardTransport', 'card/PendingJournal',
+    'card/PersonalizeRequest', 'card/PhotoImage', 'card/Profile', 'card/ProfileCodec', 'card/ProfileCryptoMeta', 'card/ProfileMetaCodec',
+    'card/Receipt', 'card/ReceiptCodec', 'card/ReceiptExpectation', 'card/ReceiptVerifier', 'card/Reconciliation', 'transport/SimulatorConnection', 'card/Sw',
+    'card/ReceiptReadRecovery', 'card/CardOverviewReader', 'card/CardAdminCommands', 'card/StudentLedgerGate',
+    'card/LedgerAlignment', 'validation/PinFormat', 'card/CardPersonalizationCommands', 'card/CardEnrollmentCommands',
+    'card/CardProfileUpdateCommands', 'validation/ClassCode', 'card/ProfileEditRequest', 'card/StateTransactionFlow', 'card/ReconciliationFlow',
+        'virtualreader/protocol/VirtualReaderProtocol',
+        'virtualreader/protocol/VirtualReaderSession'];
+  harnessSources.push(...gatewaySources.map(name => name === 'transport/CardTransport' && options['baseline-transport']
     ? path.resolve(root, options['baseline-transport'])
     : path.join(root, `desktop/src/main/java/vn/labaccess/desktop/${name}.java`)));
   manifest = {
@@ -147,28 +150,43 @@ try {
         '-cp', `${toolsHome}/lib/api_classic-3.2.0.jar;${classes}`, variantSource]);
     }
     if (label === 'test' && ['receive', 'short-input'].includes(options.transport)) {
-      const original = fs.readFileSync(path.join(sourceDir, 'LabAccessApplet.java'), 'utf8');
-      const instrumented = original
-        .replace('private final PinStore pins;', 'private final byte[] receiveTrace = new byte[65];\n    private final PinStore pins;')
-        .replace('requireApplicationCla(buffer);', `requireApplicationCla(buffer);
+      const appletSource = fs.readFileSync(path.join(sourceDir, 'LabAccessApplet.java'), 'utf8');
+      const checksSource = fs.readFileSync(path.join(sourceDir, 'protocol/ApduChecks.java'), 'utf8');
+      const instrumentedApplet = appletSource.replace('requireApplicationCla(buffer);', `requireApplicationCla(buffer);
             if (ins == (byte) 0x7E) {
-                Util.arrayCopyNonAtomic(receiveTrace, (short) 0, buffer, (short) 0, (short) receiveTrace.length);
-                apdu.setOutgoingAndSend((short) 0, (short) receiveTrace.length);
+                Util.arrayCopyNonAtomic(ApduChecks.receiveTrace, (short) 0, buffer, (short) 0,
+                        (short) ApduChecks.receiveTrace.length);
+                apdu.setOutgoingAndSend((short) 0, (short) ApduChecks.receiveTrace.length);
                 return;
-            }`)
+            }`);
+      const instrumentedChecks = checksSource
+        .replace('final class ApduChecks {',
+          'final class ApduChecks {\n\n    static final byte[] receiveTrace = new byte[65];')
         .replace('short received = apdu.setIncomingAndReceive();\n        short lc',
           'Util.arrayFillNonAtomic(receiveTrace, (short) 0, (short) receiveTrace.length, (byte) 0);\n        receiveTrace[64] = 1;\n        short received = apdu.setIncomingAndReceive();\n        short lc')
         .replace('while (total < lc) {', `while (total < lc) {
             Util.setShort(receiveTrace, (short) (1 + receiveTrace[0] * 2), received);
             receiveTrace[0]++;`);
-      assert.notEqual(instrumented, original);
-      const probeSource = path.join(scratch, 'LabAccessApplet.java');
-      fs.writeFileSync(probeSource, instrumented);
-      fs.writeFileSync(path.join(output, 'receive-probe.java'), instrumented);
-      manifest.receiveProbe = { source: 'receive-probe.java', sha256: digest(probeSource),
+      assert.notEqual(instrumentedApplet, appletSource, 'Probe anchor moved out of LabAccessApplet.process');
+      assert(instrumentedChecks.includes('static final byte[] receiveTrace = new byte[65];'),
+        'Probe anchor moved out of the ApduChecks declaration');
+      assert(instrumentedChecks.includes('receiveTrace[64] = 1;'),
+        'Probe anchor moved out of ApduChecks.receiveCommandData entry');
+      assert(instrumentedChecks.includes('receiveTrace[0]++;'),
+        'Probe anchor moved out of the ApduChecks.receiveCommandData loop');
+      const probeApplet = path.join(scratch, 'LabAccessApplet.java');
+      const probeChecks = path.join(scratch, 'ApduChecks.java');
+      fs.writeFileSync(probeApplet, instrumentedApplet);
+      fs.writeFileSync(probeChecks, instrumentedChecks);
+      fs.writeFileSync(path.join(output, 'receive-probe-LabAccessApplet.java'), instrumentedApplet);
+      fs.writeFileSync(path.join(output, 'receive-probe-ApduChecks.java'), instrumentedChecks);
+      manifest.receiveProbe = {
+        sources: [
+          { source: 'receive-probe-LabAccessApplet.java', sha256: digest(probeApplet) },
+          { source: 'receive-probe-ApduChecks.java', sha256: digest(probeChecks) }],
         scope: 'test CAP only: read-only receive byte counts; product CAP uses unchanged source' };
       await run('javac-receive-probe', javac, ['-g', '-d', classes, '-source', '10', '-target', '10', '-Xlint:-options',
-        '-cp', `${toolsHome}/lib/api_classic-3.2.0.jar;${classes}`, probeSource]);
+        '-cp', `${toolsHome}/lib/api_classic-3.2.0.jar;${classes}`, probeChecks, probeApplet]);
     }
     const deliverables = path.join(scratch, label);
     fs.mkdirSync(deliverables);
@@ -267,15 +285,25 @@ try {
   };
   console.log(`SCAN-CONTROL-PAYLOAD-HEX | ${scanSelfTest.payloadHexLeakDetected ? 'PASS' : 'FAIL'}`);
   console.log(`SCAN-CONTROL-HASH-RANDOM | ${scanSelfTest.hashFieldIgnored ? 'PASS' : 'FAIL'}`);
+  const simulatorLog = path.join(output, 'simulator.log');
+  let simulatorLogKept = null;
+  if (fs.existsSync(simulatorLog)) {
+    const lines = fs.readFileSync(simulatorLog, 'utf8').split(/\r?\n/);
+    const kept = lines.filter(line => !containsPin(line, testedPins)
+      && !/(\b[0-9A-F]{2}\b[\s:,-]*){12,}/i.test(line));
+    fs.writeFileSync(simulatorLog, `${kept.join('\n')}\n`);
+    simulatorLogKept = { total: lines.length, kept: kept.length,
+      scope: 'simulator log filtered: JCRE payload dumps and PIN bytes removed before evidence is kept' };
+  }
   const leaks = fs.readdirSync(output).filter(name => name.endsWith('.log'))
-    .filter(name => containsPin(fs.readFileSync(path.join(output, name), 'utf8'), testedPins));
-  const resolvedScratch = path.resolve(scratch);
+    .filter(name => containsPin(fs.readFileSync(path.join(output, name), 'utf8'), testedPins));  const resolvedScratch = path.resolve(scratch);
   assert.equal(path.dirname(resolvedScratch), path.resolve(options['scratch-root']));
   assert(path.basename(resolvedScratch).startsWith('labaccess-apdu-'));
   fs.rmSync(resolvedScratch, { recursive: true, force: true });
   if (manifest) {
     manifest.sensitivePayloadHits = leaks;
     manifest.scanSelfTest = scanSelfTest;
+    manifest.simulatorLog = simulatorLogKept;
     if (['sw6c', 'gateway-sw6c'].includes(options.transport) && fs.existsSync(path.join(output, 'relay.log'))) {
       const entries = readLog('relay').split(/\r?\n/).filter(line => line.startsWith('{')).map(line => JSON.parse(line));
       manifest.wire = { startRequests: entries.filter(entry => entry.ev === 'app-frame' && entry.startCommand).length,

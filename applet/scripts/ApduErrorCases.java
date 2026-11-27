@@ -19,6 +19,7 @@ import javax.smartcardio.TerminalFactory;
 
 final class ApduErrorCases {
     private static final byte[] EMPTY = new byte[0];
+    private static final int[] UNSUPPORTED_INS = { 0x7F, 0x7E };
     private CardChannel channel;
     private final byte[] adminPin;
     private final byte[] studentPin;
@@ -701,7 +702,7 @@ final class ApduErrorCases {
             protocolError("G4-CLA-" + Integer.toHexString(ins),
                     new CommandAPDU(0x90, ins, 0, 0, data, le), 0x6E00);
         }
-        for (int ins : new int[] { 0x7F, 0x41 }) {
+        for (int ins : UNSUPPORTED_INS) {
             protocolError("G4-INS-" + Integer.toHexString(ins), command(ins, 0, EMPTY, 0), 0x6D00);
         }
         protocolError("G4-PERSONALIZE-ISSUED", command(0x30, 0, payload, 256), 0x6985);
@@ -978,7 +979,7 @@ final class ApduErrorCases {
                 command(0x33, 0, new byte[1], 0), 0x6A86, 128);
         uploadRetryError("G4-FINISH-INCOMPLETE-OPEN-STUDENT-RETRY",
                 command(0x35, 0, EMPTY, 0), 0x6985, 128);
-        for (int ins : new int[] { 0x7F, 0x41 }) {
+        for (int ins : UNSUPPORTED_INS) {
             uploadRetryError("G4-INS-" + Integer.toHexString(ins) + "-OPEN-STUDENT-RETRY",
                     command(ins, 0, EMPTY, 0), 0x6D00, 128);
         }
@@ -1059,7 +1060,7 @@ final class ApduErrorCases {
         }
         readStreamRetry("G4-READ-CLA-STREAM-ADMIN-RETRY",
                 new CommandAPDU(0x90, 0x34, 0, 128, 128), 0x6E00);
-        for (int ins : new int[] { 0x7F, 0x41 }) {
+        for (int ins : UNSUPPORTED_INS) {
             readStreamRetry("G4-INS-" + Integer.toHexString(ins) + "-STREAM-ADMIN-RETRY",
                     command(ins, 0, EMPTY, 0), 0x6D00);
         }

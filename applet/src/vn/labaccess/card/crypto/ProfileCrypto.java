@@ -54,6 +54,17 @@ final class ProfileCrypto {
     short encryptRecord(byte[] plaintext, short plaintextLength, byte[] target) {
         random.generateData(target, RECORD_HEADER_OFFSET_NONCE,
                 GCM_NONCE_LENGTH);
+        return encryptWithNonce(plaintext, plaintextLength, target);
+    }
+
+    short encryptRecordWithNonce(byte[] plaintext, short plaintextLength, byte[] target,
+            byte[] nonce) {
+        Util.arrayCopyNonAtomic(nonce, (short) 0, target, RECORD_HEADER_OFFSET_NONCE,
+                GCM_NONCE_LENGTH);
+        return encryptWithNonce(plaintext, plaintextLength, target);
+    }
+
+    private short encryptWithNonce(byte[] plaintext, short plaintextLength, byte[] target) {
         gcm.init(aesKey, AEADCipher.MODE_ENCRYPT, target, RECORD_HEADER_OFFSET_NONCE,
                 GCM_NONCE_LENGTH);
         gcm.updateAAD(Protocol.MAGIC, (short) 0, Protocol.MAGIC_LENGTH);

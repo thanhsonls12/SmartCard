@@ -17,6 +17,17 @@ final class ApduChecks {
         }
     }
 
+    static void requireCase3(APDU apdu) {
+        if (apdu.setOutgoing() != (short) 0) {
+            ISOException.throwIt(Sw.WRONG_LENGTH);
+        }
+    }
+
+    static void clearApduCommandData(byte[] buffer) {
+        short length = (short) (buffer.length - ISO7816.OFFSET_CDATA);
+        Util.arrayFillNonAtomic(buffer, ISO7816.OFFSET_CDATA, length, (byte) 0);
+    }
+
     static short receiveCommandData(APDU apdu, byte[] buffer, byte[] target,
             short maximumLength) {
         short received = apdu.setIncomingAndReceive();

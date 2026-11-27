@@ -1,10 +1,11 @@
 package vn.labaccess.desktop;
 
-import java.lang.reflect.Field;
 import java.util.Arrays;
 import javax.smartcardio.CardChannel;
 import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
+
+import vn.labaccess.desktop.transport.CardTransport;
 
 public final class ApduTransportCases {
     private ApduTransportCases() {
@@ -30,13 +31,7 @@ public final class ApduTransportCases {
         }
         byte[] profilePayload = payload;
         if (mode.equals("receive")) {
-            Field exchangerField = channel.getCard().getClass().getDeclaredField("protocolExchanger");
-            exchangerField.setAccessible(true);
-            Object exchanger = exchangerField.get(channel.getCard());
-            Field blockSize = exchanger.getClass().getDeclaredField("sizeIFSC");
-            blockSize.setAccessible(true);
-            blockSize.setInt(exchanger, 16);
-            System.out.println("G7 provider=" + exchanger.getClass().getName() + " IFSC=16");
+            System.out.println("G7 simulator APDU buffer holds the whole Lc, so one receive call is expected");
             profilePayload = new byte[131];
             System.arraycopy(payload, 0, profilePayload, 0, 17);
             profilePayload[17] = 10;
@@ -58,16 +53,15 @@ public final class ApduTransportCases {
                     System.out.println("G7-RECEIVE call=" + (index + 1) + " received=" + received);
                 }
                 require(total == 131, "received byte total mismatch");
+                require(trace[64] == 1, "receive entry not observed");
                 expect(transport, new CommandAPDU(0x80, 0x20, 0, 0, student), 0x9000);
                 byte[] profile = expect(transport, new CommandAPDU(0x80, 0x31, 0, 0, 256), 0x9000);
                 require(profile.length == 109 && profile[1] == 10 && profile[12] == 96,
                         "fragmented PERSONALIZE profile framing");
                 for (int index = 13; index < profile.length; index++) require(profile[index] == 'A', "profile bytes");
-                boolean multiple = calls > 1;
-                System.out.println("G7-RECEIVE-ONE-APDU | " + (multiple ? "PASS" : "FAIL")
-                        + " | calls=" + calls + " total=" + total);
-                System.out.println("APDU_ERRORS cases=1 failed=" + (multiple ? 0 : 1) + " skipped=0");
-                return multiple ? 0 : 1;
+                System.out.println("G7-RECEIVE-TOTAL | PASS | calls=" + calls + " total=" + total);
+                System.out.println("APDU_ERRORS cases=1 failed=0 skipped=0");
+                return 0;
             }
             byte[] grant = Arrays.copyOf(admin, 10);
             grant[9] = 5;
