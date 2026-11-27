@@ -20,6 +20,18 @@
 
     <module name="FileTabCharacter"/>
 
+    <module name="RegexpSingleline">
+        <property name="id" value="desktopNoComments"/>
+        <property name="format" value="^\s*(//|\*)"/>
+        <property name="message" value="Q-08: không comment trong source; đổi tên method/biến hoặc chuyển lý do sang docs/dev."/>
+    </module>
+
+    <module name="RegexpSingleline">
+        <property name="id" value="desktopNoBlockComments"/>
+        <property name="format" value="/\*"/>
+        <property name="message" value="Q-08: không block comment/Javadoc trong source."/>
+    </module>
+
     <module name="FileLength">
         <property name="max" value="1200"/>
     </module>
