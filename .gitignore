@@ -85,6 +85,8 @@ replay_pid*.log
 # --- Tài liệu nội bộ ---
 docs/
 
+tools/
+
 # --- Hệ điều hành ---
 Thumbs.db
 desktop.ini
