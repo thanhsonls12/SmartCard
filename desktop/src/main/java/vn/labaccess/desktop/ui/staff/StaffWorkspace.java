@@ -58,6 +58,7 @@ import vn.labaccess.desktop.ui.receipt.ReceiptPanel;
 
 import vn.labaccess.desktop.ui.profile.ProfileEditPanel;
 
+import vn.labaccess.desktop.ui.staff.StaffAuditPanel;
 
 import vn.labaccess.desktop.ui.transaction.GrantPanel;
 
@@ -69,6 +70,7 @@ public final class StaffWorkspace {
     private static final int ENROLLMENT = 3;
     private static final int PHOTOS = 4;
     private static final int PROFILE_EDIT = 5;
+    private static final int AUDIT = 6;
     private static final String CLOSING = "Đang đóng cửa sổ Staff.";
     private final CardSession session;
     private final CardTaskRunner tasks;
@@ -81,6 +83,7 @@ public final class StaffWorkspace {
     private final ProfileEditPanel profileEdit;
     private final ReceiptPanel receipts;
     private final HistoryPanel history;
+    private final StaffAuditPanel audit;
     private final SystemConnectionPanel system;
     private final Button connect = new Button("Kết nối", Icons.connect());
     private final Button identify = new Button("Nhận diện thẻ", Icons.identify());
@@ -113,6 +116,7 @@ public final class StaffWorkspace {
         CardGateway gateway = session.gateway();
         history = new HistoryPanel(session.backend(), backendOps::run,
                 () -> gateway.isReady() && gateway.status() != null ? gateway.status().cardId() : "", this::log);
+        audit = new StaffAuditPanel(session.backend(), backendOps);
         grants = new GrantPanel(cardOps, this::log, new GrantPanel.Actions(this::open, gateway::status,
                 session::grant, history::discardRefresh,
                 () -> history.stageRefresh(session::loadHistory), this::grantFinished,
@@ -155,7 +159,8 @@ public final class StaffWorkspace {
                 tab("Phát hành thẻ", personalize.node()),
                 tab("Đăng ký thẻ", enrollment.node()),
                 tab("Ảnh", photos.node()),
-                tab("Sửa hồ sơ", profileEdit.node()));
+                tab("Sửa hồ sơ", profileEdit.node()),
+                tab("Nhật ký nhân viên", audit.node()));
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         tabs.getStyleClass().add("la-tabs");
         tabs.setMinHeight(260);
@@ -180,6 +185,9 @@ public final class StaffWorkspace {
         disconnect.setOnAction(event -> disconnect());
         tabs.getSelectionModel().selectedIndexProperty().addListener((observable, was, now) -> {
             refresh();
+            if (now.intValue() == AUDIT) {
+                audit.activate();
+            }
         });
     }
 
@@ -487,6 +495,7 @@ public final class StaffWorkspace {
         identify.setDisable(CardGate.identifyDisabled(gateway, busy));
         disconnect.setDisable(CardGate.disconnectDisabled(gateway, busy));
         system.setBusy(busy);
+        audit.setBusy(busy);
         if (!busy) {
             system.showBackendAccess();
         }
@@ -534,6 +543,7 @@ public final class StaffWorkspace {
 
     public void closeRequested() {
         active = false;
+        audit.close();
         clearInputs();
         lockForClosing();
     }
@@ -549,6 +559,7 @@ public final class StaffWorkspace {
         personalize.updateAvailability(false, false, CLOSING);
         enrollment.setEnabled(false, CLOSING);
         history.setEnabled(false, CLOSING);
+        audit.setBusy(true);
         receipts.lockAll();
         system.setBusy(true);
         showFeedback(CLOSING, UiLabels.Tone.PENDING);

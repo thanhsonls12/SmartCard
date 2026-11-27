@@ -4,7 +4,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { createPrivateKey, generateKeyPairSync, sign } from 'node:crypto';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DatabaseService } from '../database/database.service.js';
 import { receiptMessage, RECEIPT_PAYLOAD_BYTES } from './receipt-canonical.js';

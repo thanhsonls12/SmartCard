@@ -11,9 +11,10 @@ NestJS + Prisma/PostgreSQL làm sổ đối chiếu mỏng cho Applet và JavaFX
 | `src/profile/` | Challenge và xác nhận cập nhật hồ sơ |
 | `src/receipts/` | Xác minh receipt, đối soát ledger và truy vấn lịch sử |
 | `src/staff-auth/` | Đăng nhập, phiên Staff và guard xác thực |
+| `src/staff-auth/audit/` | Controller và service nhật ký thao tác Staff |
 | `test/` | Kiểm thử API qua `AppModule` |
 
-`StaffAuthModule` đăng ký xác thực Staff. Kiểm thử đơn vị nằm cạnh source tương ứng; Prisma client sinh tự động ở `src/generated/prisma/`.
+`StaffAuthModule` đăng ký cả xác thực và nhật ký Staff. Kiểm thử đơn vị nằm cạnh source tương ứng; Prisma client sinh tự động ở `src/generated/prisma/`.
 
 ## Yêu cầu
 

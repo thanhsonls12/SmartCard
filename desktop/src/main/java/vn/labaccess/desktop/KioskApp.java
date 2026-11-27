@@ -1,14 +1,5 @@
 package vn.labaccess.desktop;
 
-import vn.labaccess.desktop.card.CardOperationResult;
-import vn.labaccess.desktop.session.CardSession;
-import vn.labaccess.desktop.ui.shared.CardTaskRunner;
-import vn.labaccess.desktop.ui.kiosk.KioskOperations;
-import vn.labaccess.desktop.ui.kiosk.KioskPinPrompt;
-import vn.labaccess.desktop.ui.kiosk.KioskWorkspace;
-import vn.labaccess.desktop.session.SupersededRecovery;
-import vn.labaccess.desktop.ui.foundation.UiTheme;
-
 import java.util.Arrays;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
@@ -16,6 +7,22 @@ import javafx.application.Application;
 import javafx.scene.Scene;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
+
+import vn.labaccess.desktop.ui.foundation.UiTheme;
+
+import vn.labaccess.desktop.card.CardOperationResult;
+
+import vn.labaccess.desktop.backend.BackendClient;
+
+import vn.labaccess.desktop.session.CardSession;
+import vn.labaccess.desktop.session.SupersededRecovery;
+
+import vn.labaccess.desktop.ui.shared.CardTaskRunner;
+import vn.labaccess.desktop.ui.shared.StaffCredentialsDialog;
+
+import vn.labaccess.desktop.ui.kiosk.KioskOperations;
+import vn.labaccess.desktop.ui.kiosk.KioskPinPrompt;
+import vn.labaccess.desktop.ui.kiosk.KioskWorkspace;
 
 public final class KioskApp extends Application {
 
@@ -33,7 +40,7 @@ public final class KioskApp extends Application {
                 Math.min(1060, Screen.getPrimary().getVisualBounds().getWidth() - 40),
                 Math.min(800, Screen.getPrimary().getVisualBounds().getHeight() - 80));
         UiTheme.apply(scene);
-        stage.setTitle("LabAccess — Kiosk học viên");
+        stage.setTitle("LabAccess — Kiosk sinh viên");
         stage.setMinWidth(480);
         stage.setMinHeight(360);
         stage.setScene(scene);
@@ -82,23 +89,44 @@ public final class KioskApp extends Application {
 
     private void confirmOperator(CardOperationResult.SupersededProof proof, char[] pin) {
         long revision = workspace.revision();
+        StaffCredentialsDialog.Credentials credentials = StaffCredentialsDialog.ask(workspace.node());
+        if (credentials == null) {
+            Arrays.fill(pin, '\0');
+            return;
+        }
+        if (tasks.isBusy() || tasks.isClosing() || workspace.revision() != revision
+                || !workspace.operations().canConfirm(proof)) {
+            credentials.close();
+            Arrays.fill(pin, '\0');
+            return;
+        }
         boolean accepted;
         try {
             accepted = submit("Xác nhận SUPERSEDED", () -> {
-                try {
+                try (credentials) {
+                    session.backend().loginStaff(credentials.username(), credentials.password());
                     SupersededRecovery.Confirmation confirmation = workspace.operations().confirm(proof, pin);
                     workspace.logOperatorResponse(proof, confirmation);
                     return confirmation;
                 } finally {
                     Arrays.fill(pin, '\0');
+                    try {
+                        session.backend().logoutStaff();
+                    } catch (BackendClient.Failure failure) {
+                        log("Không xác nhận được thu hồi phiên nhân viên trên Backend.");
+                    } finally {
+                        session.backend().forgetStaffSession();
+                    }
                 }
             }, outcome -> workspace.synchronizeConnection(),
                     outcome -> workspace.operatorCompleted(proof, revision, outcome));
         } catch (RuntimeException failure) {
+            credentials.close();
             Arrays.fill(pin, '\0');
             throw failure;
         }
         if (!accepted) {
+            credentials.close();
             Arrays.fill(pin, '\0');
         }
     }
@@ -112,6 +140,7 @@ public final class KioskApp extends Application {
                     failure.accept(outcome.failure());
                 }
             } finally {
+                workspace.backendCompleted(label, outcome.failure() == null);
                 workspace.refresh();
             }
         });

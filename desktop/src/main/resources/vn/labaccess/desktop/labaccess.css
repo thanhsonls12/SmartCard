@@ -743,6 +743,83 @@
     -fx-text-fill: -la-fg;
 }
 
+.la-staff-login .la-login-mark {
+    -fx-min-width: 3.4286em;
+    -fx-pref-width: 3.4286em;
+    -fx-min-height: 3.4286em;
+    -fx-pref-height: 3.4286em;
+    -fx-alignment: center;
+    -fx-background-color: -la-accent-soft;
+    -fx-background-radius: 0.8571em;
+}
+
+.la-staff-login .la-login-mark .la-icon {
+    -fx-icon-size: 24;
+    -fx-icon-color: -la-accent-strong;
+}
+
+.la-staff-login .la-login-panel {
+    -fx-background-color: -la-surface-raised;
+    -fx-background-radius: 0.8571em;
+    -fx-border-color: -la-border-soft;
+    -fx-border-width: 0.0714em;
+    -fx-border-radius: 0.8571em;
+}
+
+.la-staff-login .la-login-title {
+    -fx-font-size: 1.7143em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -la-fg;
+}
+
+.la-staff-login .la-login-description {
+    -fx-font-size: 1em;
+    -fx-text-fill: -la-fg-muted;
+}
+
+.la-staff-login .la-login-label {
+    -fx-font-size: 1em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -la-fg;
+}
+
+.la-staff-login .la-login-field {
+    -fx-min-height: 3.4286em;
+    -fx-pref-height: 3.4286em;
+    -fx-padding: 0.8571em;
+}
+
+.la-staff-login .la-login-submit {
+    -fx-font-size: 1.1429em;
+    -fx-border-radius: 0.5714em;
+    -fx-min-height: 3em;
+    -fx-pref-height: 3em;
+    -fx-graphic-text-gap: 0.5em;
+    -fx-padding: 0.75em 1em;
+}
+
+.la-staff-login .la-login-submit .la-icon {
+    -fx-icon-size: 18;
+}
+
+.la-staff-login .la-login-feedback {
+    -fx-background-color: -la-surface-sunken;
+    -fx-background-radius: 0.5714em;
+    -fx-padding: 0.8571em;
+}
+
+.la-staff-login .la-login-message {
+    -fx-font-size: 1em;
+    -fx-text-fill: -la-fg-muted;
+}
+
+.la-staff-login .la-login-help {
+    -fx-font-size: 0.8571em;
+    -fx-text-fill: -la-fg-muted;
+    -fx-text-alignment: center;
+    -fx-alignment: center;
+}
+
 .la-kiosk {
     -fx-font-size: 1.3333em;
 }

@@ -8,7 +8,6 @@ export const COUNTER_MAX = 0xffffffff;
 export const BALANCE_MAX = 9999;
 export const GRANT_DELTA_MAX = 9999;
 
-/** Domain ký của receipt, tách khỏi domain enrollment (Q-22). */
 export const RECEIPT_DOMAIN = Buffer.from('LABACCESS-RECEIPT-v1', 'ascii');
 
 const OFFSET_VERSION = 0;
@@ -30,7 +29,7 @@ export interface Receipt {
   operation: ReceiptOperation;
   delta: number;
   balanceAfter: number;
-  /** GRANT dùng sentinel toàn zero trên thẻ; lưu NULL trong DB. */
+
   visitId: Buffer | null;
 }
 
@@ -54,10 +53,6 @@ function fail(message: string): never {
   throw new BadRequestException(message);
 }
 
-/**
- * Đọc payload canonical 34 byte do thẻ ký. Mọi sai lệch về độ dài, version, mã lệnh hoặc miền số
- * là lỗi schema (400), không phải lỗi conflict: chưa có gì để đối chiếu với ledger.
- */
 export function parseReceipt(bytes: Buffer): Receipt {
   if (bytes.length !== RECEIPT_PAYLOAD_BYTES) {
     fail(`payload must be exactly ${RECEIPT_PAYLOAD_BYTES} bytes`);
@@ -115,15 +110,10 @@ export function parseReceipt(bytes: Buffer): Receipt {
   return { version, cardId, counterAfter, operation, delta, balanceAfter, visitId };
 }
 
-/** Thông điệp đã ký: domain receipt nối trước payload canonical, không đổi thứ tự. */
 export function receiptMessage(bytes: Buffer): Buffer {
   return Buffer.concat([RECEIPT_DOMAIN, bytes]);
 }
 
-/**
- * Kiểm chuyển trạng thái thuần, không chạm DB: kết quả phải khớp ledger hiện tại thì mới được ghi.
- * Counter phải liên tục; nhảy cóc là gap, phải đối soát thủ công chứ không tự sửa.
- */
 export function checkTransition(ledger: LedgerState, receipt: Receipt): TransitionCheck {
   if (receipt.counterAfter !== ledger.lastCounter + 1) {
     return { ok: false, reason: `gap: counterAfter ${receipt.counterAfter} is not ${ledger.lastCounter + 1}` };

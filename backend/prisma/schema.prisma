@@ -32,10 +32,69 @@ model StaffSession {
 
   staff Staff @relation(fields: [staffId], references: [id], onDelete: Restrict)
   adminSessions AdminSession[]
+  auditOperations StaffAuditOperation[]
 
   @@index([staffId])
   @@index([expiresAt])
   @@map("staff_sessions")
+}
+
+enum StaffAuditAction {
+  PERSONALIZE
+  ENROLLMENT
+  GRANT
+  PHOTO_UPLOAD
+  PHOTO_REPLACE
+  UNBLOCK
+  PROFILE_SAVE
+  PROFILE_REOPEN
+  PROFILE_REPLACE
+  RECONCILE
+}
+
+enum StaffAuditOutcome {
+  CLIENT_CONFIRMED
+  CLIENT_NOT_EXECUTED
+  CLIENT_SUPERSEDED
+  UNKNOWN
+  RECEIPT_VERIFIED
+}
+
+model StaffAuditOperation {
+  id             String           @id @default(uuid()) @db.Uuid
+  staffSessionId String           @db.Uuid
+  action         StaffAuditAction
+  cardId         String?          @db.VarChar(16)
+  expectedPayload String?         @db.VarChar(68)
+  originId       String?          @db.Uuid
+  createdAt      DateTime         @default(now()) @db.Timestamptz(6)
+
+  staffSession StaffSession @relation(fields: [staffSessionId], references: [id], onDelete: Restrict)
+  origin StaffAuditOperation? @relation("AuditOrigin", fields: [originId], references: [id], onDelete: Restrict)
+  recoveries StaffAuditOperation[] @relation("AuditOrigin")
+  events StaffAuditEvent[]
+  grantTransaction Transaction?
+
+  @@index([staffSessionId, createdAt])
+  @@index([cardId, createdAt])
+  @@index([originId])
+  @@map("staff_audit_operations")
+}
+
+model StaffAuditEvent {
+  id            String            @id @default(uuid()) @db.Uuid
+  operationId   String            @db.Uuid
+  outcome       StaffAuditOutcome
+  cardId        String?           @db.VarChar(16)
+  transactionId String?           @db.Uuid
+  createdAt     DateTime          @default(now()) @db.Timestamptz(6)
+
+  operation StaffAuditOperation @relation(fields: [operationId], references: [id], onDelete: Restrict)
+  transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+
+  @@unique([operationId, outcome])
+  @@index([transactionId])
+  @@map("staff_audit_events")
 }
 
 model AdminSession {
@@ -157,6 +216,9 @@ model Transaction {
   payload      Bytes     @db.ByteA
   signature    Bytes     @db.ByteA
   recordedAt   DateTime  @default(now()) @db.Timestamptz(6)
+  grantAuditId String? @unique @db.Uuid
+  grantAudit StaffAuditOperation? @relation(fields: [grantAuditId], references: [id], onDelete: Restrict)
+  auditEvents StaffAuditEvent[]
 
   student Student @relation(fields: [cardId], references: [cardId], onDelete: Restrict, onUpdate: Cascade)
 
