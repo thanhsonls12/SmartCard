@@ -1,23 +1,18 @@
 package vn.labaccess.desktop;
 
-import static vn.labaccess.desktop.UiSection.tab;
+import static vn.labaccess.desktop.ui.foundation.UiSection.tab;
 
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.scene.Scene;
-import javafx.geometry.Orientation;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
-import javafx.scene.control.SplitPane;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
-import javafx.scene.control.TextArea;
 import javafx.scene.control.TitledPane;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.control.Tooltip;
@@ -29,17 +24,55 @@ import javafx.scene.layout.VBox;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 
+import vn.labaccess.desktop.ui.foundation.Icons;
+import vn.labaccess.desktop.ui.foundation.InputFeedback;
+import vn.labaccess.desktop.ui.foundation.UiColumns;
+import vn.labaccess.desktop.ui.foundation.UiScale;
+import vn.labaccess.desktop.ui.foundation.UiTheme;
+
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardLifecycle;
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.CardStatus;
+import vn.labaccess.desktop.card.PendingJournal;
+
+import vn.labaccess.desktop.session.CardSession;
+
+import vn.labaccess.desktop.ui.shared.ActionNote;
+import vn.labaccess.desktop.ui.shared.CardIdentityPanel;
+import vn.labaccess.desktop.ui.shared.CardTaskRunner;
+import vn.labaccess.desktop.ui.shared.HistoryPanel;
+import vn.labaccess.desktop.ui.shared.OperationLog;
+import vn.labaccess.desktop.ui.shared.OperationLogSplit;
+import vn.labaccess.desktop.ui.shared.StatusBar;
+import vn.labaccess.desktop.ui.shared.SystemConnectionPanel;
+import vn.labaccess.desktop.ui.shared.UiLabels;
+import vn.labaccess.desktop.ui.shared.UiRows;
+
+import vn.labaccess.desktop.ui.enrollment.EnrollmentPanel;
+import vn.labaccess.desktop.ui.enrollment.PersonalizePanel;
+
+import vn.labaccess.desktop.ui.photo.PhotoPanel;
+
+import vn.labaccess.desktop.ui.pin.PinPanel;
+
+import vn.labaccess.desktop.ui.receipt.ReceiptPanel;
+import vn.labaccess.desktop.ui.receipt.ReceiptReconciliationFlow;
+
+import vn.labaccess.desktop.ui.profile.ProfilePanel;
+
+import vn.labaccess.desktop.ui.transaction.TransactionPanel;
+
+import vn.labaccess.desktop.demo.DemoEvidence;
+
 public class App extends Application {
 
-    private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
 
+    private final OperationLog operationLog = new OperationLog(OperationLog.View.LEGACY);
     private final CardSession session = new CardSession(this::log);
     private final CardTaskRunner taskRunner = new CardTaskRunner();
 
-    private static final int LOG_MAX_CHARS = 200_000;
-    private static final int LOG_TRIM_CHARS = 20_000;
 
-    private TextArea logArea;
     private StatusBar statusBar;
     private Label valueConnection;
     private TabPane mainTabs;
@@ -61,25 +94,15 @@ public class App extends Application {
 
     private ToggleButton techToggle;
     private ToggleButton logToggle;
-    private SplitPane workSplit;
     private TitledPane logPane;
-    private VBox logColumn;
     private HistoryPanel historyPanel;
-    private BackendClient.HistoryLoad loadedHistory;
-    private Exception historyError;
-    private boolean historyReady;
     private String lastFeedback = "Chưa có thao tác";
     private String lastFailure;
     private final InputFeedback inputFeedback = new InputFeedback(this::updateButtons);
     private UiLabels.Tone lastTone = UiLabels.Tone.NEUTRAL;
-    private boolean logUiClosed;
 
-    private static final double NARROW_WIDTH = 920;
-    private static final double SPLIT_BUSINESS = 0.65;
-    private double horizontalSplit = SPLIT_BUSINESS;
-    private double verticalSplit = 0.68;
-    static final String BUSY_WHY = "đang xử lý thao tác khác";
-    static final String BUSY_NOTE = "Đang xử lý thao tác khác — chờ xong.";
+    static final String BUSY_WHY = UiLabels.BUSY_WHY;
+    static final String BUSY_NOTE = UiLabels.BUSY_NOTE;
     private static final String CLOSING_NOTE = "Đang đóng cửa sổ.";
 
     private ActionNote actionNote;
@@ -93,7 +116,7 @@ public class App extends Application {
     private SystemConnectionPanel systemConnectionPanel;
     private ProfilePanel profilePanel;
     private PhotoPanel photoPanel;
-    private DemoScenario demo;
+    private DemoScript demo = DemoScript.NONE;
 
     private boolean uiConnected;
     private boolean uiReady;
@@ -139,12 +162,19 @@ public class App extends Application {
                     log((ok ? "[OK] " : "[FAIL] ") + message);
                     updateButtons();
                 });
+        historyPanel = new HistoryPanel(session.backend(), this::runEnrollmentOp,
+                () -> {
+                    CardStatus current = session.gateway().status();
+                    return current == null ? "" : current.cardId();
+                },
+                this::log);
         transactionPanel = new TransactionPanel(session.gateway(), this::runOp, this::log,
                 new TransactionPanel.Session(this::snapshotKnown, this::sessionOpen,
                         session::runStateTransaction,
                         session::grant,
-                        this::invalidateHistory,
-                        this::rememberHistory, this::transactionFinished, this::studentPinChanged,
+                        historyPanel::discardRefresh,
+                        () -> historyPanel.stageRefresh(session::loadHistory),
+                        this::transactionFinished, this::studentPinChanged,
                         () -> receiptPanel.pressReadReceipt()));
         receiptPanel = new ReceiptPanel(session.gateway(), this::runOp, this::log,
                 new ReceiptPanel.Session(this::sessionOpen, session::pendingJournal, session.journalFile(),
@@ -157,8 +187,9 @@ public class App extends Application {
                                 session::reconcileAdminGrant,
                                 session::confirmSuperseded, session::inspectManualReconcile,
                                 session::confirmManualReconcile),
-                        this::invalidateHistory,
-                        this::rememberHistory, this::publishHistory, this::refreshButtons,
+                        historyPanel::discardRefresh,
+                        () -> historyPanel.stageRefresh(session::loadHistory),
+                        historyPanel::publishRefresh, this::refreshButtons,
                         this::receiptFinished, this::reconcileFinished,
                         () -> {
                             showTab(TAB_OPERATIONS);
@@ -167,7 +198,7 @@ public class App extends Application {
         pinPanel = new PinPanel(session.gateway(), this::runOp, this::log);
         enrollmentPanel = new EnrollmentPanel(session.gateway(), this::runEnrollmentOp, session.backend(),
                 this::log, this::reportEnrollment);
-        personalizePanel = new PersonalizePanel(session.gateway(), this::runOp, this::log,
+        personalizePanel = new PersonalizePanel(session.gateway(), this::runOp, session.backend(), this::log,
                 (ok, issued) -> {
                     uiReady = ok && session.gateway().isReady();
                     session.invalidateSnapshot();
@@ -179,8 +210,7 @@ public class App extends Application {
                 });
         profilePanel = new ProfilePanel(session.gateway(), this::runOp, this::log);
         photoPanel = new PhotoPanel(session.gateway(), this::runOp, this::log);
-        demo = new DemoScenario(this, pinPanel, personalizePanel, enrollmentPanel,
-                profilePanel, photoPanel, this::log);
+        demo = DemoScript.create(this);
 
         valueConnection = UiLabels.chip();
         valueAid = UiLabels.value();
@@ -234,12 +264,6 @@ public class App extends Application {
         header.getStyleClass().add("la-header");
         header.setPadding(UiScale.headerInsets());
 
-        historyPanel = new HistoryPanel(session.backend(), this::runEnrollmentOp,
-                () -> {
-                    CardStatus current = session.gateway().status();
-                    return current == null ? "" : current.cardId();
-                },
-                this::log);
         Tab tabOperations = tab("Vận hành",
                 identityPanel.node(),
                 new UiColumns(UiScale.WORKSPACE_COLUMNS_WIDTH, 64,
@@ -264,45 +288,22 @@ public class App extends Application {
 
         statusBar = new StatusBar(this::showTab);
 
-        logArea = new TextArea();
-        logArea.setEditable(false);
-        logArea.setWrapText(true);
-        logArea.getStyleClass().add("la-log");
-        TitledPane logPane = new TitledPane("Nhật ký thao tác", logArea);
-        logPane.setMaxHeight(Double.MAX_VALUE);
-        logPane.getStyleClass().add("la-log-pane");
+        TitledPane logPane = operationLog.createPane();
         this.logPane = logPane;
-        logToggle.selectedProperty().bindBidirectional(logPane.expandedProperty());
-        logPane.setExpanded(false);
-
-        VBox business = new VBox(mainTabs);
-        business.setMinHeight(260);
-        business.setPadding(UiScale.centerInsets());
-
-        logColumn = new VBox(logPane);
-        logColumn.setMinWidth(320);
-        business.setMinWidth(0);
-        logColumn.setPadding(UiScale.centerInsets());
-        VBox.setVgrow(logPane, Priority.ALWAYS);
-
-        workSplit = new SplitPane(business);
-        workSplit.getStyleClass().add("la-split");
-        SplitPane.setResizableWithParent(logColumn, false);
-        VBox.setVgrow(workSplit, Priority.ALWAYS);
-        logPane.expandedProperty().addListener((observable, was, now) -> showLogColumn(now));
+        OperationLogSplit logSplit = new OperationLogSplit(mainTabs, logPane, logToggle);
 
         BorderPane root = new BorderPane();
         root.setTop(header);
-        root.setCenter(new VBox(statusBar.node(), workSplit));
+        root.setCenter(new VBox(statusBar.node(), logSplit.node()));
 
         Scene scene = new Scene(root, windowWidth(), windowHeight());
         UiTheme.apply(scene);
-        scene.widthProperty().addListener((observable, was, now) -> layoutForWidth(now.doubleValue()));
+        scene.widthProperty().addListener((observable, was, now) -> logSplit.layoutForWidth(now.doubleValue()));
         mainTabs.getSelectionModel().selectedIndexProperty().addListener((observable, was, now) -> {
             inputFeedback.clear();
             updateButtons();
         });
-        layoutForWidth(windowWidth());
+        logSplit.layoutForWidth(windowWidth());
         String title = "LabAccess — Quản lý & vận hành thẻ";
         stage.setTitle(Boolean.getBoolean("labaccess.demo") ? title + " (PID " + pid + ")" : title);
         stage.setMinWidth(900);
@@ -324,7 +325,11 @@ public class App extends Application {
 
         if (Boolean.getBoolean("labaccess.demo")) {
             stage.setAlwaysOnTop(true);
-            demo.start();
+            if (demo == DemoScript.NONE) {
+                log("Không có kịch bản demo trên classpath; bỏ qua -Dlabaccess.demo");
+            } else {
+                demo.start();
+            }
         }
     }
 
@@ -347,52 +352,6 @@ public class App extends Application {
         if (mainTabs.getTabs().get(index).getContent() instanceof ScrollPane scroll) {
             scroll.setVvalue(0);
         }
-    }
-
-    private void layoutForWidth(double width) {
-        if (workSplit == null) {
-            return;
-        }
-        Orientation orientation = width < NARROW_WIDTH ? Orientation.VERTICAL : Orientation.HORIZONTAL;
-        if (orientation == workSplit.getOrientation()) {
-            return;
-        }
-        rememberLogSplit();
-        workSplit.setOrientation(orientation);
-        logColumn.setMinHeight(orientation == Orientation.VERTICAL ? UiScale.LOG_MIN_HEIGHT : 0);
-        restoreLogSplit();
-    }
-
-    private void showLogColumn(boolean expanded) {
-        boolean shown = workSplit.getItems().contains(logColumn);
-        if (expanded == shown) {
-            return;
-        }
-        if (expanded) {
-            workSplit.getItems().add(logColumn);
-            restoreLogSplit();
-            return;
-        }
-        rememberLogSplit();
-        workSplit.getItems().remove(logColumn);
-        workSplit.setDividerPositions(1);
-    }
-
-    private void rememberLogSplit() {
-        if (workSplit.getDividers().isEmpty()) {
-            return;
-        }
-        double position = workSplit.getDividerPositions()[0];
-        if (workSplit.getOrientation() == Orientation.HORIZONTAL) {
-            horizontalSplit = position;
-        } else {
-            verticalSplit = position;
-        }
-    }
-
-    private void restoreLogSplit() {
-        workSplit.setDividerPositions(workSplit.getOrientation() == Orientation.HORIZONTAL
-                ? horizontalSplit : verticalSplit);
     }
 
     private void blockOnStartupJournal() {
@@ -428,7 +387,7 @@ public class App extends Application {
         uiReady = false;
         session.invalidateSnapshot();
         clearSessionInputs();
-        invalidateHistory();
+        historyPanel.discardRefresh();
         historyPanel.onCard(null);
         receiptPanel.clear();
         profilePanel.resetView("bắt đầu SELECT lại, không giữ hồ sơ của lần đọc trước");
@@ -461,27 +420,6 @@ public class App extends Application {
                 profilePanel.resetView("đã ngắt kết nối, không giữ hồ sơ cũ");
             }
         });
-    }
-
-    static boolean validPin(char[] pin, int length) {
-        if (pin == null || pin.length != length) {
-            return false;
-        }
-        for (char c : pin) {
-            if (c < '0' || c > '9') {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    static void clearBuffers(char[] studentPin, byte[] adminPin) {
-        if (studentPin != null) {
-            java.util.Arrays.fill(studentPin, '\0');
-        }
-        if (adminPin != null) {
-            java.util.Arrays.fill(adminPin, (byte) 0);
-        }
     }
 
     private void showStatus() {
@@ -527,7 +465,7 @@ public class App extends Application {
 
     private void clearInfo() {
         clearSessionInputs();
-        invalidateHistory();
+        historyPanel.discardRefresh();
         valueConnection.setText(uiConnected ? "Đã kết nối" : "Chưa kết nối");
         UiLabels.applyChip(valueConnection, UiLabels.Tone.NEUTRAL);
         valueLifecycle.setText("Chưa rõ");
@@ -678,7 +616,7 @@ public class App extends Application {
             systemConnectionPanel.showBackendAccess();
         }
         boolean reconnect = session.gateway().needsReconnect();
-        ReceiptPanel.CardMismatch mismatch = receiptPanel.pendingCardMismatch();
+        ReceiptReconciliationFlow.CardMismatch mismatch = receiptPanel.pendingCardMismatch();
         identityPanel.show(uiReady ? current : null,
                 uiReady && session.snapshotKnown() ? session.gateway().lastProfile() : null,
                 uiReady && session.snapshotKnown() ? session.gateway().lastPhoto() : null,
@@ -801,100 +739,28 @@ public class App extends Application {
     }
 
     void captureScene(java.nio.file.Path path) throws java.io.IOException {
-        javafx.scene.image.WritableImage image = root().snapshot(null, null);
-        java.awt.image.BufferedImage buffered = new java.awt.image.BufferedImage(
-                (int) image.getWidth(), (int) image.getHeight(),
-                java.awt.image.BufferedImage.TYPE_INT_ARGB);
-        javafx.scene.image.PixelReader reader = image.getPixelReader();
-        for (int y = 0; y < buffered.getHeight(); y++) {
-            for (int x = 0; x < buffered.getWidth(); x++) {
-                buffered.setRGB(x, y, reader.getArgb(x, y));
-            }
-        }
-        java.nio.file.Files.createDirectories(path.getParent());
-        javax.imageio.ImageIO.write(buffered, "png", path.toFile());
+        DemoEvidence.captureScene(statusBar.node().getScene().getRoot(), path);
         log("Đã lưu ảnh giao diện " + path);
     }
 
-    private javafx.scene.Parent root() {
-        return statusBar.node().getScene().getRoot();
-    }
-
-    private void rememberHistory() {
-        historyReady = false;
-        loadedHistory = null;
-        historyError = null;
-        CardSession.History history = session.loadHistory();
-        loadedHistory = history.loaded();
-        historyError = history.failure();
-        historyReady = true;
-    }
-
-    private void publishHistory() {
-        if (!historyReady) {
-            return;
-        }
-        historyReady = false;
-        if (historyError != null) {
-            historyPanel.showFailure(historyError);
-            return;
-        }
-        historyPanel.show(loadedHistory);
-    }
-
     void logReconcileEvidence(String label) {
-        PendingJournal.Loaded loaded = session.pendingJournal();
-        String journalState = !loaded.present() ? "khong-co"
-                : !loaded.valid() ? "KHONG-HOP-LE"
-                : loaded.status().name();
-        CardStatus current = session.gateway().status();
-        String cardState = current == null || !current.studentStateAvailable()
-                ? "state-the-khong-kha-dung"
-                : String.format("counter=%d balance=%d caMo=%s", current.counter(), current.balance(),
-                        current.hasActiveVisit() ? current.activeVisitId() : "khong");
-        log(String.format(
-                "SIGN-08 %s | journal=%s | doiSoat=%s | the %s | grant=%s start=%s end=%s"
-                        + " | nutDoiSoat=%s | nhan=%s",
-                label, journalState, session.gateway().reconciliation().state(), cardState,
-                transactionPanel.grantState(), transactionPanel.startState(),
-                transactionPanel.endState(), receiptPanel.reconcileState(),
-                statusBar.statusText()));
+        log(demoEvidence(null).reconcile(label));
     }
 
     void logUi10Evidence(String label) {
-        PendingJournal.Loaded loaded = session.pendingJournal();
-        String journalState = !loaded.present() ? "khong-co"
-                : !loaded.valid() ? "KHONG-HOP-LE (" + loaded.problem() + ")"
-                : String.format("%s cardId=%s counter=%d operation=%s",
-                        loaded.status(), loaded.entry().cardId(),
-                        loaded.entry().expectedCounter(),
-                        Receipt.operationText(loaded.entry().operation()));
-        CardStatus current = session.gateway().status();
-        String cardState = current == null ? "chua-nhan-dien"
-                : !current.studentStateAvailable()
-                        ? "cardId=" + current.cardId() + " state-student-khong-kha-dung"
-                        : String.format("cardId=%s counter=%d balance=%d caMo=%s",
-                                current.cardId(), current.counter(), current.balance(),
-                                current.hasActiveVisit() ? current.activeVisitId() : "khong");
-        log(String.format(
-                "UI-10 %s | journal=%s | doiSoat=%s | dangKyThe=%s | the %s"
-                        + " | grant=%s start=%s end=%s | nutDoiSoat=%s | hoThoaiDangMo=%s"
-                        + " | ketNoi=%s nhanDien=%s | nhan=%s",
-                label, journalState, session.gateway().reconciliation().state(), session.gateway().enrollmentText(),
-                cardState, transactionPanel.grantState(), transactionPanel.startState(),
-                transactionPanel.endState(), receiptPanel.reconcileState(),
-                reconcileDialogVisible(), uiConnected, uiReady,
-                statusBar.statusText()));
+        DemoEvidence evidence = demoEvidence(session.gateway().enrollmentText());
+        log(evidence.ui10(label, reconcileDialogVisible(), uiConnected, uiReady));
+    }
+
+    private DemoEvidence demoEvidence(String enrollment) {
+        return new DemoEvidence(session.pendingJournal(), session.gateway().status(),
+                session.gateway().reconciliation().state(), enrollment,
+                transactionPanel.grantState(), transactionPanel.startState(), transactionPanel.endState(),
+                receiptPanel.reconcileState(), statusBar.statusText());
     }
 
     boolean reconcileDialogVisible() {
-        for (javafx.stage.Window window : javafx.stage.Window.getWindows()) {
-            if (window.isShowing() && window.getScene() != null
-                    && window.getScene().getRoot() instanceof javafx.scene.control.DialogPane) {
-                return true;
-            }
-        }
-        return false;
+        return DemoEvidence.dialogVisible();
     }
 
     String probeTransactionGate(String label) {
@@ -905,8 +771,6 @@ public class App extends Application {
 
     private boolean sessionOpen() { return !taskRunner.isClosing() && !taskRunner.isBusy(); }
 
-    private void invalidateHistory() { historyReady = false; }
-
     private char[] studentPinInput() { return transactionPanel.studentPinInput(); }
 
     private void clearStudentPinInput() { transactionPanel.clearStudentPin(); }
@@ -916,7 +780,7 @@ public class App extends Application {
     private void transactionFinished(boolean ok) {
         session.transactionFinished(ok);
         receiptPanel.showReceipt();
-        publishHistory();
+        historyPanel.publishRefresh();
     }
 
     private void receiptFinished(boolean ok) {
@@ -943,40 +807,28 @@ public class App extends Application {
         return true;
     }
 
-    private void trimLogArea() {
-        int overflow = logArea.getLength() - LOG_MAX_CHARS;
-        if (overflow < LOG_TRIM_CHARS) {
-            return;
-        }
-        int cut = logArea.getText(0, Math.min(overflow + 200, logArea.getLength())).indexOf('\n');
-        logArea.deleteText(0, cut >= 0 ? cut + 1 : overflow);
+    void log(String message) {
+        operationLog.append(message);
     }
 
-    private void log(String message) {
-        String line = "[" + LocalTime.now().format(TS) + "] " + message;
-        System.out.println(line);
-        if (Platform.isFxApplicationThread()) {
-            showLogLine(message, line);
-            return;
-        }
-        if (logUiClosed) {
-            return;
-        }
-        try {
-            Platform.runLater(() -> showLogLine(message, line));
-        } catch (IllegalStateException toolkitStopped) {
-            logUiClosed = true;
-            System.out.println("[" + LocalTime.now().format(TS) + "] ngừng vẽ nhật ký: "
-                    + toolkitStopped.getMessage());
-        }
+    PinPanel pinPanel() {
+        return pinPanel;
     }
 
-    private void showLogLine(String message, String line) {
-        if (logArea != null) {
-            logArea.appendText(line + System.lineSeparator());
-            trimLogArea();
-            logArea.setScrollTop(Double.MAX_VALUE);
-        }
+    PersonalizePanel personalizePanel() {
+        return personalizePanel;
+    }
+
+    EnrollmentPanel enrollmentPanel() {
+        return enrollmentPanel;
+    }
+
+    ProfilePanel profilePanel() {
+        return profilePanel;
+    }
+
+    PhotoPanel photoPanel() {
+        return photoPanel;
     }
 
     private void shutdown() {

@@ -51,8 +51,10 @@ final class RecoveryBackendFixture implements AutoCloseable {
                         if (character < 0) throw new IOException("missing request body");
                         incoming.append((char) character);
                     }
-                    Reply reply = handler == null ? new Reply(status, body(request))
-                            : handler.reply(request, incoming.toString());
+                    Reply reply = handler == null ? null : handler.reply(request, incoming.toString());
+                    if (reply == null) {
+                        reply = new Reply(status, body(request));
+                    }
                     if (reply.status() == 0) continue;
                     byte[] body = reply.body().getBytes(StandardCharsets.UTF_8);
                     String headers = "HTTP/1.1 " + reply.status() + " Fixture\r\nConnection: close\r\nContent-Type: application/json"

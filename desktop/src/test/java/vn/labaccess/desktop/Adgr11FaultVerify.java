@@ -20,9 +20,19 @@ import javax.smartcardio.CardException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-/**
- * ADGR-11: mất phản hồi APDU sau GRANT đã commit, và mất ACK HTTP sau khi sổ đã ghi.
- */
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.CardStatus;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptCodec;
+import vn.labaccess.desktop.card.Reconciliation;
+
+import vn.labaccess.desktop.backend.BackendClient;
+
+import vn.labaccess.desktop.session.AdminGrantRecovery;
+import vn.labaccess.desktop.session.AdminGrantService;
+
 public final class Adgr11FaultVerify {
 
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -209,7 +219,7 @@ public final class Adgr11FaultVerify {
                 gateway.disconnect();
             }
         } catch (RuntimeException | CardException ignored) {
-            // phiên đã đứt vì mất phản hồi
+
         }
     }
 
@@ -374,7 +384,10 @@ public final class Adgr11FaultVerify {
         private Reply route(String method, String path, byte[] raw) throws IOException {
             JsonNode body = raw.length == 0 ? JSON.createObjectNode() : JSON.readTree(raw);
             if ("POST".equals(method) && "/admin/sessions".equals(path)) {
-                return json(201, "{\"sessionId\":\"" + java.util.UUID.randomUUID() + "\",\"expiresAt\":null}");
+                byte[] sessionNonce = new byte[32];
+                RANDOM.nextBytes(sessionNonce);
+                return json(201, "{\"sessionId\":\"" + java.util.UUID.randomUUID()
+                        + "\",\"nonce\":\"" + hex(sessionNonce) + "\",\"expiresAt\":null}");
             }
             if ("POST".equals(method) && "/enrollments/challenges".equals(path)) {
                 String id = java.util.UUID.randomUUID().toString();

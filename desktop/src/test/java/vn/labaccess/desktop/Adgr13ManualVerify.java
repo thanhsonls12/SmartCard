@@ -20,9 +20,22 @@ import javax.smartcardio.CardException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-/**
- * ADGR-13: Staff đối soát tay khi journal Kiosk không còn.
- */
+import vn.labaccess.desktop.transport.CardTransport;
+
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.CardStatus;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptCodec;
+import vn.labaccess.desktop.card.ReceiptExpectation;
+import vn.labaccess.desktop.card.ReceiptVerifier;
+
+import vn.labaccess.desktop.backend.BackendClient;
+
+import vn.labaccess.desktop.session.AdminGrantService;
+import vn.labaccess.desktop.session.StaffManualReconcile;
+
 public final class Adgr13ManualVerify {
 
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -441,7 +454,10 @@ public final class Adgr13ManualVerify {
         private Reply route(String method, String path, byte[] raw) throws IOException {
             JsonNode body = raw.length == 0 ? JSON.createObjectNode() : JSON.readTree(raw);
             if ("POST".equals(method) && "/admin/sessions".equals(path)) {
-                return json(201, "{\"sessionId\":\"" + java.util.UUID.randomUUID() + "\",\"expiresAt\":null}");
+                byte[] sessionNonce = new byte[32];
+                RANDOM.nextBytes(sessionNonce);
+                return json(201, "{\"sessionId\":\"" + java.util.UUID.randomUUID()
+                        + "\",\"nonce\":\"" + hex(sessionNonce) + "\",\"expiresAt\":null}");
             }
             if ("POST".equals(method) && "/enrollments/challenges".equals(path)) {
                 String id = java.util.UUID.randomUUID().toString();

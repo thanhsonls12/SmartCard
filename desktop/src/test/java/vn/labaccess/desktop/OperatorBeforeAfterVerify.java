@@ -12,6 +12,19 @@ import javafx.scene.control.TextArea;
 import javafx.scene.control.TitledPane;
 import javafx.scene.control.ToggleButton;
 
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Receipt;
+
+import vn.labaccess.desktop.backend.BackendClient;
+
+import vn.labaccess.desktop.ui.shared.EnrollmentRunner;
+import vn.labaccess.desktop.ui.shared.HistoryPanel;
+import vn.labaccess.desktop.ui.shared.OperationLog;
+import vn.labaccess.desktop.ui.shared.SystemConnectionPanel;
+
+import vn.labaccess.desktop.ui.receipt.ReceiptPanel;
+
 public final class OperatorBeforeAfterVerify {
     private static final String CARD = RecoveryCardFixture.CARD_ID;
     private static boolean baseline;
@@ -76,13 +89,21 @@ public final class OperatorBeforeAfterVerify {
 
     private static void logPreference() throws Exception {
         App app = new App();
-        TitledPane pane = new TitledPane();
-        pane.setExpanded(false);
-        set(app, "logPane", pane);
-        set(app, "logArea", new TextArea());
-        Method log = App.class.getDeclaredMethod("showLogLine", String.class, String.class);
-        log.setAccessible(true);
-        log.invoke(app, "[FAIL] VERIFY_STUDENT_PIN: SW=63C2", "fixture PIN failure");
+        TitledPane pane;
+        if (baseline) {
+            pane = new TitledPane();
+            pane.setExpanded(false);
+            set(app, "logPane", pane);
+            set(app, "logArea", new TextArea());
+            Method log = App.class.getDeclaredMethod("showLogLine", String.class, String.class);
+            log.setAccessible(true);
+            log.invoke(app, "[FAIL] VERIFY_STUDENT_PIN: SW=63C2", "fixture PIN failure");
+        } else {
+            OperationLog log = (OperationLog) get(app, "operationLog");
+            pane = log.createPane();
+            pane.setExpanded(false);
+            log.append("[FAIL] VERIFY_STUDENT_PIN: SW=63C2");
+        }
         outcome("7 PIN failure preserves collapsed log", !pane.isExpanded());
         Object owner = baseline ? app : get(app, "taskRunner");
         ((java.util.concurrent.ExecutorService) get(owner, baseline ? "worker" : "executor")).shutdownNow();

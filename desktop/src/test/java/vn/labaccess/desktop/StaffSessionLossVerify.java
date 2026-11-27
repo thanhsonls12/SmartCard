@@ -28,6 +28,27 @@ import javax.smartcardio.CardException;
 import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
 
+import vn.labaccess.desktop.card.CardLifecycle;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptVerifier;
+import vn.labaccess.desktop.card.Sw;
+
+import vn.labaccess.desktop.session.CardSession;
+
+import vn.labaccess.desktop.ui.enrollment.EnrollmentPanel;
+import vn.labaccess.desktop.ui.enrollment.PersonalizePanel;
+
+import vn.labaccess.desktop.ui.photo.PhotoUploadPanel;
+
+import vn.labaccess.desktop.ui.pin.StudentPinUnblockPanel;
+
+import vn.labaccess.desktop.ui.receipt.ReceiptPanel;
+
+import vn.labaccess.desktop.ui.transaction.GrantPanel;
+
+import vn.labaccess.desktop.ui.staff.StaffWorkspace;
+
 public final class StaffSessionLossVerify {
 
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -95,7 +116,7 @@ public final class StaffSessionLossVerify {
                             && !Files.exists(journal) && labels(receipts.node()).contains("Chữ ký hợp lệ"));
                     grants.fillInputs(admin, 5);
                     ((PhotoUploadPanel) field(workspace, "photos")).fillAdminPin(admin);
-                    ((EnrollmentPanel) field(workspace, "enrollment")).fillInputs("LOSS0001", student);
+                    ((EnrollmentPanel) field(workspace, "enrollment")).fillInputs("LOSS0001", "AT19A", student);
                     StudentPinUnblockPanel unblock = (StudentPinUnblockPanel) field(workspace, "unblock");
                     unblock.fillAdminPin(admin);
                     unblock.fillNewPin(student);

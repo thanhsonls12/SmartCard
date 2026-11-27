@@ -9,6 +9,7 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
@@ -22,14 +23,36 @@ import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
 
 import javafx.application.Platform;
+import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.Parent;
+import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.DialogPane;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
+import javafx.scene.image.ImageView;
+import javafx.scene.image.WritableImage;
+import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
 import javafx.stage.Window;
+
+import vn.labaccess.desktop.ui.foundation.UiTheme;
+
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.PersonalizeRequest;
+import vn.labaccess.desktop.card.PhotoImage;
+
+import vn.labaccess.desktop.ui.shared.CardIdentityPanel;
+import vn.labaccess.desktop.ui.shared.CardOpRunner;
+import vn.labaccess.desktop.ui.shared.PhotoPreview;
+
+import vn.labaccess.desktop.ui.photo.PhotoDraft;
+import vn.labaccess.desktop.ui.photo.PhotoDraftPicker;
+import vn.labaccess.desktop.ui.photo.PhotoPanel;
+import vn.labaccess.desktop.ui.photo.PhotoUploadPanel;
 
 public final class PhotoUploadComponentVerify {
 
@@ -49,6 +72,8 @@ public final class PhotoUploadComponentVerify {
             fx(() -> {
                 selectionAndCleanup(image, invalid);
                 rejectedAndCancelled(image);
+                previewFitsImage(image);
+                previewAspect();
                 return null;
             });
             uploadCompletion(image);
@@ -69,7 +94,7 @@ public final class PhotoUploadComponentVerify {
         check("standalone owns only Admin PIN and no Student read controls",
                 nodes(panel.node(), PasswordField.class).size() == 1
                         && nodes(panel.node(), Button.class).stream().noneMatch(b -> b.getText().equals("Đọc ảnh"))
-                        && !text(panel.node()).contains("PIN học viên"));
+                        && !text(panel.node()).contains("PIN sinh viên"));
         check("no upload before a draft", !panel.pressUpload() && submission.work == null);
         check("invalid initial file explains selection failure", !panel.loadDraft(invalid)
                 && !panel.hasDraft() && text(panel.node()).contains("Không đọc được ảnh. Chọn tệp ảnh khác."));
@@ -97,8 +122,9 @@ public final class PhotoUploadComponentVerify {
         check("same normalized card preserves draft", panel.hasDraft());
         panel.onCard("ccdd");
         check("changed card clears draft and errors", !panel.hasDraft()
-                && nodes(panel.node(), Label.class).stream().noneMatch(label -> label.isVisible()
-                        && label.getStyleClass().contains("la-field-error")));
+                && nodes(panel.node(), Label.class).stream()
+                        .filter(label -> label.getStyleClass().contains("la-field-error"))
+                        .allMatch(label -> label.getText().isEmpty()));
         panel.setEnabled(false, "chưa kết nối thẻ");
         check("session gate disables choose and upload", !panel.pressChoose() && !panel.pressUpload());
 
@@ -107,6 +133,148 @@ public final class PhotoUploadComponentVerify {
                 && text(legacy.node()).contains("Ghi ảnh lên thẻ")
                 && text(legacy.node()).contains("Đọc ảnh từ thẻ")
                 && legacy.statusText().equals("Chưa chọn ảnh | Chưa đọc ảnh từ thẻ — chưa đọc ảnh từ thẻ"));
+    }
+
+    private static void previewFitsImage(Path image) {
+        PhotoDraftPicker picker = new PhotoDraftPicker(ignored -> { }, () -> { });
+        VBox pickerRoot = picker.node();
+        UiTheme.apply(new Scene(pickerRoot, 640, 480));
+        lay(pickerRoot, 640, 480);
+        Fit pickerEmpty = fits(pickerRoot).get(0);
+        System.out.println("DO khung Sửa hồ sơ (trống): " + pickerEmpty);
+        picker.loadDraft(image);
+        lay(pickerRoot, 640, 480);
+        Fit pickerLoaded = fits(pickerRoot).get(0);
+        System.out.println("DO khung Sửa hồ sơ (có ảnh): " + pickerLoaded);
+        check("ô xem trước Sửa hồ sơ ôm khít ảnh, chỉ còn viền khung: " + pickerLoaded,
+                pickerLoaded.snug() && pickerLoaded.aspectError() <= 0.01
+                        && pickerLoaded.shownHeight() == PhotoPreview.HEIGHT);
+        check("ô xem trước Sửa hồ sơ không đổi kích thước khi nạp ảnh: "
+                + pickerEmpty + " -> " + pickerLoaded,
+                pickerEmpty.frameWidth() == pickerLoaded.frameWidth()
+                        && pickerEmpty.frameHeight() == pickerLoaded.frameHeight());
+
+        PhotoPanel photoPanel = new PhotoPanel(new CardGateway(new PhotoCard()),
+                (label, operation, finished) -> false, ignored -> { });
+        VBox photoRoot = photoPanel.node();
+        UiTheme.apply(new Scene(photoRoot, 1180, 672));
+        lay(photoRoot, 1180, 672);
+        photoPanel.loadDraft(image);
+        lay(photoRoot, 1180, 672);
+        List<Fit> photoFits = fits(photoRoot);
+        photoFits.forEach(fit -> System.out.println("DO khung tab Ảnh: " + fit));
+        check("hai ô xem trước ở tab Ảnh cùng ôm khít ảnh, chỉ còn viền khung: " + photoFits,
+                photoFits.size() == 2 && photoFits.stream().allMatch(Fit::snug));
+
+        CardIdentityPanel identity = new CardIdentityPanel();
+        VBox identityRoot = identity.node();
+        UiTheme.apply(new Scene(identityRoot, 600, 240));
+        lay(identityRoot, 600, 240);
+        Fit portrait = fits(identityRoot).get(0);
+        System.out.println("DO khung nhận diện người dùng thẻ: " + portrait);
+        check("khung ảnh nhận diện người dùng thẻ ôm khít ảnh thẻ: " + portrait, portrait.snug());
+    }
+
+    private static void previewAspect() {
+        ImageView view = new ImageView();
+        Label placeholder = new Label("Chọn ảnh để xem trước");
+        placeholder.getStyleClass().add("la-preview-empty");
+        StackPane frame = PhotoPreview.frame(view, placeholder);
+        VBox root = new VBox(frame);
+        UiTheme.apply(new Scene(root, 640, 480));
+        lay(root, 640, 480);
+        Fit empty = fits(root).get(0);
+        System.out.println("DO tỉ lệ (trạng thái rỗng): " + empty);
+
+        view.setImage(new WritableImage(480, 640));
+        lay(root, 640, 480);
+        Fit tall = fits(root).get(0);
+        System.out.println("DO tỉ lệ (chân dung 480×640): " + tall);
+
+        view.setImage(new WritableImage(640, 480));
+        lay(root, 640, 480);
+        Fit wide = fits(root).get(0);
+        System.out.println("DO tỉ lệ (ngang 640×480): " + wide);
+
+        view.setImage(new WritableImage(480, 480));
+        lay(root, 640, 480);
+        Fit square = fits(root).get(0);
+        System.out.println("DO tỉ lệ (vuông 480×480): " + square);
+
+        check("khung trạng thái rỗng đúng tỉ lệ ảnh thẻ " + PhotoImage.WIDTH + "×" + PhotoImage.HEIGHT
+                + " và cao bằng lúc có ảnh: " + empty + " | có ảnh " + tall,
+                Math.abs(empty.contentAspect() - (double) PhotoImage.WIDTH / PhotoImage.HEIGHT) <= 0.01
+                        && Math.abs(empty.shownHeight() - tall.shownHeight()) < 0.5);
+        check("khung ôm khít ảnh chân dung 480×640, tỉ lệ sai ≤1%: " + tall,
+                tall.snug() && tall.aspectError() <= 0.01 && tall.shownHeight() == PhotoPreview.HEIGHT);
+        check("khung ôm khít ảnh ngang 640×480, tỉ lệ sai ≤1%, chặn bề rộng: " + wide,
+                wide.snug() && wide.aspectError() <= 0.01 && wide.shownWidth() == PhotoPreview.MAX_WIDTH);
+        check("khung ôm khít ảnh vuông 480×480, tỉ lệ sai ≤1%: " + square,
+                square.snug() && square.aspectError() <= 0.01);
+    }
+
+    private static List<Fit> fits(Parent root) {
+        List<Fit> fits = new ArrayList<>();
+        for (Node node : root.lookupAll(".la-preview")) {
+            StackPane frame = (StackPane) node;
+            ImageView view = images(frame).get(0);
+            Insets insets = frame.getInsets();
+            fits.add(new Fit(frame.getWidth(), frame.getHeight(),
+                    view.getBoundsInParent().getWidth(), view.getBoundsInParent().getHeight(),
+                    insets.getLeft() + insets.getRight(), insets.getTop() + insets.getBottom(),
+                    view.getFitWidth(), view.getFitHeight()));
+        }
+        return fits;
+    }
+
+    private static List<ImageView> images(Parent frame) {
+        List<ImageView> found = new ArrayList<>();
+        for (Node child : frame.getChildrenUnmodifiable()) {
+            if (child instanceof ImageView view) {
+                found.add(view);
+            }
+        }
+        return found;
+    }
+
+    private static void lay(Parent root, double width, double height) {
+        root.resize(width, height);
+        root.applyCss();
+        root.layout();
+        root.applyCss();
+        root.layout();
+    }
+
+    private record Fit(double frameWidth, double frameHeight, double imageWidth, double imageHeight,
+            double insetX, double insetY, double fitWidth, double fitHeight) {
+
+        double shownWidth() {
+            return imageWidth > 0 ? imageWidth : fitWidth;
+        }
+
+        double shownHeight() {
+            return imageHeight > 0 ? imageHeight : fitHeight;
+        }
+
+        double contentAspect() {
+            return shownWidth() / shownHeight();
+        }
+
+        double aspectError() {
+            return Math.abs(contentAspect() - imageWidth / imageHeight) / (imageWidth / imageHeight);
+        }
+
+        boolean snug() {
+            return Math.abs(frameWidth - shownWidth() - insetX) < 0.5
+                    && Math.abs(frameHeight - shownHeight() - insetY) < 0.5
+                    && insetX <= 4 && insetY <= 4;
+        }
+
+        @Override
+        public String toString() {
+            return String.format(Locale.ROOT, "khung %.0f×%.0f | ảnh %.0f×%.0f | viền %.0f×%.0f",
+                    frameWidth, frameHeight, imageWidth, imageHeight, insetX, insetY);
+        }
     }
 
     private static void rejectedAndCancelled(Path image) {
@@ -164,7 +332,7 @@ public final class PhotoUploadComponentVerify {
             submission.finished.accept(result.ok());
             check("success feedback locks second upload without Student instructions", !panel.pressUpload()
                     && text(panel.node()).contains("Đã ghi ảnh lên thẻ.")
-                    && !text(panel.node()).contains("PIN học viên"));
+                    && !text(panel.node()).contains("PIN sinh viên"));
             panel.onCard("ccdd");
             panel.loadDraft(image);
             submit(panel);
@@ -193,7 +361,7 @@ public final class PhotoUploadComponentVerify {
             submission.finished.accept(false);
             check("failure stays gated and does not direct Staff to Student PIN", !panel.pressUpload()
                     && !panel.pressChoose() && text(panel.node()).contains("Không tự động ghi lại.")
-                    && !text(panel.node()).contains("PIN học viên"));
+                    && !text(panel.node()).contains("PIN sinh viên"));
             return null;
         });
     }
@@ -296,16 +464,23 @@ public final class PhotoUploadComponentVerify {
         public boolean run(String label, Callable<CardOperationResult> operation, Consumer<Boolean> callback) {
             work = operation;
             finished = callback;
+            List<char[]> pins = new ArrayList<>();
             try {
                 for (Field field : operation.getClass().getDeclaredFields()) {
                     if (field.getType() == char[].class) {
                         field.setAccessible(true);
-                        pin = (char[]) field.get(operation);
+                        pins.add((char[]) field.get(operation));
+                    } else if (field.getType() == char[][].class) {
+                        field.setAccessible(true);
+                        pins.addAll(Arrays.asList((char[][]) field.get(operation)));
                     }
                 }
             } catch (ReflectiveOperationException failure) {
                 throw new IllegalStateException(failure);
             }
+            check("runner captures exactly one nonzero owned Admin PIN", pins.size() == 1
+                    && !allZero(pins.get(0)));
+            pin = pins.get(0);
             if (throwOnSubmit) {
                 throw new IllegalStateException("fixture rejected submission");
             }

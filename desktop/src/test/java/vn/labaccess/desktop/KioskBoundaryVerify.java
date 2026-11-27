@@ -16,6 +16,29 @@ import javafx.scene.Parent;
 import javafx.scene.control.Button;
 import javafx.scene.control.PasswordField;
 
+import vn.labaccess.desktop.ui.foundation.UiTheme;
+
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.CardStatus;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Profile;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptCodec;
+import vn.labaccess.desktop.card.Reconciliation;
+import vn.labaccess.desktop.card.Sw;
+
+import vn.labaccess.desktop.session.CardSession;
+import vn.labaccess.desktop.session.SupersededRecovery;
+
+import vn.labaccess.desktop.ui.shared.CardTaskRunner;
+import vn.labaccess.desktop.ui.shared.EnrollmentRunner;
+import vn.labaccess.desktop.ui.shared.HistoryPanel;
+
+import vn.labaccess.desktop.ui.kiosk.KioskOperations;
+import vn.labaccess.desktop.ui.kiosk.KioskPinPrompt;
+import vn.labaccess.desktop.ui.kiosk.KioskWorkspace;
+
 public final class KioskBoundaryVerify {
 
     private static int checks;
@@ -110,7 +133,7 @@ public final class KioskBoundaryVerify {
                     : Files.readString(journal.file()).equals(original) && journal.load().status() == PendingJournal.Status.PENDING);
             fx(() -> {
                 workspace.logOperatorResponse(proof, result);
-                String logs = ((javafx.scene.control.TextArea) field(workspace, "logArea")).getText();
+                String logs = ((javafx.scene.control.TextArea) field(field(workspace, "operationLog"), "logArea")).getText();
                 check(label + " authentication audit remains", logs.contains("GET_ADMIN_STATUS SW=9000"));
                 check(label + " conclusion only on successful closure", logs.contains("Đóng journal SUPERSEDED") == ledgerMatches);
                 if (ledgerMatches) {
@@ -281,7 +304,7 @@ public final class KioskBoundaryVerify {
                     workspace.logOperatorResponse(proof.state().cardId(), confirmation);
                     workspace.synchronizeConnection();
                     workspace.operatorCompleted(proof, revision, new CardTaskRunner.Outcome<>(confirmation, null));
-                    String logs = ((javafx.scene.control.TextArea) field(workspace, "logArea")).getText();
+                    String logs = ((javafx.scene.control.TextArea) field(field(workspace, "operationLog"), "logArea")).getText();
                     String line = logs.lines().filter(value -> value.contains(String.format("SW=%04X", response)))
                             .reduce((left, right) -> right).orElseThrow();
                     java.time.Instant.parse(line.substring(0, line.indexOf(" | ")));
@@ -416,6 +439,7 @@ public final class KioskBoundaryVerify {
                 session.gateway().reconciliation().markKnown("fixture resolved before next UI case");
                 value.synchronizeConnection();
                 value.refresh();
+                layoutChecks(value);
                 return null;
             });
             char[] pin = RecoveryCardFixture.pin(6);
@@ -470,6 +494,38 @@ public final class KioskBoundaryVerify {
             ((java.util.concurrent.ExecutorService) field(tasks, "executor")).shutdownNow();
             Files.delete(directory);
         }
+    }
+
+    private static void layoutChecks(KioskWorkspace workspace) throws Exception {
+        javafx.scene.layout.Region root = (javafx.scene.layout.Region) workspace.node();
+        javafx.scene.Scene scene = new javafx.scene.Scene(root, 1060, 680);
+        UiTheme.apply(scene);
+        root.resize(1060, 680);
+        root.applyCss();
+        root.layout();
+        Button start = (Button) field(workspace, "start");
+        Button end = (Button) field(workspace, "end");
+        var startBounds = start.localToScene(start.getBoundsInLocal());
+        var endBounds = end.localToScene(end.getBoundsInLocal());
+        check("main actions share a row without overlap", Math.abs(startBounds.getMinY() - endBounds.getMinY()) < 1
+                && endBounds.getMinX() > startBounds.getMaxX());
+        Button reconcile = (Button) field(workspace, "reconcile");
+        check("recovery has no empty slot without a pending operation", !reconcile.isVisible() && !reconcile.isManaged());
+        workspace.started("LICH_SU");
+        workspace.backendCompleted("LICH_SU", true);
+        check("history completion clears the busy message", ((javafx.scene.control.Label) field(workspace, "feedback"))
+                .getText().equals("Xong: tải lịch sử giao dịch"));
+        ((Button) field(workspace, "info")).fire();
+        KioskPinPrompt prompt = (KioskPinPrompt) field(workspace, "prompt");
+        check("PIN form replaces the action grid", prompt.isOpen() && !start.getParent().isVisible()
+                && !start.getParent().isManaged());
+        ((Button) field(prompt, "cancel")).fire();
+        check("cancelling PIN restores actions", !prompt.isOpen() && start.getParent().isVisible()
+                && start.getParent().isManaged());
+        root.resize(480, 360);
+        root.layout();
+        var narrowEnd = end.localToScene(end.getBoundsInLocal());
+        check("main actions fit narrow Kiosk", narrowEnd.getMaxX() <= 480 && start.getWidth() >= 56);
     }
 
     private static void serviceChecks() throws Exception {

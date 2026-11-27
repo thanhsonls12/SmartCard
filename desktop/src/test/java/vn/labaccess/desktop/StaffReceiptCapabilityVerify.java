@@ -14,6 +14,17 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.stage.Window;
 
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardLifecycle;
+import vn.labaccess.desktop.card.CardStatus;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.Reconciliation;
+
+import vn.labaccess.desktop.ui.shared.CardOpRunner;
+
+import vn.labaccess.desktop.ui.receipt.ReceiptPanel;
+
 public final class StaffReceiptCapabilityVerify {
 
     private static final String CARD_ID = "A1B2C3D411223344";
@@ -60,13 +71,13 @@ public final class StaffReceiptCapabilityVerify {
     private static void nonGrantPendingNeverUsesRecoveryCapabilities() throws Exception {
         for (int operation : new int[] {Receipt.OPERATION_START, Receipt.OPERATION_END}) {
             try (Fixture fixture = new Fixture()) {
-                require(fixture.journal.writePending(entry(operation, CARD_ID)), "Tạo pending học viên");
+                require(fixture.journal.writePending(entry(operation, CARD_ID)), "Tạo pending sinh viên");
                 byte[] before = Files.readAllBytes(fixture.journal.file());
                 ReceiptPanel panel = fixture.staffPanel();
                 require(panel.pendingOperationReason().contains("Kiosk"), "Gate Staff hướng dẫn Kiosk");
                 panel.offerPendingReconciliation();
                 require(fixture.gateway.reconciliation().state() == Reconciliation.State.UNKNOWN,
-                        "Offer giữ UNKNOWN cho pending học viên");
+                        "Offer giữ UNKNOWN cho pending sinh viên");
                 panel.applyLock(false, null, null);
                 require(!panel.reconcileEnabled() && !panel.pressReconcile(), "Không bật đối soát Staff cho START/END");
                 require(!panel.pressReadReceipt(), "Không đi vòng qua đọc Student receipt");

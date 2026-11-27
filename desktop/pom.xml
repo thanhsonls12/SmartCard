@@ -11,6 +11,7 @@
     <name>LabAccess Desktop - Gate 0 smoke UI</name>
 
     <properties>
+        <labaccess.buildDirectory>${project.basedir}/target</labaccess.buildDirectory>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>25</maven.compiler.release>
         <javafx.version>25</javafx.version>
@@ -75,6 +76,7 @@
     </dependencies>
 
     <build>
+        <directory>${labaccess.buildDirectory}</directory>
         <plugins>
             <plugin>
                 <groupId>org.openjfx</groupId>

@@ -5,6 +5,19 @@ import java.util.Arrays;
 import javax.smartcardio.CardException;
 import javax.smartcardio.CommandAPDU;
 
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptCodec;
+import vn.labaccess.desktop.card.ReceiptExpectation;
+import vn.labaccess.desktop.card.Reconciliation;
+import vn.labaccess.desktop.card.Sw;
+
+import vn.labaccess.desktop.backend.BackendClient;
+
+import vn.labaccess.desktop.session.ConfirmedOperationRefresh;
+
 public final class OperatorRecoveryVerify {
     private static int checks;
 

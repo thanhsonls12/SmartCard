@@ -27,6 +27,23 @@ import javax.smartcardio.CardException;
 import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
 
+import vn.labaccess.desktop.card.CardLifecycle;
+import vn.labaccess.desktop.card.CardStatus;
+import vn.labaccess.desktop.card.LedgerAlignment;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptVerifier;
+import vn.labaccess.desktop.card.Sw;
+
+import vn.labaccess.desktop.session.CardSession;
+
+import vn.labaccess.desktop.ui.kiosk.KioskPinPrompt;
+import vn.labaccess.desktop.ui.kiosk.KioskWorkspace;
+
+import vn.labaccess.desktop.ui.transaction.GrantPanel;
+
+import vn.labaccess.desktop.ui.staff.StaffWorkspace;
+
 public final class RoleLedgerDisplayVerify {
 
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -92,8 +109,8 @@ public final class RoleLedgerDisplayVerify {
                     check(name + " sender journal byte-preserved", Arrays.equals(original, Files.readAllBytes(senderJournal)));
                     check(name + " Student VERIFY performed", fixture.ins.subList(traceStart, fixture.ins.size()).contains(0x20));
                     if (aligned) {
-                        check(name + " verified Student source", receiver.text("stateOrigin").equals("Đã xác minh · STUDENT"));
-                        check(name + " publishes matching quota", receiver.text("quota").equals("10 lượt · STUDENT"));
+                        check(name + " verified Student source", receiver.text("stateOrigin").equals("Đã xác minh · PIN sinh viên"));
+                        check(name + " publishes matching quota", receiver.text("quota").equals("10 lượt"));
                         check(name + " profile visible after Student read", !receiver.text("name").isEmpty());
                     } else {
                         check(name + " no verified quota label", !receiver.text("stateOrigin").contains("Đã xác minh"));
@@ -134,7 +151,7 @@ public final class RoleLedgerDisplayVerify {
             fixture.failRefresh = failRefresh;
             fixture.hold = true;
             snapshot(name + "-public", window, fixture);
-            check(name + " public source", window.text("stateOrigin").equals("Công khai · chưa xác minh"));
+            check(name + " public source", window.text("stateOrigin").equals("Chưa xác minh"));
             check(name + " public hides quota", !window.text("quota").contains(" lượt"));
             window.act(role);
             check(name + " reaches POST before ACK", fixture.postEntered.await(10, TimeUnit.SECONDS));
@@ -153,9 +170,9 @@ public final class RoleLedgerDisplayVerify {
                 check(name + " no unconfirmed number", !window.text("quota").matches(".*[0-9]+ lượt.*"));
                 check(name + " preserves no-replay warning", window.text("feedback").contains("Không thực hiện lại"));
             } else {
-                String source = role.equals("Staff") ? "ADMIN" : "STUDENT";
+                String source = role.equals("Staff") ? "PIN quản trị" : "PIN sinh viên";
                 check(name + " verified role", window.text("stateOrigin").equals("Đã xác minh · " + source));
-                check(name + " publishes ACKed quota", window.text("quota").equals(fixture.card.balance + " lượt · " + source));
+                check(name + " publishes ACKed quota", window.text("quota").equals(fixture.card.balance + " lượt"));
                 if (!role.equals("Staff")) {
                     CountDownLatch reading = new CountDownLatch(1), finishReading = new CountDownLatch(1);
                     fx(() -> {
@@ -174,9 +191,9 @@ public final class RoleLedgerDisplayVerify {
                     check(name + " busy hides quota", window.text("quota").equals("Chưa rõ kết quả"));
                     finishReading.countDown();
                     window.idle();
-                    check(name + " read-only refresh restores quota", window.text("quota").equals(fixture.card.balance + " lượt · STUDENT"));
+                    check(name + " read-only refresh restores quota", window.text("quota").equals(fixture.card.balance + " lượt"));
                     fx(() -> { ((Button) field(window.workspace, "done")).fire(); return null; });
-                    check(name + " end session clears verified state", window.text("stateOrigin").equals("Công khai · chưa xác minh")
+                    check(name + " end session clears verified state", window.text("stateOrigin").equals("Chưa xác minh")
                             && window.text("quota").equals("Chưa xác thực"));
                 }
             }

@@ -12,6 +12,16 @@ import javax.smartcardio.CardException;
 import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
 
+import vn.labaccess.desktop.transport.CardTransport;
+import vn.labaccess.desktop.transport.SimulatorConnection;
+
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptExpectation;
+import vn.labaccess.desktop.card.Reconciliation;
+
 public final class SimulatorConnectionVerify {
     private SimulatorConnectionVerify() {
     }

@@ -48,6 +48,26 @@ import javax.smartcardio.CardException;
 import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
 
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptCodec;
+import vn.labaccess.desktop.card.ReceiptVerifier;
+import vn.labaccess.desktop.card.Sw;
+
+import vn.labaccess.desktop.backend.BackendClient;
+
+import vn.labaccess.desktop.session.AdminGrantService;
+import vn.labaccess.desktop.session.StaffManualReconcile;
+
+import vn.labaccess.desktop.ui.shared.CardOpRunner;
+import vn.labaccess.desktop.ui.shared.FxPinSource;
+
+import vn.labaccess.desktop.ui.receipt.ReceiptPanel;
+
+import vn.labaccess.desktop.ui.transaction.TransactionPanel;
+
 public final class Adgr13StaffVerify {
 
     private static final String CARD_ID = "A1B2C3D411223344";

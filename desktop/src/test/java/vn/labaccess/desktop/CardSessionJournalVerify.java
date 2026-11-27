@@ -7,6 +7,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Reconciliation;
+
+import vn.labaccess.desktop.session.CardSession;
+
 public final class CardSessionJournalVerify {
 
     private static int checks;

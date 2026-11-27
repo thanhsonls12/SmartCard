@@ -42,6 +42,15 @@ import javax.imageio.ImageIO;
 import vn.labaccess.desktop.RoleLedgerDisplayVerify.Fixture;
 import vn.labaccess.desktop.RoleLedgerDisplayVerify.Window;
 
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.CardStatus;
+
+import vn.labaccess.desktop.ui.shared.HistoryPanel;
+import vn.labaccess.desktop.ui.shared.SupersededDialog;
+import vn.labaccess.desktop.ui.shared.UiLabels;
+
+import vn.labaccess.desktop.ui.kiosk.KioskPinPrompt;
+
 public final class ResponsiveRoleVerify {
 
     private static final List<Map<String, Object>> RESULTS = new ArrayList<>();
@@ -190,8 +199,8 @@ public final class ResponsiveRoleVerify {
 
     private static void staff(Window app) throws Exception {
         resize(app, 840, 420);
-        click((ToggleButton) field(app.workspace, "technical"));
-        click((ToggleButton) field(app.workspace, "logToggle"));
+        clickStaffMenuItem(app, "Chi tiết kỹ thuật");
+        clickStaffMenuItem(app, "Nhật ký");
         TabPane tabs = (TabPane) field(app.workspace, "tabs");
         for (int index = 0; index < tabs.getTabs().size(); index++) {
             int selected = index;
@@ -235,7 +244,7 @@ public final class ResponsiveRoleVerify {
         check("change PIN form opens", fx(prompt::isOpen));
         PasswordField next = (PasswordField) field(prompt, "newPin");
         PasswordField repeated = (PasswordField) field(prompt, "confirmation");
-        for (Node expected : List.of(next, repeated, (Button) field(prompt, "submit"), (Button) field(prompt, "cancel"))) {
+        for (Node expected : List.of(next, repeated, (Button) field(prompt, "cancel"), (Button) field(prompt, "submit"))) {
             key(KeyCode.TAB);
             check("PIN Tab reaches " + name(expected), fx(() -> expected.isFocused() && visible(expected)));
         }
@@ -404,7 +413,22 @@ public final class ResponsiveRoleVerify {
         throw new AssertionError("dialog did not open");
     }
 
-    private static void click(Control control) throws Exception {
+    private static void clickStaffMenuItem(Window app, String text) throws Exception {
+        Button more = fx(() -> app.stage.getScene().getRoot().lookupAll(".button").stream()
+                .filter(node -> node instanceof Button button && "Khác".equals(button.getText()))
+                .map(Button.class::cast).findFirst().orElseThrow());
+        fx(() -> { more.fire(); return null; });
+        settle();
+        Node item = fx(() -> javafx.stage.Window.getWindows().stream()
+                .filter(window -> window instanceof javafx.scene.control.ContextMenu && window.isShowing())
+                .map(javafx.scene.control.ContextMenu.class::cast)
+                .flatMap(menu -> menu.getItems().stream())
+                .filter(entry -> text.equals(entry.getText()))
+                .map(javafx.scene.control.MenuItem::getStyleableNode).findFirst().orElseThrow());
+        click(item);
+    }
+
+    private static void click(Node control) throws Exception {
         fx(() -> { control.requestFocus(); return null; });
         settle();
         fx(() -> {

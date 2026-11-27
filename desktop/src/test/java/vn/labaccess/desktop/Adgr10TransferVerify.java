@@ -21,9 +21,22 @@ import javax.smartcardio.CommandAPDU;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-/**
- * ADGR-10 trên một Simulator: hai Gateway, hai journal, lần lượt Staff rồi Kiosk.
- */
+import vn.labaccess.desktop.transport.CardTransport;
+
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.CardStatus;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptCodec;
+import vn.labaccess.desktop.card.ReceiptExpectation;
+
+import vn.labaccess.desktop.backend.BackendClient;
+
+import vn.labaccess.desktop.session.AdminGrantRecovery;
+import vn.labaccess.desktop.session.AdminGrantService;
+import vn.labaccess.desktop.session.SupersededRecovery;
+
 public final class Adgr10TransferVerify {
 
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -179,7 +192,7 @@ public final class Adgr10TransferVerify {
             ledger.verifyCalls.set(0);
             CardOperationResult blocked = new AdminGrantService(staff, staffJournal, backend)
                     .grant(5, () -> admin.clone());
-            require(!blocked.ok() && blocked.text().contains("khác ledger"),
+            require(!blocked.ok() && blocked.text().contains("chưa khớp"),
                     "staff phai chan vi lech ledger: " + blocked.text());
             require(stateCount(apdus) == 0 && ledger.posts.get() == 0 && ledger.verifyCalls.get() == 0
                     && !staffJournal.load().present(),
@@ -570,7 +583,10 @@ public final class Adgr10TransferVerify {
         private Reply route(String method, String path, byte[] raw) throws IOException {
             JsonNode body = raw.length == 0 ? JSON.createObjectNode() : JSON.readTree(raw);
             if ("POST".equals(method) && "/admin/sessions".equals(path)) {
-                return json(201, "{\"sessionId\":\"" + java.util.UUID.randomUUID() + "\",\"expiresAt\":null}");
+                byte[] sessionNonce = new byte[32];
+                RANDOM.nextBytes(sessionNonce);
+                return json(201, "{\"sessionId\":\"" + java.util.UUID.randomUUID()
+                        + "\",\"nonce\":\"" + hex(sessionNonce) + "\",\"expiresAt\":null}");
             }
             if ("POST".equals(method) && "/enrollments/challenges".equals(path)) {
                 String id = java.util.UUID.randomUUID().toString();

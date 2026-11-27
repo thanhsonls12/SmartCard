@@ -1,11 +1,9 @@
 package vn.labaccess.desktop;
 
-import java.util.Locale;
+import vn.labaccess.desktop.card.CardStatus;
+import vn.labaccess.desktop.ui.shared.UiLabels;
 
 final class SessionGates {
-
-    private static final String[] SESSION_LEVEL_REASONS = {"chưa kết nối thẻ", "chưa nhận diện thẻ",
-        "cần đối soát giao dịch", "có giao dịch đang chờ đối soát", "nhật ký cần xử lý thủ công"};
 
     record State(boolean busy, boolean connected, boolean ready, boolean snapshotKnown,
             boolean transactionAllowed, boolean journalPresent, boolean validPending,
@@ -35,23 +33,11 @@ final class SessionGates {
     }
 
     static boolean sessionLevel(String reason) {
-        if (reason == null) {
-            return false;
-        }
-        String text = reason.toLowerCase(Locale.ROOT);
-        if (text.equals(App.BUSY_WHY) || text.equals(App.BUSY_NOTE.toLowerCase(Locale.ROOT))) {
-            return true;
-        }
-        for (String prefix : SESSION_LEVEL_REASONS) {
-            if (text.startsWith(prefix)) {
-                return true;
-            }
-        }
-        return false;
+        return UiLabels.sessionLevel(reason);
     }
 
     static String panelNote(String reason) {
-        return sessionLevel(reason) ? null : reason;
+        return UiLabels.panelNote(reason);
     }
 
     static NextStep nextStep(boolean closing, State state, String enrollment,
@@ -90,13 +76,13 @@ final class SessionGates {
             return new NextStep("bấm Kiểm tra hệ thống để kết nối lại sổ giao dịch", -1);
         }
         if (!state.snapshotKnown() || !authenticated(state)) {
-            return new NextStep("nhập PIN học viên rồi bấm Đọc thẻ", App.TAB_OPERATIONS);
+            return new NextStep("nhập PIN sinh viên rồi bấm Đọc thẻ", App.TAB_OPERATIONS);
         }
         if (state.card().hasActiveVisit()) {
             return new NextStep("đóng ca khi kết thúc", App.TAB_OPERATIONS);
         }
         return new NextStep(state.card().balance() <= 0 ? "cấp lượt để mở ca"
-                : "nhập PIN học viên và mở ca", App.TAB_OPERATIONS);
+                : "nhập PIN sinh viên và mở ca", App.TAB_OPERATIONS);
     }
 
     private static String connect(State state) {
@@ -165,7 +151,7 @@ final class SessionGates {
         if (state.enrollmentProblem() != null) {
             return "chưa xác nhận đăng ký thẻ — bấm Kiểm tra hệ thống hoặc mở tab Đăng ký thẻ";
         }
-        return authenticated(state) ? null : "cần PIN học viên đúng để đọc trạng thái thẻ";
+        return authenticated(state) ? null : "cần PIN sinh viên đúng để đọc trạng thái thẻ";
     }
 
     private static boolean authenticated(State state) {

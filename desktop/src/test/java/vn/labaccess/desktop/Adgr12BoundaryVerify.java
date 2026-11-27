@@ -9,9 +9,11 @@ import javax.smartcardio.CardException;
 import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
 
-/**
- * ADGR-12 trên Simulator: lệnh đọc Admin không mở quyền Student.
- */
+import vn.labaccess.desktop.transport.CardTransport;
+
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.PhotoImage;
+
 public final class Adgr12BoundaryVerify {
 
     private static final int SW_OK = 0x9000;

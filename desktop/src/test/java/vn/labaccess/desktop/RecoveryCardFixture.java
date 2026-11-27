@@ -15,6 +15,11 @@ import javax.smartcardio.CardException;
 import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
 
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptVerifier;
+import vn.labaccess.desktop.card.Sw;
+
 final class RecoveryCardFixture extends CardChannel implements CardGateway.ReceiptSink {
     static final String CARD_ID = "A1B2C3D411223344";
     static final byte[] AID = HexFormat.of().parseHex("F04C4142010101");
@@ -70,6 +75,14 @@ final class RecoveryCardFixture extends CardChannel implements CardGateway.Recei
         return switch (command.getINS()) {
             case 0xA4 -> response(new byte[0], Sw.OK);
             case 0x10 -> response(statusBytes(), statusSw);
+            case 0x11 -> response(statusBytes(), statusSw);
+            case 0x63 -> {
+                ResponseAPDU receipt = response(receiptBytes(), Sw.OK);
+                if (failRefreshAfterSave) {
+                    statusSw = Sw.INTERNAL_ERROR;
+                }
+                yield receipt;
+            }
             case 0x20 -> {
                 pinCommands++;
                 yield response(new byte[0], pinSw);

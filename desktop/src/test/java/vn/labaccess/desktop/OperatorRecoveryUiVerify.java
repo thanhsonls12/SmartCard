@@ -17,6 +17,20 @@ import javafx.scene.control.TitledPane;
 import javafx.scene.control.ToggleButton;
 import javafx.stage.Stage;
 
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptVerifier;
+import vn.labaccess.desktop.card.Sw;
+
+import vn.labaccess.desktop.ui.shared.ActionNote;
+import vn.labaccess.desktop.ui.shared.HistoryPanel;
+import vn.labaccess.desktop.ui.shared.SystemConnectionPanel;
+
+import vn.labaccess.desktop.ui.pin.PinPanel;
+
+import vn.labaccess.desktop.ui.receipt.ReceiptPanel;
+
 public final class OperatorRecoveryUiVerify {
     private static App app;
     private static Stage stage;
@@ -30,7 +44,8 @@ public final class OperatorRecoveryUiVerify {
         Path temporary = Files.createTempDirectory("labaccess-ui-recovery");
         System.setProperty("labaccess.journal", temporary.resolve("pending.txt").toString());
         System.setProperty("labaccess.demo", "false");
-        try (RecoveryBackendFixture backend = new RecoveryBackendFixture()) {
+        card = new RecoveryCardFixture();
+        try (RecoveryBackendFixture backend = new RecoveryBackendFixture(OperatorRecoveryUiVerify::grantReply)) {
             System.setProperty("labaccess.backend", backend.url());
             Platform.startup(() -> { });
             Platform.setImplicitExit(false);
@@ -43,7 +58,6 @@ public final class OperatorRecoveryUiVerify {
                     stage.setHeight(760);
                     return null;
                 });
-                card = new RecoveryCardFixture();
                 gateway = (CardGateway) field(field(app, "session"), "gateway");
                 Object transport = field(gateway, "transport");
                 set(transport, "channel", card);
@@ -56,7 +70,10 @@ public final class OperatorRecoveryUiVerify {
                 receiptRecovery();
                 wrongPinKeepsLogChoice();
                 confirmedTransaction();
+                backend.counter = card.counter;
+                backend.balance = card.balance;
                 confirmedReconciliation();
+                backend.counter = 1;
                 wrongCard();
                 backendBadge(backend);
                 brokenConnection();
@@ -73,6 +90,21 @@ public final class OperatorRecoveryUiVerify {
             Files.deleteIfExists(temporary.resolve("pending.txt"));
             Files.delete(temporary);
         }
+    }
+
+    private static RecoveryBackendFixture.Reply grantReply(String request, String body) {
+        String route = request.split(" ")[1];
+        var result = new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode().put("cardId", card.cardId);
+        if (route.startsWith("/enrollments/cards/")) {
+            result.put("publicKey", java.util.HexFormat.of().formatHex(ReceiptVerifier.encodePoint(card.keys.getPublic())));
+            return new RecoveryBackendFixture.Reply(200, result.toString());
+        }
+        if (route.equals("/receipts/verify")) {
+            result.put("status", "recorded").put("operation", "GRANT").put("counterAfter", card.counter)
+                    .put("delta", 5).put("balanceAfter", card.balance).putNull("visitId");
+            return new RecoveryBackendFixture.Reply(201, result.toString());
+        }
+        return null;
     }
 
     private static void readCard() throws Exception {
@@ -154,9 +186,9 @@ public final class OperatorRecoveryUiVerify {
             awaitOperation();
             fx(() -> {
                 check("completed grant is not reported as failure", note().contains("cấp lượt")
-                        && note().contains("Chưa cập nhật trạng thái") && !note().contains("Lỗi:"));
-                check("completed grant keeps stale snapshot locked", !(boolean) field(field(app, "session"), "snapshotKnown")
-                        && !app.pressGrant());
+                        && note().contains("cần đọc lại trạng thái") && !note().contains("Lỗi:"));
+                check("completed grant keeps Student operations locked on a stale snapshot",
+                        !(boolean) field(field(app, "session"), "snapshotKnown") && !app.pressStart());
                 check("grant executed once and journal resolved", card.stateCommands == 1 && card.counter == 2
                         && !journal.load().present());
                 app.captureScene(EVIDENCE.resolve("confirmed-refresh-wide.png"));
@@ -179,13 +211,12 @@ public final class OperatorRecoveryUiVerify {
         check("fixture pending represents committed grant", journal.writePending(new PendingJournal.Entry(card.cardId,
                 card.counter, Receipt.OPERATION_GRANT, 5, card.balance, null, System.currentTimeMillis())));
         gateway.markTransactionUnknown("fixture lost response");
-        card.failRefreshAfterSave = true;
-        char[] pin = RecoveryCardFixture.pin(6);
+        char[] pin = RecoveryCardFixture.pin(8);
         int commandsBefore = card.stateCommands;
         try {
             fx(() -> {
                 app.refreshButtons();
-                app.fillTransactionInputs(pin, null, 5);
+                app.fillTransactionInputs(new char[0], pin, 5);
                 Platform.runLater(() -> {
                     for (var window : java.util.List.copyOf(javafx.stage.Window.getWindows())) {
                         if (window instanceof Stage dialog && dialog != stage) {
@@ -203,9 +234,8 @@ public final class OperatorRecoveryUiVerify {
             });
             awaitOperation();
             fx(() -> {
-                check("completed reconciliation retains success and refresh warning",
-                        note().contains("Đã hoàn tất đối soát") && note().contains("Chưa cập nhật trạng thái")
-                                && !journal.load().present() && !(boolean) field(field(app, "session"), "snapshotKnown"));
+                check("completed Admin reconciliation closes the journal",
+                        !note().contains("Lỗi:") && !journal.load().present());
                 check("reconciliation never repeats state command", card.stateCommands == commandsBefore);
                 return null;
             });

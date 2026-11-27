@@ -11,7 +11,6 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.event.Event;
 import javafx.scene.control.Button;
@@ -19,10 +18,29 @@ import javafx.scene.control.ButtonBar;
 import javafx.scene.control.DialogPane;
 import javafx.scene.image.PixelFormat;
 import javafx.stage.WindowEvent;
-import javafx.util.Duration;
 import javax.imageio.ImageIO;
 import vn.labaccess.desktop.RoleLedgerDisplayVerify.Fixture;
 import vn.labaccess.desktop.RoleLedgerDisplayVerify.Window;
+
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Receipt;
+
+import vn.labaccess.desktop.session.AdminGrantService;
+import vn.labaccess.desktop.session.StaffManualReconcile;
+
+import vn.labaccess.desktop.ui.shared.CardTaskRunner;
+
+import vn.labaccess.desktop.ui.enrollment.PersonalizePanel;
+
+import vn.labaccess.desktop.ui.photo.PhotoUploadPanel;
+
+import vn.labaccess.desktop.ui.pin.StudentPinUnblockPanel;
+
+import vn.labaccess.desktop.ui.receipt.ReceiptPanel;
+
+import vn.labaccess.desktop.ui.kiosk.KioskPinPrompt;
+
+import vn.labaccess.desktop.ui.transaction.GrantPanel;
 
 public final class LegacyJournalVerify {
 
@@ -202,17 +220,16 @@ public final class LegacyJournalVerify {
         if (app.staff) {
             fx(() -> {
                 ((GrantPanel) field(app.workspace, "grants")).fillInputs(app.pin, 5);
-                PauseTransition accept = new PauseTransition(Duration.millis(150));
-                accept.setOnFinished(event -> {
+                Platform.runLater(() -> {
                     var windows = List.copyOf(javafx.stage.Window.getWindows());
                     for (var window : windows) {
-                        if (window.isShowing() && window.getScene().getRoot() instanceof DialogPane pane) {
+                        if (window.isShowing() && window.getScene().getRoot() instanceof DialogPane pane
+                                && "Đọc biên nhận để xử lý nhật ký chờ gửi?".equals(pane.getHeaderText())) {
                             pane.getButtonTypes().stream().filter(type -> type.getButtonData() == ButtonBar.ButtonData.OK_DONE)
                                     .findFirst().ifPresent(type -> ((Button) pane.lookupButton(type)).fire());
                         }
                     }
                 });
-                accept.play();
                 check("Staff recovery button fired", ((ReceiptPanel) field(app.workspace, "receipts")).pressReconcile());
                 return null;
             });

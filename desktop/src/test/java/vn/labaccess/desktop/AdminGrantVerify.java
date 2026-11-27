@@ -40,6 +40,27 @@ import javax.smartcardio.CardException;
 import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
 
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.CardStatus;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptCodec;
+import vn.labaccess.desktop.card.ReceiptVerifier;
+import vn.labaccess.desktop.card.Reconciliation;
+import vn.labaccess.desktop.card.Sw;
+
+import vn.labaccess.desktop.backend.BackendClient;
+
+import vn.labaccess.desktop.session.AdminGrantRecovery;
+import vn.labaccess.desktop.session.AdminGrantService;
+
+import vn.labaccess.desktop.ui.shared.CardOpRunner;
+
+import vn.labaccess.desktop.ui.receipt.ReceiptPanel;
+
+import vn.labaccess.desktop.ui.transaction.TransactionPanel;
+
 public final class AdminGrantVerify {
 
     private enum UiCase {
@@ -924,7 +945,6 @@ public final class AdminGrantVerify {
             };
         }
 
-        /** PIN chưa được lấy thì không có char[] nào cần xóa; đã lấy thì phải về 0. */
         boolean pinSafe() { return pinTakes == 0 || allZero(pinInput); }
         PendingJournal.Entry entry() { return new PendingJournal.Entry(CARD_ID, 1, 1, 5, 5, null, 1); }
 

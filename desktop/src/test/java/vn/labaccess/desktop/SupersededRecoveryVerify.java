@@ -28,12 +28,27 @@ import javafx.scene.control.DialogPane;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextArea;
+import javafx.scene.control.TitledPane;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import javax.smartcardio.Card;
 import javax.smartcardio.CardChannel;
 import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
+
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.CardStatus;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptVerifier;
+import vn.labaccess.desktop.card.Reconciliation;
+import vn.labaccess.desktop.card.Sw;
+
+import vn.labaccess.desktop.backend.BackendClient;
+
+import vn.labaccess.desktop.session.AdminGrantRecovery;
+import vn.labaccess.desktop.session.SupersededRecovery;
 
 public final class SupersededRecoveryVerify {
 
@@ -294,7 +309,8 @@ public final class SupersededRecoveryVerify {
             check("shared Gateway SW is now 9000 from Student evidence", gateway.lastResponseSw() == Sw.OK);
             f.journal.remove();
             check("replacement journal fixture", f.journal.writePending(startIntent(900)));
-            TextArea log = (TextArea) field(app, "logArea").get(app);
+            TitledPane logPane = (TitledPane) field(app, "logPane").get(app);
+            TextArea log = (TextArea) logPane.getContent();
             log.textProperty().addListener((observable, old, next) -> {
                 if (next.contains("Journal đã đổi trước khi xác nhận")) stopped.complete(null);
             });

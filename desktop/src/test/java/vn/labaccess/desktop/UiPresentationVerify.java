@@ -15,6 +15,46 @@ import javafx.scene.control.Label;
 import javafx.scene.control.TableView;
 import javafx.scene.layout.VBox;
 
+import vn.labaccess.desktop.ui.foundation.InputFeedback;
+import vn.labaccess.desktop.ui.foundation.UiScale;
+import vn.labaccess.desktop.ui.foundation.UiTheme;
+
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardLifecycle;
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.CardStatus;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.PersonalizeRequest;
+import vn.labaccess.desktop.card.Profile;
+import vn.labaccess.desktop.card.Receipt;
+
+import vn.labaccess.desktop.backend.BackendClient;
+
+import vn.labaccess.desktop.session.CardSession;
+
+import vn.labaccess.desktop.ui.shared.CardIdentityPanel;
+import vn.labaccess.desktop.ui.shared.CardOpRunner;
+import vn.labaccess.desktop.ui.shared.EnrollmentRunner;
+import vn.labaccess.desktop.ui.shared.HistoryPanel;
+import vn.labaccess.desktop.ui.shared.JournalRecoveryView;
+import vn.labaccess.desktop.ui.shared.StatusBar;
+import vn.labaccess.desktop.ui.shared.UiLabels;
+import vn.labaccess.desktop.ui.shared.UiRows;
+
+import vn.labaccess.desktop.ui.enrollment.EnrollmentPanel;
+import vn.labaccess.desktop.ui.enrollment.PersonalizePanel;
+
+import vn.labaccess.desktop.ui.photo.PhotoPanel;
+
+import vn.labaccess.desktop.ui.pin.PinPanel;
+
+import vn.labaccess.desktop.ui.receipt.ReceiptPanel;
+import vn.labaccess.desktop.ui.receipt.ReceiptView;
+
+import vn.labaccess.desktop.ui.profile.ProfilePanel;
+
+import vn.labaccess.desktop.ui.transaction.TransactionPanel;
+
 public final class UiPresentationVerify {
 
     private static final String CARD_ID = "A1B2C3D411223344";
@@ -90,8 +130,15 @@ public final class UiPresentationVerify {
         BackendClient.HistoryEntry row = new BackendClient.HistoryEntry(
                 "giao-dich-thu-nghiem", 1, "GRANT", 5, 5, "verified",
                 java.time.Instant.parse("2026-11-12T08:00:00Z"));
-        panel.show(history(List.of(row), 1, 5));
+        panel.stageRefresh(() -> new CardSession.History(history(List.of(row), 1, 5), null));
+        check("staged history is only displayed after publication", panel.rowCount() == 0);
+        panel.publishRefresh();
         check("loaded history", panel.rowCount() == 1);
+        panel.stageRefresh(() -> new CardSession.History(null, new IllegalStateException("discarded refresh")));
+        panel.discardRefresh();
+        panel.publishRefresh();
+        check("discarded refresh does not replace visible history",
+                panel.rowCount() == 1 && !loadStatus.getText().contains("discarded refresh"));
         panel.pressReload();
         check("reload preserves existing rows", panel.rowCount() == 1
                 && loadStatus.getText().contains("lần tải trước"));
@@ -265,7 +312,8 @@ public final class UiPresentationVerify {
         CardOpRunner noIo = (operation, work, callback) -> {
             throw new AssertionError("Invalid input must not start card I/O");
         };
-        PersonalizePanel issuing = new PersonalizePanel(gateway, noIo, ignored -> { }, (ok, card) -> { });
+        PersonalizePanel issuing = new PersonalizePanel(gateway, noIo, new BackendClient("http://127.0.0.1:1"),
+                ignored -> { }, (ok, card) -> { });
         issuing.updateAvailability(true, false, null);
         PhotoPanel photos = new PhotoPanel(gateway, noIo, ignored -> { });
         photos.setEnabled(true, null);
@@ -291,7 +339,7 @@ public final class UiPresentationVerify {
         scroll.layout();
         int visibleErrors = 0;
         for (javafx.scene.Node node : content.lookupAll(".la-field-error")) {
-            if (node instanceof Label label && label.isVisible()) {
+            if (node instanceof Label label && label.isVisible() && !label.getText().isEmpty()) {
                 visibleErrors++;
                 javafx.scene.text.Text expected = new javafx.scene.text.Text(label.getText());
                 expected.setFont(label.getFont());
@@ -408,7 +456,7 @@ public final class UiPresentationVerify {
             panel.resetView();
             check("reset clears draft selection errors", !panel.hasDraft()
                     && panel.node().lookupAll(".la-field-error").stream()
-                            .noneMatch(javafx.scene.Node::isVisible));
+                            .allMatch(node -> ((javafx.scene.control.Label) node).getText().isEmpty()));
         } finally {
             java.nio.file.Files.deleteIfExists(valid);
             java.nio.file.Files.deleteIfExists(invalid);
@@ -556,7 +604,7 @@ public final class UiPresentationVerify {
         check("new PIN session clears every PIN and confirmation", fields(pins.node()).stream()
                 .allMatch(field -> field.getText().isEmpty()));
         check("new PIN session clears validation", pins.node().lookupAll(".la-field-error").stream()
-                .noneMatch(javafx.scene.Node::isVisible));
+                .allMatch(node -> ((Label) node).getText().isEmpty()));
         PhotoPanel photos = new PhotoPanel(gateway, noIo, ignored -> { });
         fields(photos.node()).forEach(field -> field.setText("1".repeat(8)));
         photos.resetView();
@@ -566,7 +614,8 @@ public final class UiPresentationVerify {
         profile.fillPin("1".repeat(6).toCharArray());
         profile.resetView("new card");
         check("profile reset clears PIN", fields(profile.node()).getFirst().getText().isEmpty());
-        PersonalizePanel issuing = new PersonalizePanel(gateway, noIo, ignored -> { }, (ok, card) -> { });
+        PersonalizePanel issuing = new PersonalizePanel(gateway, noIo, new BackendClient("http://127.0.0.1:1"),
+                ignored -> { }, (ok, card) -> { });
         fields(issuing.node()).forEach(field -> field.setText("1".repeat(8)));
         issuing.resetView();
         check("issuing reset clears PINs", fields(issuing.node()).stream()
@@ -576,7 +625,8 @@ public final class UiPresentationVerify {
     private static void uiReviewFixes() {
         VBox field = UiRows.field("Nhãn", new javafx.scene.control.TextField());
         Label empty = (Label) field.getChildren().getLast();
-        check("empty field error reserves no space", !empty.isManaged() && !empty.isVisible());
+        check("empty field error reserves space", empty.isManaged() && empty.isVisible()
+                && empty.getMinHeight() >= UiScale.FIELD_ERROR_HEIGHT);
 
         Label longError = UiLabels.fieldError();
         UiLabels.setFieldError(longError, "Mã sinh viên phải 8–10 ký tự chữ A–Z hoặc số 0–9.");

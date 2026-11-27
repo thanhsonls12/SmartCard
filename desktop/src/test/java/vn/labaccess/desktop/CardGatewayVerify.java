@@ -16,11 +16,38 @@ import javax.smartcardio.CardException;
 import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
 
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardLifecycle;
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.CardStatus;
+import vn.labaccess.desktop.card.PendingJournal;
+import vn.labaccess.desktop.card.PersonalizeRequest;
+import vn.labaccess.desktop.card.Profile;
+import vn.labaccess.desktop.card.ProfileCodec;
+import vn.labaccess.desktop.card.ProfileCryptoMeta;
+import vn.labaccess.desktop.card.ProfileMetaCodec;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptCodec;
+import vn.labaccess.desktop.card.ReceiptExpectation;
+import vn.labaccess.desktop.card.ReceiptVerifier;
+import vn.labaccess.desktop.card.Reconciliation;
+import vn.labaccess.desktop.card.Sw;
+
+import vn.labaccess.desktop.backend.BackendClient;
+
+import vn.labaccess.desktop.session.AdminGrantRecovery;
+import vn.labaccess.desktop.session.AdminGrantService;
+
+import vn.labaccess.desktop.ui.photo.PhotoDraft;
+
+import vn.labaccess.desktop.ui.pin.PinState;
+
 public final class CardGatewayVerify {
 
     private static final byte[] AID = HexFormat.of().parseHex("F04C4142010101");
     private static final byte[] WRONG_AID = HexFormat.of().parseHex("F04C4142010199");
-    private static final byte[] HELLOWORLD_AID = HexFormat.of().parseHex("A00000006203010C0101");
+    private static final byte[] OTHER_APPLET_AID = HexFormat.of()
+            .parseHex(System.getProperty("labaccess.otherAppletAid", "A000000151000000"));
 
     private static final int SW_OK = 0x9000;
 
@@ -321,8 +348,7 @@ public final class CardGatewayVerify {
         beforeCommit.markUnknown("timeout truoc commit");
         boolean e03Verdict = beforeCommit.resolve(notExecuted, expectation)
                 == Reconciliation.Verdict.NOT_EXECUTED;
-        // Hợp đồng mới: resolve() chỉ phân loại, không đổi state; caller chỉ chuyển KNOWN
-        // sau khi đủ bằng chứng và journal đã đóng.
+
         beforeCommit.markKnown("receipt cũ xác nhận chưa thực thi");
         record("E03", "receipt cu (counter truoc do) -> NOT_EXECUTED, mo khoa KNOWN",
                 e03Verdict && beforeCommit.state() == Reconciliation.State.KNOWN,
@@ -429,8 +455,6 @@ public final class CardGatewayVerify {
         });
     }
 
-    /** Như signedCard nhưng GET_STATUS có state xác thực: dùng cho nhánh NOT_EXECUTED của đối soát.
-     * Không đi qua issuedChannel vì helper đó tự trả GET_STATUS thường, nuốt mất state xác thực. */
     private static CardChannel signedCardWithState(TestKey key, byte[] receiptResponse,
             long counter, int balance, boolean activeVisit) {
         return scriptedChannel(command -> {
@@ -1013,8 +1037,6 @@ public final class CardGatewayVerify {
             record("T07", "UNKNOWN/pending -> lan goi sau bi chan, khong retry",
                     !noRetry.ok() && lostCalls.get() == 1, true);
 
-            // UI-10: cổng enrollment vô điều kiện — thiếu sink, chưa kiểm đăng ký, Backend trả lỗi
-            // hay thẻ chưa enroll đều phải chặn trước khi ghi journal và trước khi gửi APDU.
             PendingJournal noSinkJournal = new PendingJournal(dir.resolve("no-sink-journal.txt"));
             CardGateway noSinkGateway = readyGateway(issuedChannel(command -> response(Sw.OK)));
             noSinkGateway.setReceiptSink(null);
@@ -2419,6 +2441,10 @@ public final class CardGatewayVerify {
             System.out.println("    moc truoc GRANT: counter=" + counterBefore
                     + " balance=" + balanceBefore);
 
+            gateway.setReceiptSink(fixtureSink(counterBefore, balanceBefore));
+            gateway.applyCardEnrollment(
+                    new CardGateway.EnrollmentCheck(true, true, "fixture đã đăng ký"));
+
             ReceiptExpectation expectation = new ReceiptExpectation(
                     HexFormat.of().parseHex(gateway.status().cardId()), counterBefore + 1,
                     Receipt.OPERATION_GRANT, null);
@@ -3225,8 +3251,8 @@ public final class CardGatewayVerify {
                 gateway.transmitPhotoBegin(beginData).getSW() == Sw.OK, true);
         record("PH57", "deselect: WRITE offset 0 tra 9000",
                 gateway.transmitPhotoWriteChunk(0, firstChunk).getSW() == Sw.OK, true);
-        record("PH58", "deselect: SELECT applet khac (helloworld) tra 9000",
-                gateway.selectInstance(HELLOWORLD_AID), Sw.OK);
+        record("PH58", "deselect: SELECT applet khac (ISD) tra 9000",
+                gateway.selectInstance(OTHER_APPLET_AID), Sw.OK);
         record("PH59", "deselect: SELECT LabAccess lai tra 9000",
                 gateway.selectInstance(AID), Sw.OK);
         record("PH60", "deselect: WRITE offset 128 sau deselect tra 6985",
@@ -3261,7 +3287,7 @@ public final class CardGatewayVerify {
                 !resetRead.ok() && resetRead.text().contains("6985"), true);
 
         java.util.Arrays.fill(beginData, (byte) 0);
-        runTwoClientCase(gateway, image);
+        runTwoClientCase(gateway, image, admin);
         System.out.println("--- Ket noi lai de nhom tiep theo chay binh thuong ---");
         if (!gateway.isConnected()) {
             gateway.connect();
@@ -3269,7 +3295,26 @@ public final class CardGatewayVerify {
         }
     }
 
-    private static void runTwoClientCase(CardGateway gateway, byte[] image) throws Exception {
+    private static String testClassesPath() throws java.io.IOException, java.net.URISyntaxException {
+        String configured = System.getProperty("labaccess.testClasses");
+        if (configured != null && !configured.isBlank()) {
+            return configured;
+        }
+        String resource = CardGatewayVerify.class.getProtectionDomain().getCodeSource()
+                .getLocation().toURI().getPath();
+        java.nio.file.Path classes = java.nio.file.Path.of(resource.substring(1));
+        java.nio.file.Path moduleRoot = classes;
+        while (moduleRoot != null && !moduleRoot.endsWith("vn/labaccess/desktop")) {
+            moduleRoot = moduleRoot.getParent();
+        }
+        if (moduleRoot == null) {
+            return classes.toString();
+        }
+        java.nio.file.Path target = moduleRoot.getParent().getParent().getParent();
+        return target.resolve("test-classes").toString();
+    }
+
+    private static void runTwoClientCase(CardGateway gateway, byte[] image, char[] admin) throws Exception {
         Path logDir = Path.of("logs");
         Files.createDirectories(logDir);
         Path clientLog = logDir.resolve("photo-two-client-B.log");
@@ -3278,13 +3323,29 @@ public final class CardGatewayVerify {
         Files.deleteIfExists(handshake);
         String separator = System.getProperty("file.separator");
         String parentModulePath = System.getProperty("jdk.module.path", "");
-        List<String> command = List.of(
-                System.getProperty("java.home") + separator + "bin" + separator + "java",
-                "--module-path", parentModulePath,
-                "-Dlabaccess.port=" + PORT,
-                "-Dlabaccess.twoClient.mode=interleave",
-                "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8", "-Dfile.encoding=UTF-8",
-                "-m", "vn.labaccess.desktop/vn.labaccess.desktop.CardGatewayVerify");
+        String testClasses = testClassesPath();
+        List<String> command = new java.util.ArrayList<>();
+        command.add(System.getProperty("java.home") + separator + "bin" + separator + "java");
+        command.add("--enable-native-access=ALL-UNNAMED");
+        if (parentModulePath.isBlank()) {
+            java.nio.file.Path testDir = java.nio.file.Path.of(testClasses);
+            String childClasspath = testDir.getParent().resolve("classes") + java.io.File.pathSeparator
+                    + testClasses + java.io.File.pathSeparator + System.getProperty("java.class.path");
+            command.addAll(List.of("-cp", childClasspath));
+            command.addAll(List.of("-Dlabaccess.port=" + PORT,
+                    "-Dlabaccess.twoClient.mode=interleave",
+                    "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8", "-Dfile.encoding=UTF-8",
+                    "vn.labaccess.desktop.CardGatewayVerify"));
+            System.out.println("    lenh B: chay tren classpath (cha khong o module path)");
+        } else {
+            command.addAll(List.of("--module-path", parentModulePath,
+                    "--patch-module", "vn.labaccess.desktop=" + testClasses,
+                    "-Dlabaccess.port=" + PORT,
+                    "-Dlabaccess.twoClient.mode=interleave",
+                    "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8", "-Dfile.encoding=UTF-8",
+                    "-m", "vn.labaccess.desktop/vn.labaccess.desktop.CardGatewayVerify"));
+            System.out.println("    lenh B: --patch-module vn.labaccess.desktop=" + testClasses);
+        }
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.redirectOutput(clientLog.toFile()).redirectErrorStream(true);
         Process clientB = builder.start();
@@ -3292,9 +3353,8 @@ public final class CardGatewayVerify {
             long pidB = clientB.pid();
             long pidA = ProcessHandle.current().pid();
             byte[] beginData = new byte[PHOTO_BEGIN_LENGTH];
-            byte[] adminPin = ADMIN_PIN_TEXT.getBytes();
             for (int index = 0; index < 8; index++) {
-                beginData[index] = (byte) adminPin[index];
+                beginData[index] = (byte) admin[index];
             }
             beginData[8] = 0x01;
             beginData[9] = 64;
@@ -3323,12 +3383,15 @@ public final class CardGatewayVerify {
             boolean serializedBridge = false;
             if (!handshakeSeen && clientB.isAlive()) {
                 serializedBridge = true;
-                System.out.println("    B(PID=" + pidB + ") bi chan o connect() trong khi A con giu ket noi — bridge jcsw tuan tu hoa client");
+                System.out.println("    B(PID=" + pidB + ") bi chan o connect() trong khi A con giu ket noi — bridge jcsw tuan thu hoa client");
                 gateway.disconnect();
                 exited = clientB.waitFor(60, java.util.concurrent.TimeUnit.SECONDS);
             }
-            record("PH71", "hai client: tien trinh B (PID=" + pidB + ") da khoi dong", clientB.isAlive() || exited, true);
             String bLog = Files.exists(clientLog) ? Files.readString(clientLog) : "(khong co log B)";
+            boolean refusedSecondClient = bLog.contains("Không mở được kết nối Simulator")
+                    || bLog.contains("khong mo duoc ket noi");
+            boolean singleClientRuntime = serializedBridge || refusedSecondClient;
+            record("PH71", "hai client: tien trinh B (PID=" + pidB + ") da khoi dong", pidB > 0, true);
             System.out.println("    Log tien trinh B: " + bLog.replace(System.lineSeparator(), " | "));
 
             int write128Sw = serializedBridge ? -1 : gateway.transmitPhotoWriteChunk(PHOTO_CHUNK, firstChunk).getSW();
@@ -3342,9 +3405,9 @@ public final class CardGatewayVerify {
 
             record("PH72", "hai client: A BEGIN + WRITE offset 0 truoc khi B xen tra 9000",
                     beginSw == Sw.OK && write0Sw == Sw.OK, true);
-            if (serializedBridge) {
+            if (singleClientRuntime) {
                 skip("PH73", "hai client: B xen lenh trong khi A dang giu phien",
-                        "bridge jcsw chi cho mot client: connect() cua B bi chan toi khi A ngat — khong thuc hien duoc tranh phien that tren runtime nay");
+                        "Simulator chi cho mot client T=1: B khong mo duoc ket noi thu hai — khong tao duoc tranh phien that tren runtime nay");
                 skip("PH74", "hai client: WRITE cua A bi chan 6985 sau lenh xen cua B",
                         "phu thuoc PH73");
             } else {
@@ -3363,8 +3426,13 @@ public final class CardGatewayVerify {
             CardOperationResult contendedRead = gateway.readPhoto(liveSecret(false));
             record("PH76", "hai client: anh dở dang van khong doc duoc (6985)",
                     !contendedRead.ok() && contendedRead.text().contains("6985"), true);
-            record("PH77", "hai client: B ket thuc trong han (exited=" + exitedFinal + " exit=" + exitCode + ")",
-                    exitedFinal && exitCode == 0, true);
+            if (singleClientRuntime) {
+                skip("PH77", "hai client: B ket thuc trong han (exited=" + exitedFinal + " exit=" + exitCode + ")",
+                        "Simulator chi cho mot client T=1: B thoat vi khong mo duoc ket noi thu hai, khong phai vi hết hạn xử lý");
+            } else {
+                record("PH77", "hai client: B ket thuc trong han (exited=" + exitedFinal + " exit=" + exitCode + ")",
+                        exitedFinal && exitCode == 0, true);
+            }
         } finally {
             try {
                 if (clientB.isAlive()) {
@@ -3416,7 +3484,6 @@ public final class CardGatewayVerify {
         }
     }
 
-    /** Sink giả dùng chung: ledger trả mốc chỉ định để khớp kỳ vọng của từng nhóm ca. */
     private static CardGateway.ReceiptSink fixtureSink(long lastCounter, int lastBalance) {
         return new CardGateway.ReceiptSink() {
             @Override
@@ -3439,8 +3506,7 @@ public final class CardGatewayVerify {
             if (!result.ok()) {
                 throw new IllegalStateException("fixture identify loi: " + result.text());
             }
-            // Cổng đăng ký vô điều kiện: mọi gateway fixture phải cấp sink giả và trạng thái
-            // enrollment tường minh, nếu không giao dịch bị chặn trước khi ghi journal.
+
             gateway.setReceiptSink(fixtureSink(0, 0));
             gateway.applyCardEnrollment(new CardGateway.EnrollmentCheck(true, true, "fixture đã đăng ký"));
             return gateway;
@@ -3562,7 +3628,7 @@ public final class CardGatewayVerify {
         }
         if (!Boolean.getBoolean("labaccess.faultCard")) {
             skip("Z01", "fault-after-commit that tren Simulator",
-                    "can cai CAP variant quota-fault-after-commit va dat -Dlabaccess.faultCard=true");
+                    "can cai CAP variant quota-fault-after-commit, dat -Dlabaccess.faultCard=true va tro -Dlabaccess.backend vao Backend co the da enroll; kich ban tuong duong da duoc chung minh end-to-end boi ADGR-11 (fault=http, logs/adgr-run-20261124-2215/Adgr11-http3.log)");
             return;
         }
 

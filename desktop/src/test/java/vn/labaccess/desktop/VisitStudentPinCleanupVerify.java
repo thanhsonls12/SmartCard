@@ -12,6 +12,14 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.smartcardio.CardException;
 import javafx.application.Platform;
 
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.card.PersonalizeRequest;
+import vn.labaccess.desktop.card.Receipt;
+import vn.labaccess.desktop.card.ReceiptExpectation;
+
+import vn.labaccess.desktop.ui.transaction.VisitPanel;
+
 public final class VisitStudentPinCleanupVerify {
 
     private enum Mode {

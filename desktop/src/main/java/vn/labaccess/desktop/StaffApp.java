@@ -1,5 +1,12 @@
 package vn.labaccess.desktop;
 
+import vn.labaccess.desktop.card.CardOperationResult;
+import vn.labaccess.desktop.session.CardSession;
+import vn.labaccess.desktop.ui.shared.CardTaskRunner;
+import vn.labaccess.desktop.ui.staff.StaffWorkspace;
+import vn.labaccess.desktop.ui.foundation.UiScale;
+import vn.labaccess.desktop.ui.foundation.UiTheme;
+
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 import javafx.application.Application;

@@ -13,6 +13,13 @@ import javafx.application.Platform;
 import javafx.scene.control.Button;
 import javafx.scene.control.PasswordField;
 
+import vn.labaccess.desktop.card.CardGateway;
+import vn.labaccess.desktop.card.CardLifecycle;
+import vn.labaccess.desktop.card.CardStatus;
+import vn.labaccess.desktop.card.PersonalizeRequest;
+
+import vn.labaccess.desktop.ui.transaction.TransactionPanel;
+
 public final class TransactionPinBoundaryVerify {
 
     private static int checks;
