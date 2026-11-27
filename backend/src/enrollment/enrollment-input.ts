@@ -8,6 +8,12 @@ const STUDENT_ID_MAX_LENGTH = 10;
 const STUDENT_ID_INVALID_CHARACTERS = /[^A-Za-z0-9]/;
 export const SIGNATURE_MIN_BYTES = 8;
 export const SIGNATURE_MAX_BYTES = 72;
+const CLASS_CODE_MAX_LENGTH = 64;
+const PROFILE_CLASS_CODE_PATTERN = /^[A-Z0-9]{5,7}$/;
+const DISPLAY_NAME_MIN_BYTES = 1;
+const DISPLAY_NAME_MAX_BYTES = 96;
+const CONTROL_CHARACTER_MAX_CODE_POINT = 0x1f;
+const DELETE_CODE_POINT = 0x7f;
 
 export function isUuid(value: unknown): value is string {
   return typeof value === 'string' && UUID_PATTERN.test(value);
@@ -50,6 +56,79 @@ export function parseStudentId(value: unknown): string {
     throw new BadRequestException('studentId must be 8..10 ASCII letters or digits');
   }
   return value.toUpperCase();
+}
+
+export function parseOptionalClassCode(value: unknown): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    throw new BadRequestException('classCode must be a string when provided');
+  }
+  const classCode = value.trim();
+  if (
+    classCode.length === 0 ||
+    Array.from(classCode).length > CLASS_CODE_MAX_LENGTH
+  ) {
+    throw new BadRequestException(
+      `classCode must contain 1..${CLASS_CODE_MAX_LENGTH} characters after trimming`,
+    );
+  }
+  if (classCode.includes('\0')) {
+    throw new BadRequestException('classCode must not contain a null character');
+  }
+  return classCode;
+}
+
+export function parseProfileClassCode(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new BadRequestException('classCode is required');
+  }
+  const classCode = value.trim().toUpperCase();
+  if (!PROFILE_CLASS_CODE_PATTERN.test(classCode)) {
+    throw new BadRequestException('classCode must be 5..7 characters A-Z0-9 after trimming');
+  }
+  return classCode;
+}
+
+export function parseProfileDisplayName(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new BadRequestException('displayName is required');
+  }
+  const displayName = value.trim();
+  if (hasControlCharacter(displayName)) {
+    throw new BadRequestException('displayName must not contain control characters');
+  }
+  const bytes = Buffer.byteLength(displayName, 'utf8');
+  if (bytes < DISPLAY_NAME_MIN_BYTES || bytes > DISPLAY_NAME_MAX_BYTES) {
+    throw new BadRequestException(
+      `displayName must be ${DISPLAY_NAME_MIN_BYTES}..${DISPLAY_NAME_MAX_BYTES} UTF-8 bytes after trimming`,
+    );
+  }
+  return displayName;
+}
+
+function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (codePoint <= CONTROL_CHARACTER_MAX_CODE_POINT || codePoint === DELETE_CODE_POINT) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function majorFromStudentId(studentId: string): string | null {
+  switch (studentId.slice(0, 2).toUpperCase()) {
+    case 'CT':
+      return 'Công nghệ thông tin';
+    case 'AT':
+      return 'An toàn thông tin';
+    case 'DT':
+      return 'Điện tử viễn thông';
+    default:
+      return null;
+  }
 }
 
 export function parseUuid(value: unknown, field: string): string {

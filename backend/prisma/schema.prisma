@@ -8,12 +8,16 @@ datasource db {
 }
 
 model AdminSession {
-  id        String    @id @default(uuid()) @db.Uuid
-  createdAt DateTime  @default(now()) @db.Timestamptz(6)
-  expiresAt DateTime  @db.Timestamptz(6)
-  revokedAt DateTime? @db.Timestamptz(6)
+  id          String    @id @default(uuid()) @db.Uuid
+  nonce       Bytes     @db.ByteA
+  cardId      Bytes?    @db.ByteA
+  activatedAt DateTime? @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
+  expiresAt   DateTime  @db.Timestamptz(6)
+  revokedAt   DateTime? @db.Timestamptz(6)
 
   enrollmentChallenges EnrollmentChallenge[]
+  profileUpdates       ProfileUpdate[]
 
   @@map("admin_sessions")
 }
@@ -23,6 +27,7 @@ model EnrollmentChallenge {
   nonce          Bytes     @db.ByteA
   cardId         Bytes     @db.ByteA
   studentId      String    @db.VarChar(64)
+  classCode      String?   @db.VarChar(64)
   publicKey      Bytes     @db.ByteA
   publicKeyHash  Bytes     @db.ByteA
   adminSessionId String    @db.Uuid
@@ -49,14 +54,50 @@ model Student {
   id         String   @id @default(uuid()) @db.Uuid
   cardId     Bytes    @unique @db.ByteA
   studentId  String   @db.VarChar(64)
+  major      String?  @db.VarChar(64)
+  classCode  String?  @db.VarChar(64)
   publicKey  Bytes    @db.ByteA
   enrolledAt DateTime @default(now()) @db.Timestamptz(6)
 
-  ledger       CardLedger?
-  transactions Transaction[]
+  ledger         CardLedger?
+  transactions   Transaction[]
+  profileUpdates ProfileUpdate[]
 
   @@index([studentId])
   @@map("students")
+}
+
+enum ProfileUpdateState {
+  PENDING
+  COMPLETED
+  EXPIRED
+  SUPERSEDED
+}
+
+model ProfileUpdate {
+  id              String              @id @default(uuid()) @db.Uuid
+  cardId          Bytes               @db.ByteA
+  studentId       String              @db.VarChar(64)
+  displayName     String              @db.VarChar(96)
+  classCode       String?             @db.VarChar(64)
+  expectedVersion Bytes               @db.ByteA
+  nonce           Bytes               @db.ByteA
+  adminSessionId  String              @db.Uuid
+  state           ProfileUpdateState  @default(PENDING)
+  createdAt       DateTime            @default(now()) @db.Timestamptz(6)
+  expiresAt       DateTime            @db.Timestamptz(6)
+  completedAt     DateTime?           @db.Timestamptz(6)
+  resultMajor     String?             @db.VarChar(64)
+  resultStudentId String?             @db.VarChar(64)
+  resultClassCode String?             @db.VarChar(64)
+
+  student      Student      @relation(fields: [cardId], references: [cardId], onDelete: Restrict, onUpdate: Cascade)
+  adminSession AdminSession @relation(fields: [adminSessionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([cardId])
+  @@index([adminSessionId])
+  @@index([expiresAt])
+  @@map("profile_updates")
 }
 
 model CardLedger {

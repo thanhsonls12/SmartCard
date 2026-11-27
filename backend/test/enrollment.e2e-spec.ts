@@ -74,19 +74,19 @@ describe('Enrollment (e2e)', () => {
     return response.body.sessionId;
   }
 
-  function createChallenge(sessionId: string, cardIdHex: string, card: CardKey) {
+  function createChallenge(sessionId: string, cardIdHex: string, card: CardKey, extras: Record<string, unknown> = {}) {
     cardIds.push(cardIdHex);
     return request(app.getHttpServer())
       .post('/enrollments/challenges')
       .set('x-admin-session', sessionId)
-      .send({ cardId: cardIdHex, studentId: STUDENT_ID.toLowerCase(), publicKey: card.pointHex });
+      .send({ cardId: cardIdHex, studentId: STUDENT_ID.toLowerCase(), publicKey: card.pointHex, ...extras });
   }
 
-  function completeChallenge(sessionId: string, challengeId: string, signature: string) {
+  function completeChallenge(sessionId: string, challengeId: string, signature: string, extras: Record<string, unknown> = {}) {
     return request(app.getHttpServer())
       .post('/enrollments/complete')
       .set('x-admin-session', sessionId)
-      .send({ challengeId, signature });
+      .send({ challengeId, signature, ...extras });
   }
 
   async function snapshotEnrollment(label: string, cardIdHex: string) {
@@ -123,6 +123,7 @@ describe('Enrollment (e2e)', () => {
 
     const challengeResponse = await createChallenge(sessionId, cardIdHex, card).expect(201);
     const challenge = challengeResponse.body;
+    expect(Object.keys(challenge).sort()).toEqual(['challengeId', 'expiresAt', 'nonce']);
     expect(challenge.nonce).toMatch(/^[0-9a-f]{64}$/);
     const challengeTtlMs = new Date(challenge.expiresAt).getTime() - Date.now();
     expect(challengeTtlMs).toBeGreaterThan(4 * 60 * 1000);
@@ -133,11 +134,14 @@ describe('Enrollment (e2e)', () => {
 
     expect(completeResponse.body.cardId).toBe(cardIdHex);
     expect(completeResponse.body.studentId).toBe(STUDENT_ID);
+    expect(Object.keys(completeResponse.body).sort()).toEqual(['cardId', 'enrolledAt', 'studentId']);
     expect(Number.isNaN(Date.parse(completeResponse.body.enrolledAt))).toBe(false);
 
     const student = await database.student.findUnique({ where: { cardId: bytesOf(cardIdHex) } });
     expect(student).not.toBeNull();
     expect(student?.studentId).toBe(STUDENT_ID);
+    expect(student?.major).toBeNull();
+    expect(student?.classCode).toBeNull();
     expect(Buffer.from(student?.publicKey ?? []).toString('hex')).toBe(card.pointHex);
 
     const ledger = await database.cardLedger.findUnique({ where: { cardId: bytesOf(cardIdHex) } });
@@ -148,9 +152,122 @@ describe('Enrollment (e2e)', () => {
 
     const challengeRow = await database.enrollmentChallenge.findUnique({ where: { id: challenge.challengeId } });
     expect(challengeRow?.usedAt).toBeInstanceOf(Date);
+    expect(challengeRow?.classCode).toBeNull();
     expect(Buffer.from(challengeRow?.publicKeyHash ?? []).toString('hex')).toBe(
       createHash('sha256').update(Buffer.from(card.pointHex, 'hex')).digest('hex'),
     );
+  });
+
+  it('derives majors and persists only the class code saved on each challenge', async () => {
+    const sessionId = await issueSession();
+    const cases = [
+      {
+        studentId: 'CT2026001',
+        classCode: '  CT2026-A  ',
+        storedClassCode: 'CT2026-A',
+        major: 'Công nghệ thông tin',
+        completedClassCode: 'AT-TAMPER',
+      },
+      { studentId: 'AT2026001', major: 'An toàn thông tin' },
+      {
+        studentId: 'DT2026001',
+        classCode: 'DT2026-01',
+        storedClassCode: 'DT2026-01',
+        major: 'Điện tử viễn thông',
+      },
+      { studentId: 'ST2026001', major: null },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const cardIdHex = randomBytes(8).toString('hex');
+      const card = newCardKey();
+      const challengeResponse = await createChallenge(
+        sessionId,
+        cardIdHex,
+        card,
+        {
+          studentId: testCase.studentId.toLowerCase(),
+          ...(testCase.classCode === undefined
+            ? {}
+            : { classCode: testCase.classCode }),
+        },
+      ).expect(201);
+      const challenge = await database.enrollmentChallenge.findUnique({
+        where: { id: challengeResponse.body.challengeId },
+      });
+      expect(challenge?.studentId).toBe(testCase.studentId);
+      expect(challenge?.classCode).toBe(testCase.storedClassCode ?? null);
+
+      const signature = signChallenge(
+        card.privateKey,
+        cardIdHex,
+        card.pointHex,
+        challengeResponse.body.nonce,
+      );
+      const completeResponse = await completeChallenge(
+        sessionId,
+        challengeResponse.body.challengeId,
+        signature,
+        testCase.completedClassCode === undefined
+          ? {}
+          : { classCode: testCase.completedClassCode, studentId: 'AT2026999' },
+      ).expect(201);
+      expect(completeResponse.body.studentId).toBe(testCase.studentId);
+      const publicKeyResponse = await request(app.getHttpServer())
+        .get(`/enrollments/cards/${cardIdHex}`)
+        .expect(200);
+      expect(publicKeyResponse.body).toEqual({ cardId: cardIdHex, publicKey: card.pointHex });
+
+      const student = await database.student.findUnique({
+        where: { cardId: bytesOf(cardIdHex) },
+      });
+      expect(student?.studentId).toBe(testCase.studentId);
+      expect(student?.major).toBe(testCase.major);
+      expect(student?.classCode).toBe(testCase.storedClassCode ?? null);
+      expect(Buffer.from(student?.publicKey ?? []).toString('hex')).toBe(
+        card.pointHex,
+      );
+      const ledger = await database.cardLedger.findUnique({
+        where: { cardId: bytesOf(cardIdHex) },
+      });
+      expect(ledger?.lastCounter).toBe(0n);
+      expect(ledger?.lastBalance).toBe(0n);
+      expect(ledger?.activeVisitId).toBeNull();
+      await snapshotEnrollment(`profile-${index}-enrolled`, cardIdHex);
+    }
+  });
+
+  it('rejects malformed optional class codes without creating challenges', async () => {
+    const sessionId = await issueSession();
+    const invalidValues: unknown[] = [
+      null,
+      123,
+      true,
+      {},
+      [],
+      '   ',
+      'A\0B',
+      'A'.repeat(65),
+    ];
+
+    for (const value of invalidValues) {
+      const cardIdHex = randomBytes(8).toString('hex');
+      const response = await createChallenge(
+        sessionId,
+        cardIdHex,
+        newCardKey(),
+        { classCode: value },
+      ).expect(400);
+      expect(response.body.message).toContain('classCode');
+      expect(
+        await database.enrollmentChallenge.count({
+          where: { cardId: bytesOf(cardIdHex) },
+        }),
+      ).toBe(0);
+      expect(
+        await database.student.count({ where: { cardId: bytesOf(cardIdHex) } }),
+      ).toBe(0);
+    }
   });
 
   it('rejects a signature over a different nonce without enrolling the card', async () => {

@@ -2,6 +2,18 @@
 
 NestJS + Prisma/PostgreSQL làm sổ đối chiếu mỏng cho Applet và JavaFX. Thẻ vẫn là nguồn sự thật về balance/counter (INV-1); backend chỉ lưu và xác minh.
 
+## Tổ chức mã nguồn
+
+| Thư mục | Trách nhiệm |
+|---|---|
+| `src/database/` | Kết nối PostgreSQL qua Prisma và chuyển đổi dữ liệu byte |
+| `src/enrollment/` | Phiên quản trị thẻ, challenge và đăng ký thẻ |
+| `src/profile/` | Challenge và xác nhận cập nhật hồ sơ |
+| `src/receipts/` | Xác minh receipt, đối soát ledger và truy vấn lịch sử |
+| `test/` | Kiểm thử API qua `AppModule` |
+
+Kiểm thử đơn vị nằm cạnh source tương ứng; Prisma client sinh tự động ở `src/generated/prisma/`.
+
 ## Yêu cầu
 
 - Node.js 24 (NestJS 12 và Prisma 7 yêu cầu Node ≥ 20.19 / 22.12 / 24)

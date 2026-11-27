@@ -9,5 +9,6 @@ import { EnrollmentService } from './enrollment.service.js';
   imports: [DatabaseModule],
   controllers: [AdminSessionController, EnrollmentController],
   providers: [AdminSessionService, EnrollmentService],
+  exports: [AdminSessionService],
 })
 export class EnrollmentModule {}

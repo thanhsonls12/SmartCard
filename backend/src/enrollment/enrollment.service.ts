@@ -1,10 +1,13 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException, UnprocessableEntityException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import { Prisma } from '../generated/prisma/client.js';
 import { DatabaseService } from '../database/database.service.js';
+import { toStoredBytes } from '../database/stored-bytes.js';
 import { requireP256PublicKey, sha256PublicKey, verifyEnrollmentSignature } from './enrollment-crypto.js';
-import { parseBody, parseHexBytes, parseSignatureHex, parseStudentId, parseUuid } from './enrollment-input.js';
+import { parseBody, parseHexBytes, parseOptionalClassCode, parseSignatureHex, parseStudentId, parseUuid } from './enrollment-input.js';
 import { buildEnrollmentMessage, CARD_ID_BYTES, NONCE_BYTES, PUBLIC_KEY_BYTES } from './enrollment-message.js';
+import { recordEnrollment, type EnrollmentResult } from './record-enrollment.js';
+
+export type { EnrollmentResult } from './record-enrollment.js';
 
 export interface EnrollmentChallengeResponse {
   challengeId: string;
@@ -17,20 +20,7 @@ export interface EnrolledCard {
   publicKey: string;
 }
 
-export interface EnrollmentResult {
-  cardId: string;
-  studentId: string;
-  enrolledAt: Date;
-}
-
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
-const UNIQUE_VIOLATION_CODE = 'P2002';
-
-function toStoredBytes(value: Buffer): Uint8Array<ArrayBuffer> {
-  const bytes = new Uint8Array(value.byteLength);
-  bytes.set(value);
-  return bytes;
-}
 
 @Injectable()
 export class EnrollmentService {
@@ -58,6 +48,7 @@ export class EnrollmentService {
     const payload = parseBody(body);
     const cardId = parseHexBytes(payload['cardId'], CARD_ID_BYTES, 'cardId');
     const studentId = parseStudentId(payload['studentId']);
+    const classCode = parseOptionalClassCode(payload['classCode']);
     const publicKey = parseHexBytes(payload['publicKey'], PUBLIC_KEY_BYTES, 'publicKey');
     this.requireEnrollablePublicKey(publicKey);
 
@@ -73,6 +64,7 @@ export class EnrollmentService {
         nonce: toStoredBytes(nonce),
         cardId: toStoredBytes(cardId),
         studentId,
+        classCode: classCode ?? null,
         publicKey: toStoredBytes(publicKey),
         publicKeyHash: toStoredBytes(sha256PublicKey(publicKey)),
         adminSessionId,
@@ -96,6 +88,7 @@ export class EnrollmentService {
         nonce: true,
         cardId: true,
         studentId: true,
+        classCode: true,
         publicKey: true,
         publicKeyHash: true,
         adminSessionId: true,
@@ -129,32 +122,7 @@ export class EnrollmentService {
       throw new UnprocessableEntityException('enrollment signature does not verify');
     }
 
-    try {
-      return await this.database.$transaction(async (transaction) => {
-        const consumed = await transaction.enrollmentChallenge.updateMany({
-          where: { id: challenge.id, usedAt: null, expiresAt: { gt: new Date() } },
-          data: { usedAt: new Date() },
-        });
-        if (consumed.count !== 1) {
-          throw new ConflictException('enrollment challenge is no longer usable');
-        }
-
-        const student = await transaction.student.create({
-          data: { cardId: toStoredBytes(cardId), studentId: challenge.studentId, publicKey: toStoredBytes(publicKey) },
-          select: { enrolledAt: true },
-        });
-        await transaction.cardLedger.create({
-          data: { cardId: toStoredBytes(cardId), lastCounter: 0n, lastBalance: 0n, activeVisitId: null },
-        });
-
-        return { cardId: cardId.toString('hex'), studentId: challenge.studentId, enrolledAt: student.enrolledAt };
-      });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === UNIQUE_VIOLATION_CODE) {
-        throw new ConflictException('cardId is already enrolled');
-      }
-      throw error;
-    }
+    return recordEnrollment(this.database, challenge, cardId, publicKey);
   }
 
   private requireEnrollablePublicKey(publicKey: Buffer): void {

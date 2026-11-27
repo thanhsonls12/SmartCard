@@ -56,6 +56,7 @@ import vn.labaccess.desktop.ui.pin.StudentPinUnblockPanel;
 
 import vn.labaccess.desktop.ui.receipt.ReceiptPanel;
 
+import vn.labaccess.desktop.ui.profile.ProfileEditPanel;
 
 
 import vn.labaccess.desktop.ui.transaction.GrantPanel;
@@ -67,6 +68,7 @@ public final class StaffWorkspace {
     private static final int ISSUANCE = 2;
     private static final int ENROLLMENT = 3;
     private static final int PHOTOS = 4;
+    private static final int PROFILE_EDIT = 5;
     private static final String CLOSING = "Đang đóng cửa sổ Staff.";
     private final CardSession session;
     private final CardTaskRunner tasks;
@@ -76,6 +78,7 @@ public final class StaffWorkspace {
     private final PersonalizePanel personalize;
     private final EnrollmentPanel enrollment;
     private final PhotoUploadPanel photos;
+    private final ProfileEditPanel profileEdit;
     private final ReceiptPanel receipts;
     private final HistoryPanel history;
     private final SystemConnectionPanel system;
@@ -116,6 +119,7 @@ public final class StaffWorkspace {
                 () -> { }, () -> showGrantEffects()));
         unblock = new StudentPinUnblockPanel(gateway, cardOps, this::log, outcome -> refresh());
         photos = new PhotoUploadPanel(gateway, cardOps, this::log);
+        profileEdit = new ProfileEditPanel(gateway, session.backend(), backendOps, this::log);
         enrollment = new EnrollmentPanel(gateway, backendOps, session.backend(), this::log, this::enrollmentFinished);
         personalize = new PersonalizePanel(gateway, cardOps, session.backend(), this::log, (ok, issued) -> {
             session.invalidateSnapshot();
@@ -150,7 +154,8 @@ public final class StaffWorkspace {
                 tab("Mở khóa PIN", UiSection.of("Mở khóa PIN sinh viên", unblock.node(), unblock.feedbackNode())),
                 tab("Phát hành thẻ", personalize.node()),
                 tab("Đăng ký thẻ", enrollment.node()),
-                tab("Ảnh", photos.node()));
+                tab("Ảnh", photos.node()),
+                tab("Sửa hồ sơ", profileEdit.node()));
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         tabs.getStyleClass().add("la-tabs");
         tabs.setMinHeight(260);
@@ -342,6 +347,7 @@ public final class StaffWorkspace {
                 awaitingReadCard = null;
             }
             photos.onCard(current);
+            profileEdit.onCard(current);
             history.onCard(current);
             enrollment.onCard(current);
             unblock.resetFeedback();
@@ -353,6 +359,7 @@ public final class StaffWorkspace {
         awaitingReadCard = null;
         history.discardRefresh();
         photos.resetView();
+        profileEdit.resetView();
         history.onCard(null);
         enrollment.resetView();
         personalize.resetView();
@@ -364,6 +371,7 @@ public final class StaffWorkspace {
         grants.clearInputs();
         unblock.clearInputs();
         photos.clearInputs();
+        profileEdit.clearInputs();
         personalize.clearInputs();
         enrollment.clearInputs();
     }
@@ -456,6 +464,7 @@ public final class StaffWorkspace {
         grants.applyLock(busy, grantWhy);
         unblock.setEnabled(mutation == null);
         photos.setEnabled(mutation == null, mutation);
+        profileEdit.setEnabled(mutation == null, mutation);
         String issuance = base != null ? base : journalWhy != null ? journalWhy
                 : issued ? "thẻ đã phát hành — không phát hành lại" : null;
         personalize.updateAvailability(issuance == null, !busy && gateway.isConnected(), issuance);
@@ -511,6 +520,8 @@ public final class StaffWorkspace {
         grants.markPrimary(primary);
         personalize.setIssuePrimary(tabs.getSelectionModel().getSelectedIndex() == ISSUANCE && issuance == null);
         photos.setUploadPrimary(tabs.getSelectionModel().getSelectedIndex() == PHOTOS && mutation == null);
+        profileEdit.setSavePrimary(tabs.getSelectionModel().getSelectedIndex() == PROFILE_EDIT
+                && mutation == null);
         String next = recoveryProblem != null ? recoveryProblem
                 : loaded.present() ? receipts.pendingOperationReason() != null ? receipts.pendingOperationReason()
                 : loaded.valid() && loaded.status() == PendingJournal.Status.PENDING
@@ -534,6 +545,7 @@ public final class StaffWorkspace {
         grants.applyLock(true, CLOSING);
         unblock.setEnabled(false);
         photos.setEnabled(false, CLOSING);
+        profileEdit.setEnabled(false, CLOSING);
         personalize.updateAvailability(false, false, CLOSING);
         enrollment.setEnabled(false, CLOSING);
         history.setEnabled(false, CLOSING);
