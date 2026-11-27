@@ -6,8 +6,9 @@ import javacard.framework.Util;
 
 final class CardState {
 
-    private static final short PROFILE_CIPHERTEXT_MAX = (short) 160;
-    private static final short PROFILE_PLAINTEXT_MAX = (short) 144;
+    private static final short PROFILE_CIPHERTEXT_MAX = (short) (Protocol.PROFILE_MAX_LENGTH
+            + ProfileCrypto.RECORD_HEADER_LENGTH + ProfileCrypto.GCM_TAG_LENGTH);
+    private static final short PROFILE_PLAINTEXT_MAX = Protocol.PROFILE_MAX_LENGTH;
 
     private final byte[] cardId = new byte[Protocol.CARD_ID_LENGTH];
     private final QuotaLedger quota = new QuotaLedger();
@@ -20,7 +21,6 @@ final class CardState {
     private byte[] profilePlaintext;
     private short profilePlaintextLength;
 
-    private byte[] scratch;
     private final byte[] commandData;
 
     private byte lifecycle;
@@ -46,8 +46,6 @@ final class CardState {
         if (profilePlaintext == null) {
             profilePlaintext = JCSystem.makeTransientByteArray(PROFILE_PLAINTEXT_MAX,
                     JCSystem.CLEAR_ON_DESELECT);
-            scratch = JCSystem.makeTransientByteArray(PROFILE_CIPHERTEXT_MAX,
-                    JCSystem.CLEAR_ON_DESELECT);
         }
     }
 
@@ -71,7 +69,6 @@ final class CardState {
     void clearWorkingBuffers() {
         if (profilePlaintext != null) {
             Util.arrayFillNonAtomic(profilePlaintext, (short) 0, PROFILE_PLAINTEXT_MAX, (byte) 0);
-            Util.arrayFillNonAtomic(scratch, (short) 0, PROFILE_CIPHERTEXT_MAX, (byte) 0);
             profilePlaintextLength = 0;
         }
     }
@@ -183,7 +180,4 @@ final class CardState {
         profilePlaintextLength = length;
     }
 
-    byte[] scratch() {
-        return scratch;
-    }
 }

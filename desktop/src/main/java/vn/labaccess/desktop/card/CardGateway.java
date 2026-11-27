@@ -525,6 +525,11 @@ public final class CardGateway {
         return personalizationCommands.personalize(adminPin, cardIdHex, studentId, studentPin, displayName);
     }
 
+    public CardOperationResult personalize(char[] adminPin, String cardIdHex, String studentId,
+            char[] studentPin, String displayName, String classCode) throws CardException {
+        return personalizationCommands.personalize(adminPin, cardIdHex, studentId, studentPin, displayName, classCode);
+    }
+
     public CardOperationResult readLastReceipt(ReceiptExpectation expectation, int le) throws CardException {
         return reconciliationFlow.readLastReceipt(expectation, le);
     }

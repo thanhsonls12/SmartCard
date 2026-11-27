@@ -54,7 +54,11 @@ final class Protocol {
     static final short PROFILE_OFFSET_STUDENT_ID_LENGTH = (short) 1;
     static final short PROFILE_OFFSET_STUDENT_ID = (short) 2;
     static final short PROFILE_MIN_LENGTH = (short) 5;
-    static final short PROFILE_MAX_LENGTH = (short) 131;
+    static final short CLASS_MIN_LENGTH = (short) 5;
+    static final short CLASS_MAX_LENGTH = (short) 7;
+    static final short MAJOR_MAX_LENGTH = (short) 64;
+    static final short PROFILE_EXTENSION_MAX_LENGTH = (short) (2 + CLASS_MAX_LENGTH + MAJOR_MAX_LENGTH);
+    static final short PROFILE_MAX_LENGTH = (short) 204;
 
     static final short PROFILE_META_OFFSET_RECORD_VERSION = (short) 0;
     static final short PROFILE_META_OFFSET_ALGORITHM_ID = (short) 1;
@@ -88,7 +92,7 @@ final class Protocol {
             (short) (UPDATE_IDENTITY_OFFSET_STUDENT_ID + 1 + 1 + 1);
     static final short UPDATE_IDENTITY_MAX_LENGTH =
             (short) (UPDATE_IDENTITY_OFFSET_STUDENT_ID + STUDENT_ID_MAX_LENGTH + 1
-                    + DISPLAY_NAME_MAX_LENGTH);
+                    + DISPLAY_NAME_MAX_LENGTH + PROFILE_EXTENSION_MAX_LENGTH);
     static final short COMMAND_DATA_MAX_LENGTH = UPDATE_IDENTITY_MAX_LENGTH;
 
     static final short MAX_BALANCE = (short) 9999;

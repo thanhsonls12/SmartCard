@@ -18,8 +18,6 @@ final class CardSigner {
             Protocol.PROFILE_MESSAGE_LENGTH, JCSystem.CLEAR_ON_DESELECT);
     private final byte[] publicKeyHash = JCSystem.makeTransientByteArray(
             Protocol.ENROLLMENT_PUBLIC_KEY_HASH_LENGTH, JCSystem.CLEAR_ON_DESELECT);
-    private final byte[] publicPoint = JCSystem.makeTransientByteArray(
-            PUBLIC_POINT_LENGTH, JCSystem.CLEAR_ON_DESELECT);
     private final byte[] signature = JCSystem.makeTransientByteArray(
             Protocol.ENROLLMENT_SIGNATURE_MAX_LENGTH, JCSystem.CLEAR_ON_DESELECT);
 
@@ -66,9 +64,9 @@ final class CardSigner {
     }
 
     private void hashPublicKey(ECPublicKey cardPublicKey) {
-        cardPublicKey.getW(publicPoint, (short) 0);
+        cardPublicKey.getW(message, (short) 0);
         sha256.reset();
-        sha256.doFinal(publicPoint, (short) 0, PUBLIC_POINT_LENGTH, publicKeyHash, (short) 0);
+        sha256.doFinal(message, (short) 0, PUBLIC_POINT_LENGTH, publicKeyHash, (short) 0);
     }
 
     private short sign(short messageLength) {

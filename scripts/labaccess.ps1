@@ -396,7 +396,7 @@ switch ($Action) {
         if (-not $ServicesOnly) { Start-Apps }
         Write-Host ""
         Write-Host "Log phien nay: $runDir"
-        Write-Host "CAP da cai khong tu thay doi. The trang: dong hai app, chay install-applet.cmd."
+        Write-Host "CAP da cai khong tu thay doi. The trang: dong hai app, chay cmd\install-applet.cmd."
     }
     'build' { Assert-Stopped; Build-All }
     'reader' { Start-VirtualReader }

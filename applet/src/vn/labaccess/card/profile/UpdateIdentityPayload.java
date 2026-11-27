@@ -22,8 +22,12 @@ final class UpdateIdentityPayload {
         if (nameLength < (short) 1 || nameLength > Protocol.DISPLAY_NAME_MAX_LENGTH) {
             ISOException.throwIt(Sw.WRONG_DATA);
         }
-        if ((short) (nameLengthOffset + 1 + nameLength) != lc) {
+        short extensionOffset = (short) (nameLengthOffset + 1 + nameLength);
+        if (extensionOffset > lc) {
             ISOException.throwIt(Sw.WRONG_LENGTH);
+        }
+        if (extensionOffset < lc) {
+            ProfileExtension.requireValid(data, extensionOffset, lc);
         }
         StudentIdFormat.requireValid(data, Protocol.UPDATE_IDENTITY_OFFSET_STUDENT_ID,
                 studentIdLength);

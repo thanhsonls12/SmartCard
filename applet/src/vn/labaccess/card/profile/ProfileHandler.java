@@ -33,7 +33,7 @@ final class ProfileHandler {
             }
             byte[] plaintext = state.profilePlaintext();
             short plaintextLength = personalization.readProfilePlaintext(plaintext);
-            ProfileCodec.requireSchemaV1(plaintext, plaintextLength);
+            ProfileCodec.requireValid(plaintext, plaintextLength);
             Util.arrayCopyNonAtomic(plaintext, (short) 0, buffer, (short) 0, plaintextLength);
             apdu.setOutgoingLength(plaintextLength);
             apdu.sendBytes((short) 0, plaintextLength);
@@ -55,12 +55,14 @@ final class ProfileHandler {
                 ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
             }
             AdminPinVerifier.verify(pins.admin(), data, Protocol.UPDATE_PROFILE_OFFSET_ADMIN_PIN);
-            personalization.updateDisplayName(data, Protocol.UPDATE_PROFILE_OFFSET_NAME, nameLength);
+            personalization.updateDisplayName(data, Protocol.UPDATE_PROFILE_OFFSET_NAME, nameLength,
+                    buffer);
         } finally {
             pins.admin().reset();
             ApduChecks.clearApduCommandData(buffer);
             state.clearCommandData();
             state.clearWorkingBuffers();
+            Util.arrayFillNonAtomic(buffer, (short) 0, (short) buffer.length, (byte) 0);
         }
     }
 
@@ -78,12 +80,13 @@ final class ProfileHandler {
             AdminPinVerifier.verify(pins.admin(), data,
                     Protocol.UPDATE_IDENTITY_OFFSET_ADMIN_PIN);
             personalization.updateIdentity(data, Protocol.UPDATE_IDENTITY_OFFSET_VERSION,
-                    nameLength);
+                    nameLength, lc, buffer);
         } finally {
             pins.admin().reset();
             ApduChecks.clearApduCommandData(buffer);
             state.clearCommandData();
             state.clearWorkingBuffers();
+            Util.arrayFillNonAtomic(buffer, (short) 0, (short) buffer.length, (byte) 0);
         }
     }
 

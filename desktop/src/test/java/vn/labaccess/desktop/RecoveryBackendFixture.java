@@ -36,7 +36,7 @@ final class RecoveryBackendFixture implements AutoCloseable {
                 try (Socket socket = server.accept()) {
                     socket.setSoTimeout(5000);
                     BufferedReader input = new BufferedReader(new InputStreamReader(socket.getInputStream(),
-                            StandardCharsets.US_ASCII));
+                            StandardCharsets.ISO_8859_1));
                     String request = input.readLine();
                     int length = 0;
                     for (String line = input.readLine(); line != null && !line.isEmpty(); line = input.readLine()) {
@@ -51,7 +51,9 @@ final class RecoveryBackendFixture implements AutoCloseable {
                         if (character < 0) throw new IOException("missing request body");
                         incoming.append((char) character);
                     }
-                    Reply reply = handler == null ? null : handler.reply(request, incoming.toString());
+                    String payload = new String(incoming.toString().getBytes(StandardCharsets.ISO_8859_1),
+                            StandardCharsets.UTF_8);
+                    Reply reply = handler == null ? null : handler.reply(request, payload);
                     if (reply == null) {
                         reply = new Reply(status, body(request));
                     }

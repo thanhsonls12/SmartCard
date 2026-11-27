@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { buildProfileMessage, buildProfilePlaintext, PROFILE_MESSAGE_BYTES } from './profile-message.js';
+import { buildLegacyProfilePlaintext, buildProfileMessage, buildProfilePlaintext, PROFILE_MESSAGE_BYTES } from './profile-message.js';
 
 const CARD_ID_HEX = 'a1b2c3d41122ef07';
 const PUBLIC_KEY_HASH_HEX = 'aa'.repeat(32);
@@ -38,7 +38,7 @@ describe('buildProfileMessage', () => {
   });
 
   it('ends with the sha256 of the profile plaintext', () => {
-    const plaintext = buildProfilePlaintext({ studentId: 'SV2024001', displayName: 'Nguyễn Văn Bình' });
+    const plaintext = buildLegacyProfilePlaintext({ studentId: 'SV2024001', displayName: 'Nguyễn Văn Bình' });
     const message = buildProfileMessage({
       ...messageFields(),
       profileHash: createHash('sha256').update(plaintext).digest(),
@@ -68,9 +68,9 @@ describe('buildProfileMessage', () => {
   });
 });
 
-describe('buildProfilePlaintext', () => {
+describe('buildLegacyProfilePlaintext', () => {
   it('writes schema version, length-prefixed studentId, length-prefixed name', () => {
-    const plaintext = buildProfilePlaintext({ studentId: 'SV2024001', displayName: 'Le Van A' });
+    const plaintext = buildLegacyProfilePlaintext({ studentId: 'SV2024001', displayName: 'Le Van A' });
 
     expect(plaintext.toString('hex')).toBe(
       '01' + '09' + Buffer.from('SV2024001', 'ascii').toString('hex') + '08' + Buffer.from('Le Van A', 'ascii').toString('hex'),
@@ -79,7 +79,7 @@ describe('buildProfilePlaintext', () => {
 
   it('measures the name length in UTF-8 bytes rather than characters', () => {
     const displayName = 'Nguyễn Văn Bình';
-    const plaintext = buildProfilePlaintext({ studentId: 'SV2024001', displayName });
+    const plaintext = buildLegacyProfilePlaintext({ studentId: 'SV2024001', displayName });
     const nameLengthOffset = 2 + 9;
 
     expect(Buffer.byteLength(displayName, 'utf8')).toBe(19);
@@ -88,20 +88,70 @@ describe('buildProfilePlaintext', () => {
   });
 
   it('writes the studentId in uppercase ascii', () => {
-    const plaintext = buildProfilePlaintext({ studentId: 'sv2024001', displayName: 'Le Van A' });
+    const plaintext = buildLegacyProfilePlaintext({ studentId: 'sv2024001', displayName: 'Le Van A' });
 
     expect(plaintext.subarray(2, 11).toString('ascii')).toBe('SV2024001');
   });
 
   it('rejects an empty studentId', () => {
-    expect(() => buildProfilePlaintext({ studentId: '', displayName: 'Le Van A' })).toThrow(RangeError);
+    expect(() => buildLegacyProfilePlaintext({ studentId: '', displayName: 'Le Van A' })).toThrow(RangeError);
   });
 
   it('rejects an empty name', () => {
-    expect(() => buildProfilePlaintext({ studentId: 'SV2024001', displayName: '' })).toThrow(RangeError);
+    expect(() => buildLegacyProfilePlaintext({ studentId: 'SV2024001', displayName: '' })).toThrow(RangeError);
   });
 
   it('rejects a name longer than one length byte', () => {
-    expect(() => buildProfilePlaintext({ studentId: 'SV2024001', displayName: 'a'.repeat(256) })).toThrow(RangeError);
+    expect(() => buildLegacyProfilePlaintext({ studentId: 'SV2024001', displayName: 'a'.repeat(256) })).toThrow(RangeError);
+  });
+});
+
+describe('buildProfilePlaintext v2', () => {
+  it('matches the shared canonical CT2026001 vector and hash', () => {
+    const plaintext = buildProfilePlaintext({
+      studentId: 'CT2026001',
+      displayName: 'Nguyễn Văn An',
+      classCode: 'CNTT1',
+    });
+
+    expect(plaintext).toHaveLength(58);
+    expect(plaintext.toString('hex')).toBe(
+      '0209435432303236303031104e677579e1bb856e2056c4836e20416e05434e5454311743c3b46e67206e6768e1bb87207468c3b46e672074696e',
+    );
+    expect(createHash('sha256').update(plaintext).digest('hex')).toBe(
+      '17db24ee2fe1d98a4814c8fba92708fda95eff3e2fe5a3fe0089b7611ccbccd7',
+    );
+  });
+
+  it.each([
+    ['CT2026001', 'Công nghệ thông tin'],
+    ['AT2026001', 'An toàn thông tin'],
+    ['DT2026001', 'Điện tử viễn thông'],
+    ['XY2026001', ''],
+  ])('derives the major bytes from %s', (studentId, major) => {
+    const plaintext = buildProfilePlaintext({ studentId, displayName: 'An', classCode: 'CNTT1' });
+    const majorLengthOffset = 2 + studentId.length + 1 + 2 + 1 + 5;
+
+    expect(plaintext.readUInt8(majorLengthOffset)).toBe(Buffer.byteLength(major, 'utf8'));
+    expect(plaintext.subarray(majorLengthOffset + 1)).toEqual(Buffer.from(major, 'utf8'));
+  });
+
+  it.each(['CNTT1', 'AT19A1B'])('accepts canonical classCode %s', (classCode) => {
+    const plaintext = buildProfilePlaintext({ studentId: 'SV2024001', displayName: 'An', classCode });
+
+    expect(plaintext[0]).toBe(2);
+    expect(plaintext.subarray(15, 15 + classCode.length).toString('ascii')).toBe(classCode);
+    expect(plaintext.at(-1)).toBe(0);
+  });
+
+  it.each(['', 'AT19', 'AT19A1B2', 'cntt1', ' CN19A', 'CN-TT', 'CNĐT1', 'CNTT1\n'])(
+    'rejects noncanonical classCode %j',
+    (classCode) => {
+      expect(() => buildProfilePlaintext({ studentId: 'CT2026001', displayName: 'An', classCode })).toThrow(RangeError);
+    },
+  );
+
+  it.each(['CT20260Đ1', 'CT2026-01'])('rejects non-ASCII or nonalphanumeric studentId %s', (studentId) => {
+    expect(() => buildProfilePlaintext({ studentId, displayName: 'An', classCode: 'CNTT1' })).toThrow(RangeError);
   });
 });

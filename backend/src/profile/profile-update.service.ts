@@ -93,7 +93,7 @@ export class ProfileUpdateService {
     return this.writePendingRequest(async (transaction) => {
       const stale = await transaction.profileUpdate.findUnique({
         where: { id: operationId },
-        select: { cardId: true, state: true, expectedVersion: true, nonce: true },
+        select: { cardId: true, state: true, classCode: true, expectedVersion: true, nonce: true },
       });
       if (stale === null) {
         throw new NotFoundException('profile update not found');
@@ -101,7 +101,7 @@ export class ProfileUpdateService {
       if (stale.state !== 'PENDING') {
         throw new ConflictException('profile update is no longer pending');
       }
-      if (Buffer.from(stale.expectedVersion).equals(content.expectedVersion)) {
+      if (stale.classCode !== null && Buffer.from(stale.expectedVersion).equals(content.expectedVersion)) {
         throw new ConflictException('profile update is not stale; complete it instead of replacing it');
       }
 

@@ -205,7 +205,7 @@ public class App extends Application {
                     showStatus();
                     if (ok && issued != null) {
                         photoPanel.onCard(issued.cardId());
-                        enrollmentPanel.prefill(issued.cardId(), issued.studentId());
+                        enrollmentPanel.prefill(issued.cardId(), issued.studentId(), issued.classCode());
                     }
                 });
         profilePanel = new ProfilePanel(session.gateway(), this::runOp, this::log);

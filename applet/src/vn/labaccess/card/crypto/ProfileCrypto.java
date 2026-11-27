@@ -13,6 +13,7 @@ final class ProfileCrypto {
     static final byte PROFILE_RECORD_VERSION = (byte) 0x01;
     static final byte PROFILE_ALGORITHM_ID_GCM = (byte) 0x01;
     static final byte PROFILE_SCHEMA_VERSION = (byte) 0x01;
+    static final byte PROFILE_SCHEMA_VERSION_V2 = (byte) 0x02;
     static final short RECORD_HEADER_LENGTH = (short) 14;
     static final short RECORD_HEADER_OFFSET_NONCE = (short) 2;
     static final short GCM_NONCE_LENGTH = (short) 12;
@@ -102,11 +103,13 @@ final class ProfileCrypto {
 
     short writeMetadata(byte[] record, short recordLength, byte[] plaintextScratch,
             byte[] target) {
-        decryptStoredRecord(record, recordLength, plaintextScratch);
+        short plaintextLength = decryptStoredRecord(record, recordLength, plaintextScratch);
+        ProfileCodec.requireValid(plaintextScratch, plaintextLength);
         short ciphertextLength = ciphertextLength(recordLength);
         target[Protocol.PROFILE_META_OFFSET_RECORD_VERSION] = PROFILE_RECORD_VERSION;
         target[Protocol.PROFILE_META_OFFSET_ALGORITHM_ID] = PROFILE_ALGORITHM_ID_GCM;
-        target[Protocol.PROFILE_META_OFFSET_SCHEMA_VERSION] = PROFILE_SCHEMA_VERSION;
+        target[Protocol.PROFILE_META_OFFSET_SCHEMA_VERSION] =
+                plaintextScratch[Protocol.PROFILE_OFFSET_SCHEMA_VERSION];
         Util.setShort(target, Protocol.PROFILE_META_OFFSET_CIPHERTEXT_LENGTH, ciphertextLength);
         Util.arrayCopyNonAtomic(record, RECORD_HEADER_OFFSET_NONCE, target,
                 Protocol.PROFILE_META_OFFSET_NONCE, GCM_NONCE_LENGTH);

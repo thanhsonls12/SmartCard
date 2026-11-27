@@ -144,7 +144,32 @@ public final class PersonalizeSelfTest {
                 throw new IllegalStateException("test AID install failed");
             }
             selectTestInstance(channel);
-            if (Boolean.getBoolean("labaccess.tamperOnly")) {
+            String rollbackMode = System.getProperty("labaccess.profileRollbackMode", "");
+            if (!rollbackMode.isEmpty()) {
+                boolean identityFault = rollbackMode.equals("identity");
+                if (!identityFault && !rollbackMode.equals("display-name")) {
+                    throw new IllegalArgumentException("invalid profile rollback mode");
+                }
+                failed += ProfileRollbackCases.run(channel, adminPin, studentPin, identityFault);
+                if (identityFault) {
+                    if (!removeTestInstance(propertiesPath, channel)
+                            || !installTestInstance(propertiesPath, channel, adminPin)) {
+                        throw new IllegalStateException("rollback fresh test instance failed");
+                    }
+                    selectTestInstance(channel);
+                    failed += ProfileRollbackCases.runLegacyUpgrade(channel, adminPin, studentPin);
+                }
+            } else if (Boolean.getBoolean("labaccess.profileV2Only")) {
+                CardChannel current = channel;
+                byte[] provisioningPin = adminPin;
+                failed += ProfileV2Cases.run(channel, adminPin, studentPin, () -> {
+                    if (!removeTestInstance(propertiesPath, current)
+                            || !installTestInstance(propertiesPath, current, provisioningPin)) {
+                        throw new IllegalStateException("profile v2 fresh instance failed");
+                    }
+                    selectTestInstance(current);
+                });
+            } else if (Boolean.getBoolean("labaccess.tamperOnly")) {
                 byte[] payload = validPayload(adminPin, studentPin);
                 try {
                     record("AES-CONTROL-PERSONALIZE", "PERSONALIZE unmodified test CAP", SW_OK,

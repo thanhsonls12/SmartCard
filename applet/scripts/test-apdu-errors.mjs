@@ -83,7 +83,7 @@ async function freePort() {
 try {
   const sourceDir = path.join(root, 'applet/src/vn/labaccess/card');
   const sources = fs.readdirSync(sourceDir, { recursive: true }).filter(name => name.endsWith('.java')).sort().map(name => path.join(sourceDir, name));
-  const harnessSources = ['PersonalizeSelfTest.java', 'ApduErrorCases.java', 'ApduTransportCases.java', 'GatewayTransportCases.java']
+  const harnessSources = ['PersonalizeSelfTest.java', 'ProfileV2Cases.java', 'ApduErrorCases.java', 'ApduTransportCases.java', 'GatewayTransportCases.java']
     .map(name => path.join(root, 'applet/scripts', name));
   const gatewaySources = ['card/CardGateway', 'card/CardLifecycle', 'card/CardOperationResult', 'card/CardPhotoCommands', 'card/CardPinCommands',
     'card/CardProfileCommands', 'card/CardProtocol', 'card/CardStatus', 'card/CardStatusCodec', 'transport/CardTransport', 'card/PendingJournal',
@@ -91,7 +91,7 @@ try {
     'card/Receipt', 'card/ReceiptCodec', 'card/ReceiptExpectation', 'card/ReceiptVerifier', 'card/Reconciliation', 'transport/SimulatorConnection', 'card/Sw',
     'card/ReceiptReadRecovery', 'card/CardOverviewReader', 'card/CardAdminCommands', 'card/StudentLedgerGate',
     'card/LedgerAlignment', 'validation/PinFormat', 'card/CardPersonalizationCommands', 'card/CardEnrollmentCommands',
-    'card/CardProfileUpdateCommands', 'validation/ClassCode', 'card/ProfileEditRequest', 'card/StateTransactionFlow', 'card/ReconciliationFlow',
+    'card/CardProfileUpdateCommands', 'validation/ClassCode', 'validation/StudentMajor', 'card/ProfileEditRequest', 'card/StateTransactionFlow', 'card/ReconciliationFlow',
         'virtualreader/protocol/VirtualReaderProtocol',
         'virtualreader/protocol/VirtualReaderSession'];
   harnessSources.push(...gatewaySources.map(name => name === 'transport/CardTransport' && options['baseline-transport']

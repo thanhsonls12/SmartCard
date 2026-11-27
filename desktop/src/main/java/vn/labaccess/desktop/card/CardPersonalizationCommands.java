@@ -33,17 +33,24 @@ final class CardPersonalizationCommands {
 
     CardOperationResult personalize(char[] adminPin, String cardIdHex, String studentId,
             char[] studentPin, String displayName) throws CardException {
+        return personalize(adminPin, cardIdHex, studentId, studentPin, displayName, null);
+    }
+
+    CardOperationResult personalize(char[] adminPin, String cardIdHex, String studentId,
+            char[] studentPin, String displayName, String classCode) throws CardException {
         transport.requireConnected();
 
-        String problem = PersonalizeRequest.problem(
-                adminPin, cardIdHex, studentId, studentPin, displayName);
+        String problem = classCode == null
+                ? PersonalizeRequest.problem(adminPin, cardIdHex, studentId, studentPin, displayName)
+                : PersonalizeRequest.problem(adminPin, cardIdHex, studentId, studentPin, displayName, classCode);
         if (problem != null) {
             return CardOperationResult.fail("PERSONALIZE: " + problem + " | không gửi APDU");
         }
 
         String expectedCardId = cardIdHex.strip().toUpperCase();
-        byte[] data = PersonalizeRequest.payload(
-                adminPin, cardIdHex, studentId, studentPin, displayName);
+        byte[] data = classCode == null
+                ? PersonalizeRequest.payload(adminPin, cardIdHex, studentId, studentPin, displayName)
+                : PersonalizeRequest.payload(adminPin, cardIdHex, studentId, studentPin, displayName, classCode);
         int lc = data.length;
         ResponseAPDU response;
         try {

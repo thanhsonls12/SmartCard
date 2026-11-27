@@ -129,7 +129,7 @@ public final class StaffWorkspace {
             session.invalidateSnapshot();
             if (ok && issued != null) {
                 photos.onCard(issued.cardId());
-                enrollment.prefill(issued.cardId(), issued.studentId());
+                enrollment.prefill(issued.cardId(), issued.studentId(), issued.classCode());
             }
         });
         receipts = new ReceiptPanel(gateway, cardOps, this::log, new ReceiptPanel.StaffSession(

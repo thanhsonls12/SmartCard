@@ -359,11 +359,24 @@ $variants = @(
     [pscustomobject]@{
         Name = 'profile-update-fault'
         Target = 'vn/labaccess/card/enrollment/Personalization.java'
-        Anchor = '            state.setProfileCiphertextAtomic(state.scratch(), (short) 0, recordLength);'
+        Anchor = '            state.setProfileCiphertextAtomic(apduBuffer, (short) 0, recordLength);'
+        After = $true
         Lines = @(
-            '        if (data[nameOffset] == (byte) 0x7E) {',
-            '            javacard.framework.ISOException.throwIt(Sw.INTERNAL_ERROR);',
-            '        }'
+            '            if (data[nameOffset] == (byte) 0x7E) {',
+            '                javacard.framework.ISOException.throwIt(Sw.INTERNAL_ERROR);',
+            '            }'
+        )
+    },
+    [pscustomobject]@{
+        Name = 'profile-identity-update-fault'
+        Target = 'vn/labaccess/card/enrollment/Personalization.java'
+        Anchor = '            state.setProfileCiphertextAtomic(apduBuffer, (short) 0, recordLength);'
+        Occurrence = 2
+        After = $true
+        Lines = @(
+            '            if (data[UpdateIdentityPayload.nameOffset(data)] == (byte) 0x7E) {',
+            '                javacard.framework.ISOException.throwIt(Sw.INTERNAL_ERROR);',
+            '            }'
         )
     }
 )

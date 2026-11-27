@@ -170,7 +170,7 @@ final class DemoScenario implements DemoScript {
         }
         if (!ready) {
             steps.add(() -> {
-                personalizePanel.fillInputs(cardId, studentId, displayName, adminPin, studentPin);
+                personalizePanel.fillInputs(cardId, studentId, displayName, DEMO_CLASS_CODE, adminPin, studentPin);
                 fire(personalizePanel.pressPersonalize(), "PERSONALIZE");
             });
             steps.add(() -> {
@@ -233,7 +233,7 @@ final class DemoScenario implements DemoScript {
         steps.add(() -> fire(app.pressConnect(), "Connect"));
         steps.add(() -> fire(app.pressIdentify(), "SELECT + GET_STATUS"));
         steps.add(() -> {
-            personalizePanel.fillInputs(cardId, studentId, displayName, adminPin, studentPin);
+            personalizePanel.fillInputs(cardId, studentId, displayName, DEMO_CLASS_CODE, adminPin, studentPin);
             log.accept("DEMO UI-06: PERSONALIZE fresh card");
             fire(personalizePanel.pressPersonalize(), "PERSONALIZE");
         });
@@ -303,7 +303,7 @@ final class DemoScenario implements DemoScript {
         steps.add((Runnable) () -> fire(app.pressIdentify(), "SELECT + GET_STATUS"));
         steps.add((Runnable) () -> {
             app.showTab(App.TAB_CARD);
-            personalizePanel.fillInputs(cardId, studentId, displayName, adminPin, studentPin);
+            personalizePanel.fillInputs(cardId, studentId, displayName, DEMO_CLASS_CODE, adminPin, studentPin);
             log.accept("DEMO SIGN-08: PERSONALIZE thẻ mới");
             fire(personalizePanel.pressPersonalize(), "PERSONALIZE");
         });
@@ -418,7 +418,7 @@ final class DemoScenario implements DemoScript {
             steps.add((Runnable) () -> fire(app.pressIdentify(), "SELECT + GET_STATUS"));
             steps.add((Runnable) () -> {
                 app.showTab(App.TAB_CARD);
-                personalizePanel.fillInputs(cardId, studentId, displayName, adminPin, studentPin);
+                personalizePanel.fillInputs(cardId, studentId, displayName, DEMO_CLASS_CODE, adminPin, studentPin);
                 log.accept("DEMO UI-10 c5: PERSONALIZE thẻ mới nhưng KHÔNG đăng ký thẻ");
                 fire(personalizePanel.pressPersonalize(), "PERSONALIZE");
             });
@@ -472,7 +472,7 @@ final class DemoScenario implements DemoScript {
             steps.add((Runnable) () -> fire(app.pressIdentify(), "SELECT + GET_STATUS"));
             steps.add((Runnable) () -> {
                 app.showTab(App.TAB_CARD);
-                personalizePanel.fillInputs(cardId, studentId, displayName, adminPin, studentPin);
+                personalizePanel.fillInputs(cardId, studentId, displayName, DEMO_CLASS_CODE, adminPin, studentPin);
                 log.accept("DEMO UI-10: PERSONALIZE thẻ thật cardId=" + cardId
                         + " (journal đang thuộc cardId khác)");
                 fire(personalizePanel.pressPersonalize(), "PERSONALIZE");
@@ -553,7 +553,7 @@ final class DemoScenario implements DemoScript {
         steps.add((Runnable) () -> fire(app.pressIdentify(), "SELECT + GET_STATUS"));
         steps.add((Runnable) () -> {
             app.showTab(App.TAB_CARD);
-            personalizePanel.fillInputs(cardId, studentId, displayName, adminPin, studentPin);
+            personalizePanel.fillInputs(cardId, studentId, displayName, DEMO_CLASS_CODE, adminPin, studentPin);
             log.accept("DEMO SIGN-08 RECONNECT: PERSONALIZE thẻ mới");
             fire(personalizePanel.pressPersonalize(), "PERSONALIZE");
         });
@@ -840,7 +840,7 @@ final class DemoScenario implements DemoScript {
         steps.add(() -> fire(app.pressConnect(), "Connect"));
         steps.add(() -> fire(app.pressIdentify(), "SELECT + GET_STATUS"));
         steps.add(() -> {
-            personalizePanel.fillInputs(cardId, studentId, displayName, adminPin, studentPin);
+            personalizePanel.fillInputs(cardId, studentId, displayName, DEMO_CLASS_CODE, adminPin, studentPin);
             fire(personalizePanel.pressPersonalize(), "PERSONALIZE thẻ mới");
         });
         steps.add(() -> {
@@ -888,7 +888,7 @@ final class DemoScenario implements DemoScript {
         steps.add(() -> fire(app.pressConnect(), "Connect"));
         steps.add(() -> fire(app.pressIdentify(), "SELECT + GET_STATUS"));
         steps.add(() -> {
-            personalizePanel.fillInputs(cardId, studentId, displayName, adminPin, studentPin);
+            personalizePanel.fillInputs(cardId, studentId, displayName, DEMO_CLASS_CODE, adminPin, studentPin);
             log.accept("DEMO REFACTOR: PERSONALIZE thẻ mới");
             fire(personalizePanel.pressPersonalize(), "PERSONALIZE");
         });
@@ -1098,14 +1098,14 @@ final class DemoScenario implements DemoScript {
 
     private void personalize(String cardId, String studentId, String displayName,
             char[] adminPin, char[] studentPin, String expectation) {
-        personalizePanel.fillInputs(cardId, studentId, displayName, adminPin, studentPin);
+        personalizePanel.fillInputs(cardId, studentId, displayName, DEMO_CLASS_CODE, adminPin, studentPin);
         log.accept("DEMO: PERSONALIZE — " + expectation);
         fire(personalizePanel.pressPersonalize(), "PERSONALIZE");
     }
 
     private void personalizeRejected(String cardId, String studentId, String name,
             String expectation) {
-        personalizePanel.fillInputs(cardId, studentId, name,
+        personalizePanel.fillInputs(cardId, studentId, name, DEMO_CLASS_CODE,
                 "1".repeat(8).toCharArray(), "1".repeat(6).toCharArray());
         log.accept("DEMO: PERSONALIZE kỳ vọng bị chặn — " + expectation);
         fire(personalizePanel.pressPersonalize(), "PERSONALIZE (input sai)");

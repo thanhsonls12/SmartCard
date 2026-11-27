@@ -521,7 +521,8 @@ final class ApduErrorCases {
         for (int p : new int[] { 0x100, 1 }) {
             personalizeRetry("P-" + p, payload, command(0x30, p, payload, 256), 0x6A86);
         }
-        for (int length : new int[] { 0, 24, 25, 131 }) {
+        // PERSONALIZE v2 accepts up to 204 bytes; 205 is outside both layouts.
+        for (int length : new int[] { 0, 24, 25, 205 }) {
             personalizeRetry("LC-" + length, payload,
                     command(0x30, 0, Arrays.copyOf(payload, length), 256), 0x6700);
         }
@@ -589,8 +590,11 @@ final class ApduErrorCases {
             for (int delta : new int[] { -1, 1 }) {
                 byte[] data = Arrays.copyOf(payload, payload.length + delta);
                 data[offset] = (byte) '!';
+                // Truncation is a length error. An appended zero is classLength=0
+                // in the v2 extension and is rejected as wrong data before PIN/state.
+                int expectedSw = delta < 0 ? 0x6700 : 0x6A80;
                 personalizeRetry("G6-PERSONALIZE-FORMAT-" + offset + "-LENGTH-" + delta,
-                        payload, command(0x30, 0, data, 256), 0x6700);
+                        payload, command(0x30, 0, data, 256), expectedSw);
                 Arrays.fill(data, (byte) 0);
             }
         }
@@ -605,7 +609,7 @@ final class ApduErrorCases {
     }
 
     private void issuedPriorityCases(byte[] payload) throws Exception {
-        for (int length : new int[] { 0, 24, 25, 131, 132, 153, 154 }) {
+        for (int length : new int[] { 0, 24, 25, 205, 206, 254, 255 }) {
             protocolError("G6-PERSONALIZE-ISSUED-LC-" + length,
                     command(0x30, 0, Arrays.copyOf(payload, length), 256), 0x6700);
         }
@@ -779,10 +783,10 @@ final class ApduErrorCases {
             unissuedError("G3-PERSONALIZE-LE-" + le, command(0x30, 0, payload, le), 0x6700, before);
         }
         int expectedRetry = 0x63C3;
-        for (int length : new int[] { 0, 24, 25, 131, 132, 153, 154 }) {
+        for (int length : new int[] { 0, 24, 25, 205, 206, 254, 255 }) {
             unissuedError("G3-PERSONALIZE-LC-" + length,
                     command(0x30, 0, Arrays.copyOf(payload, length), 256), 0x6700, before);
-            if (length > 131) {
+            if (length > 205) {
                 caseId = "G3-PERSONALIZE-LC-" + length + "-RETRY";
                 expect(command(0x30, 0, wrong, 256), expectedRetry--);
                 cases++;

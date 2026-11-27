@@ -8,7 +8,7 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { DatabaseService } from '../database/database.service.js';
 import { Prisma } from '../generated/prisma/client.js';
-import { buildProfileMessage, buildProfilePlaintext } from './profile-message.js';
+import { buildLegacyProfilePlaintext, buildProfileMessage, buildProfilePlaintext } from './profile-message.js';
 import { ProfileUpdateService } from './profile-update.service.js';
 
 const CARD_ID = Buffer.from('a1b2c3d41122ef07', 'hex');
@@ -108,7 +108,12 @@ function signOperation(operation: Row, nonce: Buffer = Buffer.from(operation.non
   const plaintext = buildProfilePlaintext({
     studentId: operation.studentId,
     displayName: operation.displayName,
+    classCode: operation.classCode ?? '',
   });
+  return signPlaintext(operation, plaintext, nonce);
+}
+
+function signPlaintext(operation: Row, plaintext: Buffer, nonce = Buffer.from(operation.nonce)): string {
   const message = buildProfileMessage({
     cardId: Buffer.from(operation.cardId),
     publicKeyHash: createHash('sha256').update(cardKey.point).digest(),
@@ -377,6 +382,32 @@ describe('ProfileUpdateService.replaceRequest', () => {
     expect(db.rows[0]).toMatchObject({ state: 'COMPLETED' });
   });
 
+  it('replaces a legacy null-class request at the same expected version', async () => {
+    const legacy = pendingRow({ classCode: null });
+    const db = makeDb({ rows: [legacy], createdId: REPLACEMENT_ID });
+
+    const result = await db.service.replaceRequest(ADMIN_SESSION_ID, OPERATION_ID, replaceBody({
+      expectedVersion: EXPECTED_VERSION_HEX,
+    }));
+
+    expect(result).toEqual({
+      operationId: REPLACEMENT_ID,
+      nonce: expect.stringMatching(/^[0-9a-f]{64}$/),
+      expectedVersion: EXPECTED_VERSION_HEX,
+      expiresAt: expect.any(Date),
+    });
+    expect(db.rows).toHaveLength(2);
+    expect(db.rows[0]).toMatchObject({ id: OPERATION_ID, classCode: null, state: 'SUPERSEDED' });
+    expect(db.rows[1]).toMatchObject({
+      id: REPLACEMENT_ID,
+      studentId: 'DT2024003',
+      displayName: 'Trần Văn C',
+      classCode: 'DT20A',
+      expectedVersion: new Uint8Array(Buffer.from(EXPECTED_VERSION_HEX, 'hex')),
+      state: 'PENDING',
+    });
+  });
+
   it('answers 409 when the expected version did not change so the request must be completed', async () => {
     const db = makeDb({ rows: [pendingRow()] });
 
@@ -582,6 +613,79 @@ describe('ProfileUpdateService.completeRequest', () => {
       data: { studentId: 'CT2026001', major: 'Công nghệ thông tin', classCode: 'CNTT1' },
     });
     expect(db.student).toMatchObject({ studentId: 'CT2026001', classCode: 'CNTT1' });
+  });
+
+  it('answers 422 for a legacy v1 signature without writing', async () => {
+    const operation = pendingRow();
+    const db = makeDb({ rows: [operation] });
+    const plaintext = buildLegacyProfilePlaintext(operation);
+
+    await expect(db.service.completeRequest(OPERATION_ID, {
+      signature: signPlaintext(operation, plaintext),
+    })).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(db.transactionRunner).not.toHaveBeenCalled();
+    expect(db.studentUpdate).not.toHaveBeenCalled();
+    expect(operation.state).toBe('PENDING');
+  });
+
+  it('answers 422 when the signed classCode differs from the pending operation', async () => {
+    const operation = pendingRow();
+    const db = makeDb({ rows: [operation] });
+
+    await expect(db.service.completeRequest(OPERATION_ID, {
+      signature: signOperation({ ...operation, classCode: 'CNTT2' }),
+    })).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(db.transactionRunner).not.toHaveBeenCalled();
+    expect(db.studentUpdate).not.toHaveBeenCalled();
+    expect(operation.state).toBe('PENDING');
+  });
+
+  it.each(['An toàn thông tin', ''])(
+    'answers 422 when signed major %j differs from the derived major',
+    async (major) => {
+      const operation = pendingRow();
+      const db = makeDb({ rows: [operation] });
+      const plaintext = buildProfilePlaintext({ ...operation, classCode: 'CNTT1' });
+      const majorLengthOffset = plaintext.length - Buffer.byteLength('Công nghệ thông tin', 'utf8') - 1;
+      const majorBytes = Buffer.from(major, 'utf8');
+      const altered = Buffer.concat([
+        plaintext.subarray(0, majorLengthOffset),
+        Buffer.from([majorBytes.length]),
+        majorBytes,
+      ]);
+
+      await expect(db.service.completeRequest(OPERATION_ID, {
+        signature: signPlaintext(operation, altered),
+      })).rejects.toBeInstanceOf(UnprocessableEntityException);
+      expect(db.transactionRunner).not.toHaveBeenCalled();
+      expect(db.studentUpdate).not.toHaveBeenCalled();
+      expect(operation.state).toBe('PENDING');
+    },
+  );
+
+  it('uses an empty major on the card and null in the database for an unknown prefix', async () => {
+    const operation = pendingRow({ studentId: 'XY2026001' });
+    const db = makeDb({ rows: [operation] });
+
+    const result = await db.service.completeRequest(OPERATION_ID, { signature: signOperation(operation) });
+
+    expect(result).toMatchObject({ studentId: 'XY2026001', classCode: 'CNTT1', major: null });
+    expect(db.studentUpdate).toHaveBeenCalledExactlyOnceWith({
+      where: { cardId: new Uint8Array(CARD_ID) },
+      data: { studentId: 'XY2026001', classCode: 'CNTT1', major: null },
+    });
+  });
+
+  it('requires replacement of a legacy pending operation without classCode', async () => {
+    const operation = pendingRow({ classCode: null });
+    const db = makeDb({ rows: [operation] });
+
+    await expect(db.service.completeRequest(OPERATION_ID, {
+      signature: signPlaintext(operation, buildLegacyProfilePlaintext(operation)),
+    })).rejects.toBeInstanceOf(ConflictException);
+    expect(db.transactionRunner).not.toHaveBeenCalled();
+    expect(db.studentUpdate).not.toHaveBeenCalled();
+    expect(operation.state).toBe('PENDING');
   });
 
   it('answers 422 for a signature over a different nonce without writing', async () => {

@@ -25,12 +25,14 @@ public record ProfileEditRequest(String studentId, String displayName, String cl
     }
 
     public int payloadLength() {
-        return PAYLOAD_OVERHEAD + studentIdLength() + displayNameLength();
+        return PAYLOAD_OVERHEAD + studentIdLength() + displayNameLength()
+                + ProfileCodec.extension(studentId, classCode).length;
     }
 
     public byte[] payload(char[] adminPin, byte[] expectedVersion) {
         byte[] studentIdBytes = studentId.getBytes(StandardCharsets.US_ASCII);
         byte[] nameBytes = displayName.getBytes(StandardCharsets.UTF_8);
+        byte[] extension = ProfileCodec.extension(studentId, classCode);
         byte[] out = new byte[payloadLength()];
         try {
             for (int index = 0; index < ADMIN_PIN_LENGTH; index++) {
@@ -43,10 +45,12 @@ public record ProfileEditRequest(String studentId, String displayName, String cl
             offset += 1 + studentIdBytes.length;
             out[offset] = (byte) nameBytes.length;
             System.arraycopy(nameBytes, 0, out, offset + 1, nameBytes.length);
+            System.arraycopy(extension, 0, out, offset + 1 + nameBytes.length, extension.length);
             return out;
         } finally {
             Arrays.fill(studentIdBytes, (byte) 0);
             Arrays.fill(nameBytes, (byte) 0);
+            Arrays.fill(extension, (byte) 0);
         }
     }
 

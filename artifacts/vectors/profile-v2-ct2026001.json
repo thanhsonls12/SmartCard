@@ -1,0 +1,13 @@
+{
+  "name": "profile-v2-ct2026001",
+  "schemaVersion": "02",
+  "fields": {
+    "studentId": "CT2026001",
+    "displayName": "Nguyễn Văn An",
+    "classCode": "CNTT1",
+    "major": "Công nghệ thông tin"
+  },
+  "plaintextHex": "0209435432303236303031104e677579e1bb856e2056c4836e20416e05434e5454311743c3b46e67206e6768e1bb87207468c3b46e672074696e",
+  "plaintextBytes": 58,
+  "sha256": "17db24ee2fe1d98a4814c8fba92708fda95eff3e2fe5a3fe0089b7611ccbccd7"
+}

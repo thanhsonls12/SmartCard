@@ -13,12 +13,22 @@ final class ProfileCodec {
         return StudentIdFormat.length(plaintext, Protocol.PROFILE_OFFSET_STUDENT_ID_LENGTH);
     }
 
-    static void requireSchemaV1(byte[] plaintext, short plaintextLength) {
+    static short extensionOffset(byte[] plaintext) {
+        short nameLengthOffset = Protocol.profileDisplayNameLengthOffset(studentIdLength(plaintext));
+        return (short) (nameLengthOffset + 1 + (plaintext[nameLengthOffset] & UNSIGNED_BYTE_MASK));
+    }
+
+    static boolean isV2(byte[] plaintext) {
+        return plaintext[Protocol.PROFILE_OFFSET_SCHEMA_VERSION] == ProfileCrypto.PROFILE_SCHEMA_VERSION_V2;
+    }
+
+    static void requireValid(byte[] plaintext, short plaintextLength) {
         if (plaintextLength < Protocol.PROFILE_MIN_LENGTH
                 || plaintextLength > Protocol.PROFILE_MAX_LENGTH) {
             ISOException.throwIt(Sw.INTERNAL_ERROR);
         }
-        if (plaintext[Protocol.PROFILE_OFFSET_SCHEMA_VERSION] != ProfileCrypto.PROFILE_SCHEMA_VERSION) {
+        if (plaintext[Protocol.PROFILE_OFFSET_SCHEMA_VERSION] != ProfileCrypto.PROFILE_SCHEMA_VERSION
+                && !isV2(plaintext)) {
             ISOException.throwIt(Sw.INTERNAL_ERROR);
         }
         short studentIdLength = studentIdLength(plaintext);
@@ -34,7 +44,17 @@ final class ProfileCodec {
                 || displayNameLength > Protocol.DISPLAY_NAME_MAX_LENGTH) {
             ISOException.throwIt(Sw.INTERNAL_ERROR);
         }
-        if (Protocol.profileResponseLength(studentIdLength, displayNameLength) != plaintextLength) {
+        short extensionOffset = extensionOffset(plaintext);
+        if (extensionOffset > plaintextLength) {
+            ISOException.throwIt(Sw.INTERNAL_ERROR);
+        }
+        if (isV2(plaintext)) {
+            try {
+                ProfileExtension.requireValid(plaintext, extensionOffset, plaintextLength);
+            } catch (ISOException exception) {
+                ISOException.throwIt(Sw.INTERNAL_ERROR);
+            }
+        } else if (extensionOffset != plaintextLength) {
             ISOException.throwIt(Sw.INTERNAL_ERROR);
         }
     }

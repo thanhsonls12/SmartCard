@@ -22,6 +22,7 @@ import vn.labaccess.desktop.card.CardPhotoCommands;
 import vn.labaccess.desktop.card.CardProfileUpdateCommands;
 import vn.labaccess.desktop.card.CardProtocol;
 import vn.labaccess.desktop.card.PhotoImage;
+import vn.labaccess.desktop.card.ProfileCodec;
 import vn.labaccess.desktop.card.ProfileEditRequest;
 import vn.labaccess.desktop.card.Sw;
 
@@ -46,6 +47,7 @@ final class ProfileEditVerify {
     public static void main(String[] args) throws Exception {
         classCode();
         payload();
+        profileCodec();
         identity();
         signature();
         photoReplace();
@@ -100,15 +102,16 @@ final class ProfileEditVerify {
     }
 
     private static void payload() {
-        ProfileEditRequest request = ProfileEditRequest.normalized("sv12345678", "Nguyễn Văn Á",
+        ProfileEditRequest request = ProfileEditRequest.normalized("at12345678", "Nguyễn Văn Á",
                 " at19a ");
         byte[] payload = request.payload(ADMIN_PIN, VERSION);
-        byte[] studentId = "SV12345678".getBytes(StandardCharsets.US_ASCII);
+        byte[] studentId = "AT12345678".getBytes(StandardCharsets.US_ASCII);
         byte[] name = "Nguyễn Văn Á".getBytes(StandardCharsets.UTF_8);
         check("PE06", "mã sinh viên viết hoa và lớp chuẩn hóa khi gửi",
-                "SV12345678".equals(request.studentId()) && "AT19A".equals(request.classCode()));
-        check("PE07", "Lc bằng 22 cộng studentIdLen cộng nameLen đúng hợp đồng Case 3S",
+                "AT12345678".equals(request.studentId()) && "AT19A".equals(request.classCode()));
+        check("PE07", "Lc bằng 22 cộng studentIdLen, nameLen và extension v2 đúng hợp đồng Case 3S",
                 payload.length == 22 + studentId.length + name.length
+                        + 2 + 5 + "An toàn thông tin".getBytes(StandardCharsets.UTF_8).length
                         && request.payloadLength() == payload.length);
         check("PE08", "8 byte đầu là Admin PIN ASCII",
                 Arrays.equals(Arrays.copyOfRange(payload, 0, 8),
@@ -120,13 +123,65 @@ final class ProfileEditVerify {
                         && Arrays.equals(Arrays.copyOfRange(payload, 21, 21 + studentId.length),
                                 studentId));
         int nameOffset = 21 + studentId.length;
-        check("PE11", "nameLength là số byte UTF-8 rồi tới name",
+        check("PE11", "nameLength là số byte UTF-8 rồi tới name, kế đó có extension lớp/ngành v2",
                 payload[nameOffset] == (byte) name.length
-                        && Arrays.equals(Arrays.copyOfRange(payload, nameOffset + 1, payload.length),
-                                name));
+                        && Arrays.equals(Arrays.copyOfRange(payload, nameOffset + 1,
+                                nameOffset + 1 + name.length), name)
+                        && payload[nameOffset + 1 + name.length] == 5
+                        && Arrays.equals(Arrays.copyOfRange(payload, nameOffset + 2 + name.length,
+                                nameOffset + 7 + name.length), "AT19A".getBytes(StandardCharsets.US_ASCII))
+                        && payload[nameOffset + 7 + name.length]
+                                == "An toàn thông tin".getBytes(StandardCharsets.UTF_8).length
+                        && Arrays.equals(Arrays.copyOfRange(payload, nameOffset + 8 + name.length,
+                                payload.length), "An toàn thông tin".getBytes(StandardCharsets.UTF_8)));
         check("PE12", "tên tiếng Việt dài hơn số ký tự nhưng vẫn đúng giới hạn byte",
                 request.displayNameLength() == name.length
                         && request.displayNameLength() > request.displayName().length());
+    }
+
+    private static void profileCodec() {
+        byte[] vector = HexFormat.of().parseHex("0209435432303236303031104e677579e1bb856e2056c4836e20416e05434e5454311743c3b46e67206e6768e1bb87207468c3b46e672074696e");
+        ProfileCodec.Parse parsed = ProfileCodec.parse(vector);
+        check("PE35", "vector v2 chung parse đúng mã, tên, lớp và chuyên ngành",
+                parsed.ok() && parsed.profile().schemaVersion() == 2
+                        && "CT2026001".equals(parsed.profile().studentId())
+                        && "Nguyễn Văn An".equals(parsed.profile().displayName())
+                        && "CNTT1".equals(parsed.profile().classCode())
+                        && "Công nghệ thông tin".equals(parsed.profile().major()));
+        check("PE36", "hash plaintext v2 khớp vector SHA-256 chung",
+                "17db24ee2fe1d98a4814c8fba92708fda95eff3e2fe5a3fe0089b7611ccbccd7".equals(
+                        ProfileCodec.hashHex("CT2026001", "Nguyễn Văn An", "CNTT1")));
+        byte[] legacy = HexFormat.of().parseHex("0109435432303236303031104e677579e1bb856e2056c4836e20416e");
+        ProfileCodec.Parse legacyParsed = ProfileCodec.parse(legacy);
+        check("PE37", "schema v1 cũ vẫn parse thành công và không giả định lớp/ngành",
+                legacyParsed.ok() && legacyParsed.profile().schemaVersion() == 1
+                        && legacyParsed.profile().classCode() == null
+                        && legacyParsed.profile().major() == null);
+        byte[] legacyExtra = Arrays.copyOf(legacy, legacy.length + 1);
+        check("PE38", "schema v1 có byte thừa vẫn bị từ chối",
+                !ProfileCodec.parse(legacyExtra).ok());
+
+        byte[] truncated = Arrays.copyOf(vector, vector.length - 1);
+        check("PE39", "v2 thiếu byte cuối chuyên ngành bị từ chối", !ProfileCodec.parse(truncated).ok());
+        byte[] cutClass = Arrays.copyOf(vector, 30);
+        check("PE40", "v2 bị cắt trước extension lớp/ngành bị từ chối", !ProfileCodec.parse(cutClass).ok());
+        byte[] badClassLength = vector.clone();
+        badClassLength[28] = 4;
+        check("PE41", "v2 từ chối độ dài lớp ngoài 5–7 byte", !ProfileCodec.parse(badClassLength).ok());
+        byte[] badClass = vector.clone();
+        badClass[29] = (byte) 'c';
+        check("PE42", "v2 từ chối lớp không chuẩn chữ hoa A-Z hoặc số", !ProfileCodec.parse(badClass).ok());
+        byte[] badMajorUtf8 = vector.clone();
+        badMajorUtf8[36] = (byte) 0xFF;
+        check("PE43", "v2 từ chối chuyên ngành UTF-8 lỗi", !ProfileCodec.parse(badMajorUtf8).ok());
+        byte[] badMajorLength = vector.clone();
+        badMajorLength[34] = 0x18;
+        check("PE44", "v2 từ chối độ dài chuyên ngành không khớp response", !ProfileCodec.parse(badMajorLength).ok());
+        byte[] extra = Arrays.copyOf(vector, vector.length + 1);
+        check("PE45", "v2 từ chối byte thừa sau chuyên ngành", !ProfileCodec.parse(extra).ok());
+        byte[] badNameUtf8 = vector.clone();
+        badNameUtf8[12] = (byte) 0xFF;
+        check("PE46", "v2 vẫn giải mã nghiêm ngặt UTF-8 cho tên", !ProfileCodec.parse(badNameUtf8).ok());
     }
 
     private static void identity() throws Exception {

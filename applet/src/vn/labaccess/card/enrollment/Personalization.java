@@ -35,17 +35,17 @@ final class Personalization {
             if (ne != PERSONALIZE_EXPECTED_NE) {
                 ISOException.throwIt(Sw.WRONG_LENGTH);
             }
-            process(state.commandData(), lc);
+            process(state.commandData(), lc, buffer);
             ISOException.throwIt(Sw.OK);
         } catch (APDUException exception) {
             ISOException.throwIt(Sw.WRONG_LENGTH);
         } finally {
-            ApduChecks.clearApduCommandData(buffer);
+            Util.arrayFillNonAtomic(buffer, (short) 0, (short) buffer.length, (byte) 0);
             state.clearCommandData();
         }
     }
 
-    private void process(byte[] buffer, short lc) {
+    private void process(byte[] buffer, short lc, byte[] apduBuffer) {
         try {
             PersonalizePayload.requireLength(buffer, lc);
             if (state.isIssued()) {
@@ -53,7 +53,7 @@ final class Personalization {
             }
             PersonalizePayload.validateFormat(buffer);
             AdminPinVerifier.verify(pins.admin(), buffer, PersonalizePayload.OFFSET_ADMIN_PIN);
-            personalize(buffer);
+            personalize(buffer, lc, apduBuffer);
         } finally {
             pins.admin().reset();
             clearCommandSecrets(buffer, lc);
@@ -61,7 +61,7 @@ final class Personalization {
         }
     }
 
-    private void personalize(byte[] buffer) {
+    private void personalize(byte[] buffer, short lc, byte[] apduBuffer) {
         state.resetUnissued();
         boolean transactionStarted = false;
         try {
@@ -77,16 +77,16 @@ final class Personalization {
             ecKeys.generatePair();
             state.setReceiptSigner(new ReceiptSigner(ecKeys.privateKey()));
             state.setCardSigner(new CardSigner(ecKeys.privateKey()));
-            buildProfilePlaintext(buffer);
+            buildProfilePlaintext(buffer, lc);
             short recordLength = crypto.encryptRecord(
                     state.profilePlaintext(), state.profilePlaintextLength(),
-                    state.scratch());
+                    apduBuffer);
 
             JCSystem.beginTransaction();
             transactionStarted = true;
             state.setCardId(buffer, PersonalizePayload.OFFSET_CARD_ID);
-            state.setProfileCiphertext(state.scratch(), (short) 0, recordLength);
-            state.setProfileNonce(state.scratch(), ProfileCrypto.RECORD_HEADER_OFFSET_NONCE);
+            state.setProfileCiphertext(apduBuffer, (short) 0, recordLength);
+            state.setProfileNonce(apduBuffer, ProfileCrypto.RECORD_HEADER_OFFSET_NONCE);
             pins.assignStudentPin(buffer, PersonalizePayload.studentPinOffset(buffer));
             state.setKeysReady();
             state.markIssued();
@@ -119,18 +119,22 @@ final class Personalization {
         }
     }
 
-    private void buildProfilePlaintext(byte[] buffer) {
+    private void buildProfilePlaintext(byte[] buffer, short lc) {
         byte[] plaintext = state.profilePlaintext();
         short studentIdLength = PersonalizePayload.studentIdLength(buffer);
         short displayNameLength = PersonalizePayload.displayNameLength(buffer);
         short offset = (short) 0;
-        plaintext[offset++] = ProfileCrypto.PROFILE_SCHEMA_VERSION;
+        plaintext[offset++] = PersonalizePayload.totalLength(buffer) < lc
+                ? ProfileCrypto.PROFILE_SCHEMA_VERSION_V2 : ProfileCrypto.PROFILE_SCHEMA_VERSION;
         plaintext[offset++] = (byte) studentIdLength;
         offset = Util.arrayCopyNonAtomic(buffer, PersonalizePayload.OFFSET_STUDENT_ID,
                 plaintext, offset, studentIdLength);
         plaintext[offset++] = (byte) displayNameLength;
         offset = Util.arrayCopyNonAtomic(buffer, PersonalizePayload.displayNameOffset(buffer),
                 plaintext, offset, displayNameLength);
+        short extensionOffset = PersonalizePayload.totalLength(buffer);
+        offset = Util.arrayCopyNonAtomic(buffer, extensionOffset, plaintext, offset,
+                (short) (lc - extensionOffset));
         state.setProfilePlaintextLength(offset);
     }
 
@@ -156,27 +160,31 @@ final class Personalization {
                 state.profileCiphertextLength(), state.profilePlaintext(), target);
     }
 
-    void updateDisplayName(byte[] data, short nameOffset, short nameLength) {
+    void updateDisplayName(byte[] data, short nameOffset, short nameLength, byte[] apduBuffer) {
         byte[] plaintext = state.profilePlaintext();
         short storedLength = crypto.decryptStoredRecord(state.profileCiphertext(),
                 state.profileCiphertextLength(), plaintext);
-        ProfileCodec.requireSchemaV1(plaintext, storedLength);
+        ProfileCodec.requireValid(plaintext, storedLength);
         short studentIdLength = ProfileCodec.studentIdLength(plaintext);
         short nameLengthOffset = Protocol.profileDisplayNameLengthOffset(studentIdLength);
+        short oldExtensionOffset = ProfileCodec.extensionOffset(plaintext);
+        short extensionLength = (short) (storedLength - oldExtensionOffset);
+        short newExtensionOffset = (short) (nameLengthOffset + 1 + nameLength);
+        moveWithinArray(plaintext, oldExtensionOffset, newExtensionOffset, extensionLength);
         plaintext[nameLengthOffset] = (byte) nameLength;
         Util.arrayCopyNonAtomic(data, nameOffset, plaintext, (short) (nameLengthOffset + 1),
                 nameLength);
-        short plaintextLength = (short) (nameLengthOffset + 1 + nameLength);
+        short plaintextLength = (short) (newExtensionOffset + extensionLength);
         state.setProfilePlaintextLength(plaintextLength);
 
         reserveNextNonce();
         short recordLength = crypto.encryptRecordWithNonce(plaintext, plaintextLength,
-                state.scratch(), state.profileNonce());
+                apduBuffer, state.profileNonce());
         boolean transactionStarted = false;
         try {
             JCSystem.beginTransaction();
             transactionStarted = true;
-            state.setProfileCiphertextAtomic(state.scratch(), (short) 0, recordLength);
+            state.setProfileCiphertextAtomic(apduBuffer, (short) 0, recordLength);
             JCSystem.commitTransaction();
             transactionStarted = false;
         } catch (RuntimeException exception) {
@@ -184,6 +192,20 @@ final class Personalization {
                 JCSystem.abortTransaction();
             }
             ISOException.throwIt(Sw.INTERNAL_ERROR);
+        }
+    }
+
+    private static void moveWithinArray(byte[] data, short sourceOffset, short targetOffset,
+            short length) {
+        if (targetOffset > sourceOffset) {
+            for (short remaining = length; remaining > (short) 0; remaining--) {
+                data[(short) (targetOffset + remaining - 1)] =
+                        data[(short) (sourceOffset + remaining - 1)];
+            }
+        } else if (targetOffset < sourceOffset) {
+            for (short index = (short) 0; index < length; index++) {
+                data[(short) (targetOffset + index)] = data[(short) (sourceOffset + index)];
+            }
         }
     }
 
@@ -203,31 +225,40 @@ final class Personalization {
         }
     }
 
-    void updateIdentity(byte[] data, short expectedVersionOffset, short nameLength) {
+    void updateIdentity(byte[] data, short expectedVersionOffset, short nameLength, short lc,
+            byte[] apduBuffer) {
         requireCurrentVersion(data, expectedVersionOffset);
         byte[] plaintext = state.profilePlaintext();
         short storedLength = crypto.decryptStoredRecord(state.profileCiphertext(),
                 state.profileCiphertextLength(), plaintext);
-        ProfileCodec.requireSchemaV1(plaintext, storedLength);
+        ProfileCodec.requireValid(plaintext, storedLength);
         short studentIdLength = UpdateIdentityPayload.studentIdLength(data);
+        short extensionOffset = (short) (UpdateIdentityPayload.nameOffset(data) + nameLength);
+        boolean hasExtension = extensionOffset < lc;
+        if (!hasExtension && ProfileCodec.isV2(plaintext)) {
+            ISOException.throwIt(Sw.CONDITIONS_NOT_SATISFIED);
+        }
         short offset = (short) 0;
-        plaintext[offset++] = ProfileCrypto.PROFILE_SCHEMA_VERSION;
+        plaintext[offset++] = hasExtension
+                ? ProfileCrypto.PROFILE_SCHEMA_VERSION_V2 : ProfileCrypto.PROFILE_SCHEMA_VERSION;
         plaintext[offset++] = (byte) studentIdLength;
         offset = Util.arrayCopyNonAtomic(data, Protocol.UPDATE_IDENTITY_OFFSET_STUDENT_ID,
                 plaintext, offset, studentIdLength);
         plaintext[offset++] = (byte) nameLength;
         offset = Util.arrayCopyNonAtomic(data, UpdateIdentityPayload.nameOffset(data),
                 plaintext, offset, nameLength);
+        offset = Util.arrayCopyNonAtomic(data, extensionOffset, plaintext, offset,
+                (short) (lc - extensionOffset));
         state.setProfilePlaintextLength(offset);
 
         reserveNextNonce();
         short recordLength = crypto.encryptRecordWithNonce(plaintext, offset,
-                state.scratch(), state.profileNonce());
+                apduBuffer, state.profileNonce());
         boolean transactionStarted = false;
         try {
             JCSystem.beginTransaction();
             transactionStarted = true;
-            state.setProfileCiphertextAtomic(state.scratch(), (short) 0, recordLength);
+            state.setProfileCiphertextAtomic(apduBuffer, (short) 0, recordLength);
             JCSystem.commitTransaction();
             transactionStarted = false;
         } catch (RuntimeException exception) {
@@ -242,7 +273,7 @@ final class Personalization {
         byte[] plaintext = state.profilePlaintext();
         short plaintextLength = crypto.decryptStoredRecord(state.profileCiphertext(),
                 state.profileCiphertextLength(), plaintext);
-        ProfileCodec.requireSchemaV1(plaintext, plaintextLength);
+        ProfileCodec.requireValid(plaintext, plaintextLength);
         CardSigner signer = state.cardSigner();
         if (signer == null) {
             ISOException.throwIt(Sw.INTERNAL_ERROR);

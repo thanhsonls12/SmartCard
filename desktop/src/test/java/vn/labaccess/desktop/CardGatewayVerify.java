@@ -1986,8 +1986,11 @@ public final class CardGatewayVerify {
                 !ProfileMetaCodec.parse(metaResponse(2, 1, 1, 20)).ok(), true);
         record("L16", "algorithmId 02 bi tu choi",
                 !ProfileMetaCodec.parse(metaResponse(1, 2, 1, 20)).ok(), true);
-        record("L17", "profileSchemaVersion 02 bi tu choi",
-                !ProfileMetaCodec.parse(metaResponse(1, 1, 2, 20)).ok(), true);
+        record("L17", "profileSchemaVersion 03 bi tu choi",
+                !ProfileMetaCodec.parse(metaResponse(1, 1, 3, 20)).ok(), true);
+        ProfileMetaCodec.Parse v2Meta = ProfileMetaCodec.parse(metaResponse(1, 1, 2, 20));
+        record("L17A", "profileSchemaVersion 02 duoc chap nhan",
+                v2Meta.ok() && v2Meta.meta().schemaVersion() == 2, true);
         record("L18", "ciphertextLength 0 bi tu choi",
                 !ProfileMetaCodec.parse(metaResponse(1, 1, 1, 0)).ok(), true);
 

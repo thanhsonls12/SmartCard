@@ -51,19 +51,23 @@ final class EnrollmentHandler {
         if (signer == null) {
             ISOException.throwIt(Sw.INTERNAL_ERROR);
         }
-        short length = (short) 0;
         try {
-            length = signer.signEnrollment(state.commandData(), state.cardId(),
-                    personalization.publicKey());
-        } catch (RuntimeException exception) {
-            ISOException.throwIt(Sw.INTERNAL_ERROR);
+            short length;
+            try {
+                length = signer.signEnrollment(state.commandData(), state.cardId(),
+                        personalization.publicKey());
+            } catch (RuntimeException exception) {
+                ISOException.throwIt(Sw.INTERNAL_ERROR);
+                return;
+            }
+            if (length <= (short) 0 || length > Protocol.ENROLLMENT_SIGNATURE_MAX_LENGTH) {
+                ISOException.throwIt(Sw.INTERNAL_ERROR);
+            }
+            apdu.setOutgoingLength(length);
+            apdu.sendBytesLong(signer.signature(), (short) 0, length);
         } finally {
             state.clearCommandData();
+            state.clearWorkingBuffers();
         }
-        if (length <= (short) 0 || length > Protocol.ENROLLMENT_SIGNATURE_MAX_LENGTH) {
-            ISOException.throwIt(Sw.INTERNAL_ERROR);
-        }
-        apdu.setOutgoingLength(length);
-        apdu.sendBytesLong(signer.signature(), (short) 0, length);
     }
 }

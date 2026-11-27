@@ -50,9 +50,9 @@ public final class ProfileMetaCodec {
         }
 
         int schemaVersion = data[OFFSET_SCHEMA_VERSION] & 0xFF;
-        if (schemaVersion != ProfileCodec.SCHEMA_VERSION) {
-            return Parse.fail(String.format("profileSchemaVersion=%02X, chỉ nhận %02X",
-                    schemaVersion, ProfileCodec.SCHEMA_VERSION));
+        if (schemaVersion != ProfileCodec.SCHEMA_VERSION
+                && schemaVersion != ProfileCodec.LEGACY_SCHEMA_VERSION) {
+            return Parse.fail(String.format("profileSchemaVersion=%02X, chỉ nhận 01 hoặc 02", schemaVersion));
         }
 
         int ciphertextLength = ((data[OFFSET_CIPHERTEXT_LENGTH] & 0xFF) << 8)

@@ -9,6 +9,8 @@ import java.util.function.Consumer;
 import vn.labaccess.desktop.card.CardGateway;
 import vn.labaccess.desktop.card.CardOperationResult;
 import vn.labaccess.desktop.card.CardStatus;
+import vn.labaccess.desktop.card.Profile;
+import vn.labaccess.desktop.validation.StudentMajor;
 
 import vn.labaccess.desktop.backend.BackendClient;
 
@@ -96,6 +98,25 @@ public final class EnrollmentFlow {
             String problem = stateProblem(current);
             if (problem != null) {
                 throw new StepFailure(Step.CHECK_CARD, problem, false);
+            }
+            CardOperationResult profileRead = gateway.readProfileWithPin(pin);
+            Profile profile = gateway.lastProfile();
+            if (!profileRead.ok() || profile == null) {
+                throw new StepFailure(Step.CHECK_CARD,
+                        "Chưa đọc được hồ sơ trên thẻ: " + profileRead.text(), false);
+            }
+            if (!studentId.equals(profile.studentId())) {
+                throw new StepFailure(Step.CHECK_CARD,
+                        "Mã sinh viên nhập không khớp mã đang lưu trên thẻ.", false);
+            }
+            if (profile.classCode() != null && !classCode.equals(profile.classCode())) {
+                throw new StepFailure(Step.CHECK_CARD,
+                        "Lớp nhập không khớp lớp đang lưu trên thẻ.", false);
+            }
+            if (profile.major() != null
+                    && !profile.major().equals(StudentMajor.fromStudentId(profile.studentId()))) {
+                throw new StepFailure(Step.CHECK_CARD,
+                        "Chuyên ngành đang lưu trên thẻ không khớp mã sinh viên.", false);
             }
             String cardId = current.cardId();
             progress.finished(Step.CHECK_CARD);

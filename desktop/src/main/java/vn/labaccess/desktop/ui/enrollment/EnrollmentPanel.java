@@ -207,11 +207,18 @@ public final class EnrollmentPanel {
     }
 
     public void prefill(String cardId, String studentId) {
+        prefill(cardId, studentId, null);
+    }
+
+    public void prefill(String cardId, String studentId, String classCode) {
         if (cardId != null && !cardId.isBlank() && !enrolled) {
             valueCardId.setText(cardId.strip().toUpperCase());
         }
         if (studentId != null && !studentId.isBlank() && fieldStudentId.getText().isBlank()) {
             fieldStudentId.setText(studentId.strip());
+        }
+        if (classCode != null && !classCode.isBlank() && fieldClassCode.getText().isBlank()) {
+            fieldClassCode.setText(classCode);
         }
         showDetails(!valueStudentId.getText().isBlank()
                 && !UiLabels.EMPTY_VALUE.equals(valueStudentId.getText()), false, false);

@@ -7,6 +7,7 @@ import java.util.HexFormat;
 import java.util.Locale;
 
 import vn.labaccess.desktop.validation.PinFormat;
+import vn.labaccess.desktop.validation.ClassCode;
 
 public final class PersonalizeRequest {
 
@@ -17,7 +18,7 @@ public final class PersonalizeRequest {
     public static final int STUDENT_ID_MAX_LENGTH = 10;
     public static final int DISPLAY_NAME_MAX_LENGTH = 96;
     static final int MIN_PAYLOAD_LENGTH = 25;
-    static final int MAX_PAYLOAD_LENGTH = 131;
+    static final int MAX_PAYLOAD_LENGTH = 204;
 
     private static final int OFFSET_ADMIN_PIN_LENGTH = 0;
     private static final int OFFSET_ADMIN_PIN = 1;
@@ -50,6 +51,12 @@ public final class PersonalizeRequest {
             return studentPinProblem();
         }
         return displayNameProblem(displayName);
+    }
+
+    public static String problem(char[] adminPin, String cardIdHex, String studentId,
+            char[] studentPin, String displayName, String classCode) {
+        String problem = problem(adminPin, cardIdHex, studentId, studentPin, displayName);
+        return problem == null ? ClassCode.problem(classCode) : problem;
     }
 
     public static String studentPinProblem() {
@@ -141,6 +148,20 @@ public final class PersonalizeRequest {
             Arrays.fill(cardId, (byte) 0);
             Arrays.fill(studentIdBytes, (byte) 0);
             Arrays.fill(nameBytes, (byte) 0);
+        }
+    }
+
+    public static byte[] payload(char[] adminPin, String cardIdHex, String studentId,
+            char[] studentPin, String displayName, String classCode) {
+        byte[] base = payload(adminPin, cardIdHex, studentId, studentPin, displayName);
+        byte[] extension = ProfileCodec.extension(studentId, classCode);
+        try {
+            byte[] out = Arrays.copyOf(base, base.length + extension.length);
+            System.arraycopy(extension, 0, out, base.length, extension.length);
+            return out;
+        } finally {
+            Arrays.fill(base, (byte) 0);
+            Arrays.fill(extension, (byte) 0);
         }
     }
 

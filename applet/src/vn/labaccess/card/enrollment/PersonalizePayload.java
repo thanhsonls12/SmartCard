@@ -5,7 +5,7 @@ import javacard.framework.ISOException;
 final class PersonalizePayload {
 
     static final short MIN_LENGTH = (short) 25;
-    static final short MAX_LENGTH = (short) 131;
+    static final short MAX_LENGTH = (short) 204;
 
     static final short OFFSET_ADMIN_PIN_LENGTH = (short) 0;
     static final short OFFSET_ADMIN_PIN = (short) 1;
@@ -52,8 +52,11 @@ final class PersonalizePayload {
         if ((short) (nameLengthOffset + 1) > lc) {
             ISOException.throwIt(Sw.WRONG_LENGTH);
         }
-        if (totalLength(buffer) != lc) {
+        if (totalLength(buffer) > lc) {
             ISOException.throwIt(Sw.WRONG_LENGTH);
+        }
+        if (totalLength(buffer) < lc) {
+            ProfileExtension.requireValid(buffer, totalLength(buffer), lc);
         }
     }
 

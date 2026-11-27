@@ -1,6 +1,7 @@
 package vn.labaccess.desktop.ui.profile;
 
 import vn.labaccess.desktop.validation.ClassCode;
+import vn.labaccess.desktop.validation.StudentMajor;
 
 import java.util.Arrays;
 import java.util.Locale;
@@ -29,6 +30,7 @@ import vn.labaccess.desktop.card.CardGateway;
 import vn.labaccess.desktop.card.PersonalizeRequest;
 import vn.labaccess.desktop.card.PhotoImage;
 import vn.labaccess.desktop.card.ProfileEditRequest;
+import vn.labaccess.desktop.card.Profile;
 
 import vn.labaccess.desktop.backend.BackendClient;
 
@@ -49,6 +51,7 @@ public final class ProfileEditPanel {
     private final TextField fieldName = new TextField();
     private final TextField fieldStudentId = new TextField();
     private final TextField fieldClass = new TextField();
+    private final Label valueMajor = UiLabels.value();
     private final PasswordField fieldAdminPin = new PasswordField();
     private final PasswordField fieldStudentPin = new PasswordField();
     private final Label nameError = UiLabels.fieldError();
@@ -60,6 +63,7 @@ public final class ProfileEditPanel {
     private final Button btnReplace = new Button(UiLabels.REPLACE_PHOTO);
     private final Button btnReopen = new Button(UiLabels.REOPEN_PROFILE_REQUEST);
     private final Button btnReplaceStale = new Button(UiLabels.REPLACE_STALE_REQUEST);
+    private final Button btnReplaceLegacy = new Button(UiLabels.REPLACE_LEGACY_PENDING);
     private final Label valueCardId = UiLabels.value();
     private final Label valueCardProfile = UiLabels.value();
     private final Label status = new Label();
@@ -72,6 +76,7 @@ public final class ProfileEditPanel {
     private ProfileEditRequest lastSubmitted;
     private ProfileUpdateFlow.State lastState;
     private boolean replaceArmed;
+    private boolean enabled = true;
 
     public ProfileEditPanel(CardGateway gateway, BackendClient backend, EnrollmentRunner runner,
             Consumer<String> log) {
@@ -91,7 +96,11 @@ public final class ProfileEditPanel {
         fieldStudentPin.setPromptText(PersonalizeRequest.STUDENT_PIN_LENGTH + " chữ số");
         fieldName.textProperty().addListener((observable, was, now) -> UiLabels.clearFieldError(nameError));
         fieldStudentId.textProperty().addListener(
-                (observable, was, now) -> UiLabels.clearFieldError(studentIdError));
+                (observable, was, now) -> {
+                    UiLabels.clearFieldError(studentIdError);
+                    String major = StudentMajor.fromStudentId(now);
+                    valueMajor.setText(major.isEmpty() ? "Chưa xác định" : major);
+                });
         fieldClass.textProperty().addListener((observable, was, now) -> UiLabels.clearFieldError(classError));
         fieldAdminPin.textProperty().addListener(
                 (observable, was, now) -> UiLabels.clearFieldError(adminPinError));
@@ -101,13 +110,16 @@ public final class ProfileEditPanel {
         btnReplace.setOnAction(event -> replacePhoto());
         btnReopen.setOnAction(event -> reopen());
         btnReplaceStale.setOnAction(event -> replaceStale());
+        btnReplaceLegacy.setOnAction(event -> replaceLegacyPending());
         UiLabels.apduHint(btnSave, "SIGN_PROFILE_CHALLENGE (phiên) + UPDATE_IDENTITY + SIGN_PROFILE_CHALLENGE");
         UiLabels.apduHint(btnReplace,
                 "PHOTO_REPLACE_BEGIN + PHOTO_WRITE_CHUNK + PHOTO_FINISH + PHOTO_READ_CHUNK");
         UiLabels.apduHint(btnReopen, "SIGN_PROFILE_CHALLENGE (phiên) + GET_PROFILE + GET /profile-updates");
         UiLabels.apduHint(btnReplaceStale, "GET_PROFILE + SIGN_PROFILE_CHALLENGE (phiên)"
                 + " + POST /profile-updates/{id}/replace + UPDATE_IDENTITY + SIGN_PROFILE_CHALLENGE");
-        for (Button button : new Button[] {btnSave, btnReplace, btnReopen, btnReplaceStale}) {
+        UiLabels.apduHint(btnReplaceLegacy, "GET_PROFILE + SIGN_PROFILE_CHALLENGE (phiên)"
+                + " + POST /profile-updates/{id}/replace rồi mới UPDATE_IDENTITY");
+        for (Button button : new Button[] {btnSave, btnReplace, btnReopen, btnReplaceStale, btnReplaceLegacy}) {
             button.getStyleClass().add("la-action");
         }
 
@@ -118,13 +130,14 @@ public final class ProfileEditPanel {
         GridPane secrets = grid(2);
         secrets.add(UiRows.field("PIN quản trị", fieldAdminPin, adminPinError), 0, 0);
         secrets.add(UiRows.field("PIN sinh viên", fieldStudentPin, studentPinError), 1, 0);
-        FlowPane actions = UiRows.wrapping(btnSave, btnReplace, btnReopen, btnReplaceStale);
+        FlowPane actions = UiRows.wrapping(btnSave, btnReplace, btnReopen, btnReplaceStale, btnReplaceLegacy);
         actions.setAlignment(Pos.CENTER_RIGHT);
         actions.setMinWidth(0);
         actions.setMaxWidth(Double.MAX_VALUE);
         Region spacer = new Region();
         VBox.setVgrow(spacer, Priority.ALWAYS);
-        VBox form = new VBox(UiScale.SPACE_4, identity, secrets,
+        VBox form = new VBox(UiScale.SPACE_4, identity,
+                UiRows.valueBlock("Chuyên ngành sẽ lưu theo mã sinh viên", valueMajor), secrets,
                 UiRows.valueBlock("Hồ sơ đang lưu trên thẻ", valueCardProfile), spacer, actions);
         form.setMinWidth(0);
         form.setPrefWidth(UiScale.PROFILE_COLUMNS_WIDTH);
@@ -151,6 +164,7 @@ public final class ProfileEditPanel {
                 columns,
                 status);
         UiLabels.show(btnReopen, false);
+        UiLabels.show(btnReplaceLegacy, false);
         resetView();
     }
 
@@ -172,6 +186,7 @@ public final class ProfileEditPanel {
     }
 
     public void setEnabled(boolean enabled, String whyDisabled) {
+        this.enabled = enabled;
         for (TextField field : new TextField[] {fieldName, fieldStudentId, fieldClass,
                 fieldAdminPin, fieldStudentPin}) {
             field.setDisable(!enabled);
@@ -180,8 +195,10 @@ public final class ProfileEditPanel {
         btnReplace.setDisable(!enabled);
         btnReopen.setDisable(!enabled);
         btnReplaceStale.setDisable(!enabled);
+        btnReplaceLegacy.setDisable(!enabled);
         picker.setEnabled(enabled);
         UiLabels.setWhy(why, whyDisabled);
+        refreshActions();
     }
 
     public void setSavePrimary(boolean primary) {
@@ -199,10 +216,12 @@ public final class ProfileEditPanel {
     }
 
     public void resetView() {
+        flow.clearReadProfile();
         clearInputs();
         fieldName.clear();
         fieldStudentId.clear();
         fieldClass.clear();
+        valueMajor.setText("Chưa xác định");
         picker.clearDraft();
         UiLabels.setEmpty(valueCardProfile, "Chưa có hồ sơ trên thẻ",
                 "Kết nối thẻ và mở lại hồ sơ để xem.");
@@ -324,6 +343,12 @@ public final class ProfileEditPanel {
             showStatus("Chưa giữ được nội dung yêu cầu cũ nên chưa thay được.", UiLabels.Tone.ERROR);
             return;
         }
+        if (request.classCode() == null) {
+            replaceArmed = false;
+            showResult(new ProfileUpdateFlow.Result(ProfileUpdateFlow.State.CLASS_REQUIRED,
+                    "Yêu cầu cũ chưa có lớp. Nhập lớp hợp lệ rồi thay yêu cầu cũ để tiếp tục.", ""));
+            return;
+        }
         char[] adminPin = fieldAdminPin.getText().toCharArray();
         char[] studentPin = fieldStudentPin.getText().toCharArray();
         if (!pinsUsable(adminPin, studentPin)) {
@@ -339,6 +364,36 @@ public final class ProfileEditPanel {
             picker.clearDraft();
             showFailure("PROFILE replace", failure);
         });
+    }
+
+    private void replaceLegacyPending() {
+        if (btnReplaceLegacy.isDisabled() || lastState != ProfileUpdateFlow.State.CLASS_REQUIRED) {
+            return;
+        }
+        if (cardId.isEmpty()) {
+            showStatus("Chưa có mã thẻ để bổ sung lớp cho yêu cầu cũ.", UiLabels.Tone.ERROR);
+            return;
+        }
+        String classCode = ClassCode.normalize(fieldClass.getText());
+        String problem = ClassCode.problem(classCode);
+        if (problem != null) {
+            UiLabels.setFieldError(classError, problem);
+            UiLabels.inputProblem(log, fieldClass, "Bổ sung lớp yêu cầu cũ: " + problem);
+            return;
+        }
+        fieldClass.setText(classCode);
+        char[] adminPin = fieldAdminPin.getText().toCharArray();
+        char[] studentPin = fieldStudentPin.getText().toCharArray();
+        if (!pinsUsable(adminPin, studentPin)) {
+            return;
+        }
+        String targetCard = cardId;
+        runner.run("PROFILE replace legacy", PinOperation.of(
+                () -> flow.replaceLegacyPending(targetCard, classCode, adminPin, studentPin),
+                adminPin, studentPin), result -> {
+            picker.clearDraft();
+            showResult(result);
+        }, failure -> showFailure("PROFILE replace legacy", failure));
     }
 
     private boolean pinsUsable(char[] adminPin, char[] studentPin) {
@@ -366,15 +421,22 @@ public final class ProfileEditPanel {
         UiLabels.Tone tone = switch (result.state()) {
             case DONE -> UiLabels.Tone.OK;
             case REJECTED, STALE -> UiLabels.Tone.ERROR;
-            case UNVERIFIED -> UiLabels.Tone.PENDING;
+            case CLASS_REQUIRED, UNVERIFIED -> UiLabels.Tone.PENDING;
         };
         lastState = result.state();
         String detail = result.detail();
         showStatus(detail == null || detail.isBlank() ? result.message() : result.message() + " " + detail,
                 tone);
-        if (result.state() == ProfileUpdateFlow.State.DONE && lastSubmitted != null) {
+        Profile read = flow.lastReadProfile();
+        ProfileEditRequest completed = flow.lastCompletedRequest();
+        if (read != null) {
+            showReadProfile(read);
+        } else if (result.state() == ProfileUpdateFlow.State.DONE && completed != null) {
             UiLabels.clearEmpty(valueCardProfile);
-            valueCardProfile.setText(lastSubmitted.studentId() + " • " + lastSubmitted.displayName());
+            String major = StudentMajor.fromStudentId(completed.studentId());
+            valueCardProfile.setText(completed.studentId() + " • " + completed.displayName()
+                    + " • Lớp: " + completed.classCode()
+                    + " • Chuyên ngành: " + (major.isEmpty() ? "Chưa xác định" : major));
         } else if (result.state() == ProfileUpdateFlow.State.UNVERIFIED) {
             UiLabels.clearEmpty(valueCardProfile);
             valueCardProfile.setText("Chưa xác định — đọc lại thẻ");
@@ -383,6 +445,23 @@ public final class ProfileEditPanel {
                 : result.state() == ProfileUpdateFlow.State.UNVERIFIED ? "PENDING" : "FAIL") + "] "
                 + result.message() + (detail == null || detail.isBlank() ? "" : " " + detail));
         refreshActions();
+    }
+
+    private void showReadProfile(Profile profile) {
+        UiLabels.clearEmpty(valueCardProfile);
+        valueCardProfile.setText(profile.studentId() + " • " + profile.displayName()
+                + " • Lớp: " + (profile.classCode() == null ? "Chưa lưu trên thẻ" : profile.classCode())
+                + " • Chuyên ngành: " + (profile.major() == null ? "Chưa lưu trên thẻ"
+                        : profile.major().isEmpty() ? "Chưa xác định" : profile.major()));
+        if (fieldStudentId.getText().isBlank()) {
+            fieldStudentId.setText(profile.studentId());
+        }
+        if (fieldName.getText().isBlank()) {
+            fieldName.setText(profile.displayName());
+        }
+        if (fieldClass.getText().isBlank() && profile.classCode() != null) {
+            fieldClass.setText(profile.classCode());
+        }
     }
 
     private void showFailure(String label, Exception failure) {
@@ -399,13 +478,20 @@ public final class ProfileEditPanel {
     }
 
     private void refreshActions() {
-        boolean stale = lastState == ProfileUpdateFlow.State.STALE && !cardId.isEmpty();
+        boolean stale = enabled && lastState == ProfileUpdateFlow.State.STALE && !cardId.isEmpty();
+        boolean legacy = enabled && lastState == ProfileUpdateFlow.State.CLASS_REQUIRED && !cardId.isEmpty();
         if (!stale) {
             replaceArmed = false;
         }
         btnReplaceStale.setText(replaceArmed ? UiLabels.REPLACE_STALE_CONFIRM
                 : UiLabels.REPLACE_STALE_REQUEST);
         UiLabels.show(btnReplaceStale, stale);
+        UiLabels.show(btnReplaceLegacy, legacy);
+        btnSave.setDisable(!enabled || legacy);
+        btnReplace.setDisable(!enabled || legacy);
+        btnReopen.setDisable(!enabled);
+        btnReplaceStale.setDisable(!enabled);
+        btnReplaceLegacy.setDisable(!enabled || !legacy);
         UiLabels.show(btnReopen, !cardId.isEmpty());
     }
 

@@ -119,7 +119,7 @@ final class BackendResponse {
                 "nonce không phải 32 byte hex");
         return new FoundPending(requireUuid(body, "operationId", status), cardId,
                 requireString(body, "studentId", status),
-                requireString(body, "displayName", status), optionalString(body, "classCode"),
+                requireString(body, "displayName", status), nullableString(body, "classCode", status),
                 expectedVersion, nonce, optionalString(body, "expiresAt"), status);
     }
 
@@ -152,6 +152,14 @@ final class BackendResponse {
             throw invalid(status, detail);
         }
         return value;
+    }
+
+    private static String nullableString(JsonNode body, String key, int status) throws Failure {
+        JsonNode value = body.get(key);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        return requireString(body, key, status);
     }
 
     static String optionalString(JsonNode body, String key) {

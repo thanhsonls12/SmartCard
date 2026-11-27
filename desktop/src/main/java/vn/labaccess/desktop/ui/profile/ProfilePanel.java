@@ -37,6 +37,8 @@ public final class ProfilePanel {
     private final Label why = UiLabels.whyNote();
     private final Label valueStudentId = UiLabels.value();
     private final Label valueName = UiLabels.value();
+    private final Label valueClass = UiLabels.value();
+    private final Label valueMajor = UiLabels.value();
     private final Label valueAlgorithm = UiLabels.value();
     private final Label valueRecordVersion = UiLabels.value();
     private final Label valueCiphertextLength = UiLabels.value();
@@ -69,7 +71,9 @@ public final class ProfilePanel {
         VBox profileBlock = new VBox(UiScale.SPACE_2,
                 noteProfile,
                 UiRows.valueBlock("Họ tên", valueName),
-                UiRows.valueBlock("Mã sinh viên", valueStudentId));
+                UiRows.valueBlock("Mã sinh viên", valueStudentId),
+                UiRows.valueBlock("Lớp", valueClass),
+                UiRows.valueBlock("Chuyên ngành", valueMajor));
 
         VBox metaBlock = new VBox(UiScale.SPACE_2,
                 noteMeta,
@@ -109,6 +113,8 @@ public final class ProfilePanel {
         clearInputs();
         valueStudentId.setText(UiLabels.EMPTY_VALUE);
         valueName.setText(UiLabels.EMPTY_VALUE);
+        valueClass.setText(UiLabels.EMPTY_VALUE);
+        valueMajor.setText(UiLabels.EMPTY_VALUE);
         valueAlgorithm.setText(UiLabels.EMPTY_VALUE);
         valueRecordVersion.setText(UiLabels.EMPTY_VALUE);
         valueCiphertextLength.setText(UiLabels.EMPTY_VALUE);
@@ -190,9 +196,12 @@ public final class ProfilePanel {
         if (ok && profile != null) {
             valueStudentId.setText(profile.studentId());
             valueName.setText(profile.displayName());
+            valueClass.setText(profile.classCode() == null ? "Chưa lưu trên thẻ" : profile.classCode());
+            valueMajor.setText(profile.major() == null ? "Chưa lưu trên thẻ"
+                    : profile.major().isEmpty() ? "Chưa xác định" : profile.major());
             showNote(noteProfile, false);
             log.accept("GUI hiển thị hồ sơ = " + profile.evidence()
-                    + " | panel render mã sinh viên + họ tên");
+                    + " | panel render mã sinh viên + họ tên + lớp + chuyên ngành");
             return;
         }
         showFailure();

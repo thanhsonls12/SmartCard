@@ -1,6 +1,6 @@
 @echo off
 title LabAccess - Virtual Card Reader
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\labaccess.ps1" -Action reader
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\scripts\labaccess.ps1" -Action reader
 set "RESULT=%ERRORLEVEL%"
 echo.
 pause

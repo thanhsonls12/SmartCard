@@ -79,6 +79,8 @@ public final class KioskWorkspace {
     private final Label visit = UiLabels.value();
     private final Label name = UiLabels.caption("");
     private final Label studentId = UiLabels.caption("");
+    private final Label classCode = UiLabels.caption("");
+    private final Label major = UiLabels.caption("");
     private final Label photoNote = UiLabels.caption("");
     private final Label pendingNote = UiLabels.caption("");
     private final ImageView photo = new ImageView();
@@ -169,7 +171,7 @@ public final class KioskWorkspace {
     }
 
     private VBox content() {
-        Label title = new Label("Tự học tại phòng lab");
+        Label title = new Label("Sử dụng phòng lab");
         title.setWrapText(true);
         title.getStyleClass().add("la-kiosk-heading");
         VBox intro = new VBox(UiScale.SPACE_2, title, feedback);
@@ -207,6 +209,8 @@ public final class KioskWorkspace {
         name.getStyleClass().add("la-kiosk-student-name");
         name.setWrapText(true);
         studentId.setWrapText(true);
+        classCode.setWrapText(true);
+        major.setWrapText(true);
         Label empty = UiLabels.caption("Xác thực PIN để xem thông tin sinh viên.");
         empty.setWrapText(true);
         empty.visibleProperty().bind(name.textProperty().isEmpty());
@@ -215,7 +219,11 @@ public final class KioskWorkspace {
         name.managedProperty().bind(name.visibleProperty());
         studentId.visibleProperty().bind(studentId.textProperty().isNotEmpty());
         studentId.managedProperty().bind(studentId.visibleProperty());
-        VBox identity = new VBox(UiScale.SPACE_1, name, studentId, empty);
+        for (Label label : new Label[] {classCode, major}) {
+            label.visibleProperty().bind(label.textProperty().isNotEmpty());
+            label.managedProperty().bind(label.visibleProperty());
+        }
+        VBox identity = new VBox(UiScale.SPACE_1, name, studentId, classCode, major, empty);
         identity.setMinWidth(0);
         HBox.setHgrow(identity, Priority.ALWAYS);
         HBox profile = new HBox(UiScale.SPACE_4, portrait, identity);
@@ -382,6 +390,8 @@ public final class KioskWorkspace {
         visit.setText("Chưa xác thực");
         name.setText("");
         studentId.setText("");
+        classCode.setText("");
+        major.setText("");
         photo.setImage(null);
         photoNote.setText("");
         history.onCard(null);
@@ -459,6 +469,10 @@ public final class KioskWorkspace {
             if (value.profile() != null) {
                 name.setText(value.profile().displayName());
                 studentId.setText("Mã sinh viên: " + value.profile().studentId());
+                classCode.setText("Lớp: " + (value.profile().classCode() == null
+                        ? "Chưa lưu trên thẻ" : value.profile().classCode()));
+                major.setText("Chuyên ngành: " + (value.profile().major() == null ? "Chưa lưu trên thẻ"
+                        : value.profile().major().isEmpty() ? "Chưa xác định" : value.profile().major()));
                 showPhoto(value.photo());
                 photoNote.setText(value.photoAbsent() ? "Thẻ chưa có ảnh."
                         : "Thông tin vừa đọc sau khi xác thực PIN.");

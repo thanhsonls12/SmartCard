@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
     [string]$JavaHome = $env:JAVA_HOME,
-    [string]$JcHomeSimulator = $env:JC_HOME_SIMULATOR
+    [string]$JcHomeSimulator = $env:JC_HOME_SIMULATOR,
+    [int]$SimulatorPort = 9025,
+    [switch]$ProfileV2Only,
+    [ValidateSet('', 'display-name', 'identity')][string]$ProfileRollback = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,6 +16,8 @@ $buildLogDir = Join-Path $buildDir 'logs'
 $logDir = Join-Path $repoRoot 'logs'
 $scanStart = Get-Date
 $source = Join-Path $PSScriptRoot 'PersonalizeSelfTest.java'
+$profileV2Source = Join-Path $PSScriptRoot 'ProfileV2Cases.java'
+$profileRollbackSource = Join-Path $PSScriptRoot 'ProfileRollbackCases.java'
 $apduCasesSource = Join-Path $PSScriptRoot 'ApduErrorCases.java'
 $transportCasesSource = Join-Path $PSScriptRoot 'ApduTransportCases.java'
 $transportSource = Join-Path $PSScriptRoot '../../desktop/src/main/java/vn/labaccess/desktop/transport/CardTransport.java'
@@ -23,7 +28,7 @@ $gatewayNames = @('card/CardGateway', 'card/CardLifecycle', 'card/CardOperationR
     'card/ReceiptExpectation', 'card/ReceiptVerifier', 'card/Reconciliation', 'transport/SimulatorConnection', 'card/Sw',
     'card/CardAdminCommands', 'card/ReceiptReadRecovery', 'card/CardOverviewReader', 'card/StudentLedgerGate',
     'card/LedgerAlignment',
-    'card/CardPersonalizationCommands', 'card/CardEnrollmentCommands', 'card/CardProfileUpdateCommands', 'validation/ClassCode',
+    'card/CardPersonalizationCommands', 'card/CardEnrollmentCommands', 'card/CardProfileUpdateCommands', 'validation/ClassCode', 'validation/StudentMajor',
     'card/ProfileEditRequest', 'card/StateTransactionFlow', 'card/ReconciliationFlow',
         'virtualreader/protocol/VirtualReaderProtocol',
         'virtualreader/protocol/VirtualReaderSession')
@@ -80,7 +85,7 @@ $classpath = "$amserviceJar;$socketJar"
 
 Write-Host '=== LabAccess PERSONALIZE and PIN runtime selftest ==='
 Write-Host '[1/3] Compile harness'
-$result = Invoke-Native { & $javac -g -d $toolsOut -cp $classpath $source $apduCasesSource $transportCasesSource $transportSource $gatewayCasesSource @gatewaySources }
+$result = Invoke-Native { & $javac -g -d $toolsOut -cp $classpath $source $profileV2Source $profileRollbackSource $apduCasesSource $transportCasesSource $transportSource $gatewayCasesSource @gatewaySources }
 $result.Output | ForEach-Object { Write-Host "      $_" }
 if ($result.ExitCode -ne 0) {
     Stop-Test "javac failed with exit code $($result.ExitCode)"
@@ -91,6 +96,11 @@ if ($testCapFiles.Count -ne 1) {
     Stop-Test 'Expected exactly one isolated test CAP; run build.ps1 first'
 }
 $testCapPath = $testCapFiles[0].FullName
+if ($ProfileRollback) {
+    $faultVariant = if ($ProfileRollback -eq 'identity') { 'profile-identity-update-fault' } else { 'profile-update-fault' }
+    $testCapPath = Join-Path $buildDir "variants/$faultVariant-deliverables/vn/labaccess/card/javacard/card.cap"
+    if (-not (Test-Path $testCapPath)) { Stop-Test "Missing rollback fault CAP: $faultVariant" }
+}
 $variantRoot = Join-Path $buildDir 'variants'
 $variantNames = @('ciphertext', 'tag', 'nonce', 'counter-near-max',
     'quota-fault-before-commit', 'quota-fault-after-commit',
@@ -114,11 +124,13 @@ while ($testPins.Count -lt 4) {
 }
 $adminPin = $testPins[0]
 $stamp = Get-Date -Format 'yyyyMMdd-HHmm'
-$logFile = Join-Path $logDir "gate1-pin-runtime-$stamp.log"
+$logPrefix = if ($ProfileRollback) { "profile-rollback-$ProfileRollback" } elseif ($ProfileV2Only) { 'profile-v2-runtime' } else { 'gate1-pin-runtime' }
+$logFile = Join-Path $logDir "$logPrefix-$stamp.log"
 Write-Host '[2/3] Run test AID EE01 scenarios'
 $artifactsPath = Join-Path $buildDir 'receipt-artifacts.jsonl'
 $result = Invoke-Native {
-    ($testPins -join "`n") | & $java --module-path "$amserviceJar;$socketJar" --add-modules ALL-MODULE-PATH `
+    ($testPins -join "`n") | & $java "-Dlabaccess.simulator.port=$SimulatorPort" `
+        "-Dlabaccess.profileV2Only=$($ProfileV2Only.IsPresent.ToString().ToLowerInvariant())" "-Dlabaccess.profileRollbackMode=$ProfileRollback" --module-path "$amserviceJar;$socketJar" --add-modules ALL-MODULE-PATH `
         -cp $toolsOut PersonalizeSelfTest $propsFile $testCapPath $variantRoot $artifactsPath
 }
 $result.Output | ForEach-Object { Write-Host $_ }
@@ -128,7 +140,11 @@ $harnessLines = @($result.Output)
 
 Write-Host '[2b/3] Verify receipt signatures with Node.js'
 $nodeScript = Join-Path $PSScriptRoot 'verify-receipts.js'
-$nodeResult = Invoke-Native { & node $nodeScript $artifactsPath }
+$nodeResult = if ($ProfileV2Only -or $ProfileRollback) {
+    [pscustomobject]@{ ExitCode = 0; Output = @('Focused profile assertions verified by Java') }
+} else {
+    Invoke-Native { & node $nodeScript $artifactsPath }
+}
 $nodeResult.Output | ForEach-Object { Write-Host $_ }
 $nodeLines = @('', '--- Node.js verify-receipts.js ---') + @($nodeResult.Output)
 [System.IO.File]::AppendAllLines($logFile, [string[]]$nodeLines,

@@ -123,11 +123,11 @@ try {
         'card/ProfileCryptoMeta', 'card/ProfileMetaCodec', 'card/Receipt', 'card/ReceiptCodec', 'card/ReceiptExpectation',
         'card/ReceiptVerifier', 'card/Reconciliation', 'transport/SimulatorConnection', 'card/Sw', 'card/ReceiptReadRecovery',
         'card/CardOverviewReader', 'card/CardAdminCommands', 'card/StudentLedgerGate', 'card/LedgerAlignment',
-        'card/CardPersonalizationCommands', 'card/CardEnrollmentCommands', 'card/CardProfileUpdateCommands', 'validation/ClassCode',
+        'card/CardPersonalizationCommands', 'card/CardEnrollmentCommands', 'card/CardProfileUpdateCommands', 'validation/ClassCode', 'validation/StudentMajor',
         'card/ProfileEditRequest', 'card/StateTransactionFlow', 'card/ReconciliationFlow',
         'virtualreader/protocol/VirtualReaderProtocol',
         'virtualreader/protocol/VirtualReaderSession')
-    $sources = @('PersonalizeSelfTest.java', 'ApduErrorCases.java', 'ApduTransportCases.java',
+    $sources = @('PersonalizeSelfTest.java', 'ProfileV2Cases.java', 'ApduErrorCases.java', 'ApduTransportCases.java',
         'GatewayTransportCases.java') | ForEach-Object { Join-Path $repoRoot "applet/scripts/$_" }
     $sources += $desktopClasses | ForEach-Object { Join-Path $repoRoot "desktop/src/main/java/vn/labaccess/desktop/$_.java" }
     & $javac -d $harnessDir -cp $sdkModules @sources 2>&1 | Tee-Object -FilePath (Join-Path $evidence 'javac-harness.log')

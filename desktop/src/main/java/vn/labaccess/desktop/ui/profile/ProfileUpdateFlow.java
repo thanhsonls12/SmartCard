@@ -19,11 +19,12 @@ import vn.labaccess.desktop.card.Sw;
 import vn.labaccess.desktop.backend.BackendClient;
 
 import vn.labaccess.desktop.ui.shared.UiLabels;
+import vn.labaccess.desktop.validation.StudentMajor;
 
 public final class ProfileUpdateFlow {
 
     public enum State {
-        DONE, REJECTED, STALE, UNVERIFIED
+        DONE, REJECTED, STALE, CLASS_REQUIRED, UNVERIFIED
     }
 
     public record Result(State state, String message, String detail) {
@@ -45,7 +46,7 @@ public final class ProfileUpdateFlow {
         }
     }
 
-    private record Pending(String cardId, String operationId, ProfileEditRequest request) {
+    private record Pending(String cardId, String operationId, ProfileEditRequest request, String expectedVersionHex) {
     }
 
     private record CardSnapshot(Profile profile, ProfileCryptoMeta meta) {
@@ -66,10 +67,20 @@ public final class ProfileUpdateFlow {
     private final BackendClient backend;
 
     private volatile Pending pending;
+    private volatile Profile lastReadProfile;
+    private volatile ProfileEditRequest lastCompletedRequest;
 
     public ProfileUpdateFlow(CardGateway gateway, BackendClient backend) {
         this.gateway = gateway;
         this.backend = backend;
+    }
+
+    public Profile lastReadProfile() {
+        return lastReadProfile;
+    }
+
+    public ProfileEditRequest lastCompletedRequest() {
+        return lastCompletedRequest;
     }
 
     public boolean hasPending() {
@@ -90,6 +101,11 @@ public final class ProfileUpdateFlow {
         pending = null;
     }
 
+    void clearReadProfile() {
+        lastReadProfile = null;
+        lastCompletedRequest = null;
+    }
+
     Result save(String cardId, ProfileEditRequest request, char[] adminPin, char[] studentPin)
             throws CardException {
         Step<CardSnapshot> snapshot = readCard(studentPin);
@@ -108,16 +124,16 @@ public final class ProfileUpdateFlow {
         } catch (BackendClient.Failure failure) {
             return createFailed(cardId, request, failure);
         }
-        pending = new Pending(cardId, operation.operationId(), request);
+        pending = new Pending(cardId, operation.operationId(), request, expectedVersion);
 
         Profile onCard = snapshot.value().profile();
-        boolean identityChanged = !request.studentId().equals(onCard.studentId())
-                || !request.displayName().equals(onCard.displayName());
+        boolean identityChanged = !matches(onCard, request);
         return writeAndComplete(session.value(), cardId, request, expectedVersion, operation.nonceHex(),
                 adminPin, identityChanged);
     }
 
     Result replacePhoto(byte[] image, char[] adminPin, char[] studentPin) throws CardException {
+        clearReadProfile();
         CardOperationResult written = gateway.replacePhoto(image, adminPin);
         if (!written.ok()) {
             return Result.rejected("Chưa thay được ảnh trên thẻ.", written.text());
@@ -174,6 +190,13 @@ public final class ProfileUpdateFlow {
                     + " nên không tự gửi lại.", "Backend=" + open.operationId()
                             + " phiên=" + held.operationId());
         }
+        if (open.classCode() == null) {
+            pending = new Pending(cardId, open.operationId(),
+                    new ProfileEditRequest(open.studentId(), open.displayName(), null), open.expectedVersionHex());
+            return new Result(State.CLASS_REQUIRED,
+                    "Yêu cầu cũ chưa có lớp. Nhập lớp hợp lệ rồi thay yêu cầu cũ để tiếp tục.",
+                    "Yêu cầu " + open.operationId() + " vẫn đang chờ; chưa gửi lệnh ghi trong lần mở lại này.");
+        }
         if (held != null && !sameContent(held.request(), open)) {
             return Result.rejected("Nội dung yêu cầu trên Backend khác nội dung đang giữ nên không tự gửi lại.",
                     "Backend mã=" + open.studentId() + " tên=" + open.displayName()
@@ -184,11 +207,10 @@ public final class ProfileUpdateFlow {
 
         ProfileEditRequest request = held != null ? held.request()
                 : new ProfileEditRequest(open.studentId(), open.displayName(), open.classCode());
-        pending = new Pending(cardId, open.operationId(), request);
+        pending = new Pending(cardId, open.operationId(), request, open.expectedVersionHex());
 
         Profile onCard = snapshot.value().profile();
-        boolean alreadyWritten = onCard.studentId().equals(open.studentId())
-                && onCard.displayName().equals(open.displayName());
+        boolean alreadyWritten = matches(onCard, request);
         if (alreadyWritten) {
             CardOperationResult signed = gateway.signProfileChallenge(adminPin, open.nonceHex());
             if (!signed.ok()) {
@@ -208,6 +230,56 @@ public final class ProfileUpdateFlow {
                 open.nonceHex(), adminPin, true);
     }
 
+    public Result replaceLegacyPending(String cardId, String classCode, char[] adminPin, char[] studentPin)
+            throws CardException {
+        if (classCode == null || !classCode.matches("[A-Z0-9]{5,7}")) {
+            return Result.rejected("Lớp phải gồm 5–7 ký tự chữ hoặc số viết hoa.", "");
+        }
+        Step<CardSnapshot> snapshot = readCard(studentPin);
+        if (snapshot.failure() != null) {
+            return snapshot.failure();
+        }
+        Pending held = pending;
+        if (held == null || held.operationId() == null || held.request().classCode() != null) {
+            return Result.rejected("Không còn yêu cầu hồ sơ cũ cần bổ sung lớp; hãy mở lại yêu cầu.", "");
+        }
+        if (!held.cardId().equalsIgnoreCase(cardId)) {
+            return Result.rejected("Yêu cầu đang chờ thuộc thẻ khác; chưa thay đổi gì.",
+                    "yêu cầu=" + held.cardId() + " thẻ=" + cardId);
+        }
+        Profile onCard = snapshot.value().profile();
+        boolean unchangedVersion = snapshot.value().meta().nonceHex().equalsIgnoreCase(held.expectedVersionHex());
+        boolean legacyTarget = onCard.studentId().equalsIgnoreCase(held.request().studentId())
+                && onCard.displayName().equals(held.request().displayName());
+        if (!unchangedVersion && !legacyTarget) {
+            return new Result(State.CLASS_REQUIRED, "Hồ sơ trên thẻ đã thay đổi; chưa thay yêu cầu cũ.",
+                    "Yêu cầu mã=" + held.request().studentId() + " tên=" + held.request().displayName()
+                            + " | thẻ mã=" + onCard.studentId() + " tên=" + onCard.displayName()
+                            + "; mở lại đúng thẻ để bổ sung lớp cho yêu cầu cũ.");
+        }
+        Step<String> session = openSession(cardId, snapshot.value(), adminPin);
+        if (session.failure() != null) {
+            return session.failure();
+        }
+        ProfileEditRequest replacementRequest = new ProfileEditRequest(held.request().studentId(),
+                held.request().displayName(), classCode);
+        BackendClient.ProfileUpdate replacement;
+        try {
+            replacement = backend.replaceProfileUpdate(session.value(), held.operationId(), replacementRequest,
+                    snapshot.value().meta().nonceHex());
+        } catch (BackendClient.Failure failure) {
+            if (failure.statusCode() == 409) {
+                return Result.rejected("Yêu cầu cũ không còn chờ thay thế; mở lại yêu cầu để kiểm tra trạng thái.",
+                        failure.getMessage());
+            }
+            return replaceFailed(cardId, replacementRequest, failure);
+        }
+        pending = new Pending(cardId, replacement.operationId(), replacementRequest, replacement.expectedVersionHex());
+        boolean identityChanged = !matches(onCard, replacementRequest);
+        return writeAndComplete(session.value(), cardId, replacementRequest,
+                snapshot.value().meta().nonceHex(), replacement.nonceHex(), adminPin, identityChanged);
+    }
+
     public Result replaceStale(String cardId, ProfileEditRequest request, char[] adminPin, char[] studentPin)
             throws CardException {
         Step<CardSnapshot> snapshot = readCard(studentPin);
@@ -219,6 +291,13 @@ public final class ProfileUpdateFlow {
             return Result.rejected("Chưa giữ được mã yêu cầu cũ nên chưa thay được;"
                     + " bấm Mở lại yêu cầu để đọc lại yêu cầu trên Backend.", "");
         }
+        if (held.request().classCode() == null) {
+            return new Result(State.CLASS_REQUIRED,
+                    "Yêu cầu cũ chưa có lớp. Nhập lớp hợp lệ rồi thay yêu cầu cũ để tiếp tục.", "");
+        }
+        if (request == null || request.classCode() == null) {
+            return Result.rejected("Chưa có lớp hợp lệ để thay yêu cầu; hãy mở lại yêu cầu.", "");
+        }
         Step<String> session = openSession(cardId, snapshot.value(), adminPin);
         if (session.failure() != null) {
             return session.failure();
@@ -226,8 +305,7 @@ public final class ProfileUpdateFlow {
 
         Profile onCard = snapshot.value().profile();
         ProfileEditRequest target = held.request();
-        if (onCard.studentId().equals(target.studentId())
-                && onCard.displayName().equals(target.displayName())) {
+        if (matches(onCard, target)) {
             return reopen(cardId, adminPin, studentPin);
         }
 
@@ -242,21 +320,22 @@ public final class ProfileUpdateFlow {
             }
             return replaceFailed(cardId, request, failure);
         }
-        pending = new Pending(cardId, replacement.operationId(), request);
+        pending = new Pending(cardId, replacement.operationId(), request, replacement.expectedVersionHex());
 
-        boolean identityChanged = !request.studentId().equals(onCard.studentId())
-                || !request.displayName().equals(onCard.displayName());
+        boolean identityChanged = !matches(onCard, request);
         return writeAndComplete(session.value(), cardId, request, expectedVersion,
                 replacement.nonceHex(), adminPin, identityChanged);
     }
 
     private Step<CardSnapshot> readCard(char[] studentPin) throws CardException {
+        clearReadProfile();
         CardOperationResult profileRead = gateway.readProfileWithPin(studentPin);
         Profile profile = gateway.lastProfile();
         if (!profileRead.ok() || profile == null) {
             return Step.failed(Result.rejected("Chưa đọc được hồ sơ hiện tại trên thẻ nên chưa gửi yêu cầu sửa.",
                     profileRead.text()));
         }
+        lastReadProfile = profile;
         CardOperationResult metaRead = gateway.readProfileCryptoMetaWithPin(studentPin);
         ProfileCryptoMeta meta = gateway.lastProfileMeta();
         if (!metaRead.ok() || meta == null) {
@@ -284,7 +363,7 @@ public final class ProfileUpdateFlow {
 
         try {
             BackendClient.CardSession activated = backend.activateAdminSession(issued.sessionId(), cardId,
-                    ProfileCodec.hashHex(snapshot.profile().studentId(), snapshot.profile().displayName()),
+                    ProfileCodec.hashHex(snapshot.profile()),
                     gateway.lastProfileUpdateSignatureHex());
             if (!activated.cardId().equalsIgnoreCase(cardId)) {
                 return Step.failed(Result.rejected("Backend gắn phiên quản trị vào thẻ khác thẻ đang chọn.",
@@ -299,7 +378,7 @@ public final class ProfileUpdateFlow {
 
     private Result createFailed(String cardId, ProfileEditRequest request, BackendClient.Failure failure) {
         if (failure.statusCode() == 409) {
-            pending = new Pending(cardId, null, request);
+            pending = new Pending(cardId, null, request, null);
             return Result.unverified("Backend đang giữ một yêu cầu sửa hồ sơ chờ cho thẻ này."
                     + " Bấm Mở lại yêu cầu để đối chiếu với thẻ.");
         }
@@ -311,7 +390,7 @@ public final class ProfileUpdateFlow {
             return Result.rejected("Backend từ chối yêu cầu sửa hồ sơ nên thẻ chưa bị ghi.",
                     failure.getMessage());
         }
-        pending = new Pending(cardId, null, request);
+        pending = new Pending(cardId, null, request, null);
         return Result.unverified("Chưa xác định được Backend đã nhận yêu cầu sửa hồ sơ hay chưa: "
                 + failure.getMessage());
     }
@@ -325,7 +404,7 @@ public final class ProfileUpdateFlow {
             return Result.rejected("Backend từ chối thay yêu cầu cũ nên thẻ chưa bị ghi.",
                     failure.getMessage());
         }
-        pending = new Pending(cardId, null, request);
+        pending = new Pending(cardId, null, request, null);
         return Result.unverified("Chưa xác định được Backend đã nhận yêu cầu thay thế hay chưa: "
                 + failure.getMessage());
     }
@@ -351,6 +430,7 @@ public final class ProfileUpdateFlow {
 
     private Result writeIdentity(ProfileEditRequest request, String expectedVersion, char[] adminPin)
             throws CardException {
+        lastReadProfile = null;
         byte[] version = HexFormat.of().parseHex(expectedVersion);
         CardProfileUpdateCommands.IdentityWrite write;
         try {
@@ -388,10 +468,15 @@ public final class ProfileUpdateFlow {
             BackendClient.ProfileUpdateCompletion done = backend.completeProfileUpdate(sessionId,
                     current.operationId(), signatureHex);
             if (!done.cardId().equalsIgnoreCase(cardId)
-                    || !done.studentId().equalsIgnoreCase(request.studentId())) {
+                    || !done.studentId().equalsIgnoreCase(request.studentId())
+                    || !Objects.equals(done.classCode(), request.classCode())
+                    || !Objects.equals(done.major() == null ? "" : done.major(),
+                            StudentMajor.fromStudentId(request.studentId()))) {
                 return Result.unverified("Backend xác nhận một yêu cầu khác nội dung vừa ghi: cardId="
-                        + done.cardId() + " studentId=" + done.studentId());
+                        + done.cardId() + " studentId=" + done.studentId()
+                        + " classCode=" + done.classCode() + " major=" + done.major());
             }
+            lastCompletedRequest = request;
             pending = null;
             return Result.done("Đã lưu hồ sơ.", "Backend hoàn tất yêu cầu " + done.operationId()
                     + " lúc " + done.completedAt() + " | lớp=" + done.classCode()
@@ -400,6 +485,13 @@ public final class ProfileUpdateFlow {
             return Result.unverified("Thẻ đã ghi hồ sơ mới nhưng chưa xác nhận được với Backend: "
                     + failure.getMessage());
         }
+    }
+
+    private static boolean matches(Profile profile, ProfileEditRequest request) {
+        return profile.studentId().equals(request.studentId())
+                && profile.displayName().equals(request.displayName())
+                && Objects.equals(profile.classCode(), request.classCode())
+                && Objects.equals(profile.major(), StudentMajor.fromStudentId(request.studentId()));
     }
 
     private static boolean sameContent(ProfileEditRequest request, BackendClient.FoundPending open) {

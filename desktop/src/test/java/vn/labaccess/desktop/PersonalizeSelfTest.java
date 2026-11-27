@@ -46,7 +46,8 @@ import vn.labaccess.desktop.ui.enrollment.PersonalizePanel;
 public final class PersonalizeSelfTest {
 
     private static final String CARD_ID = "A1B2C3D411223344";
-    private static final String STUDENT_ID = "SV2024008";
+    private static final String STUDENT_ID = "CT2024008";
+    private static final String CLASS_CODE = "CNTT1";
     private static final String DISPLAY_NAME = "Nguyễn Văn Á";
     private static final char[] ADMIN_PIN = "12345678".toCharArray();
     private static final char[] STUDENT_PIN = "654321".toCharArray();
@@ -173,6 +174,22 @@ public final class PersonalizeSelfTest {
             check("PZ10", "ô mã thẻ không báo lỗi khi mã chưa tồn tại",
                     !scenario.showsText(UiLabels.CARD_ID_ENROLLED) && !scenario.showsText(NOT_CHECKED_TEXT),
                     "log cuối=" + scenario.lastLog());
+            byte[] sent = scenario.channel.commands.stream()
+                    .filter(command -> command.getINS() == INS_PERSONALIZE).findFirst().orElseThrow().getData();
+            int extensionOffset = 25 + STUDENT_ID.length()
+                    + DISPLAY_NAME.getBytes(StandardCharsets.UTF_8).length;
+            byte[] expectedClass = CLASS_CODE.getBytes(StandardCharsets.US_ASCII);
+            byte[] expectedMajor = "Công nghệ thông tin".getBytes(StandardCharsets.UTF_8);
+            check("PZ14", "PERSONALIZE từ UI gửi extension lớp và ngành schema v2",
+                    sent[extensionOffset] == expectedClass.length
+                            && java.util.Arrays.equals(expectedClass,
+                                    java.util.Arrays.copyOfRange(sent, extensionOffset + 1,
+                                            extensionOffset + 1 + expectedClass.length))
+                            && sent[extensionOffset + 1 + expectedClass.length] == expectedMajor.length
+                            && java.util.Arrays.equals(expectedMajor,
+                                    java.util.Arrays.copyOfRange(sent,
+                                            extensionOffset + 2 + expectedClass.length, sent.length)),
+                    "extension lớp/ngành được giữ nguyên trong APDU");
             String before = scenario.cardIdText();
             scenario.panel.pressNewCardId();
             String after = scenario.cardIdText();
@@ -254,7 +271,7 @@ public final class PersonalizeSelfTest {
         }
 
         void fill(String cardId) {
-            panel.fillInputs(cardId, STUDENT_ID, DISPLAY_NAME, ADMIN_PIN.clone(), STUDENT_PIN.clone());
+            panel.fillInputs(cardId, STUDENT_ID, DISPLAY_NAME, CLASS_CODE, ADMIN_PIN.clone(), STUDENT_PIN.clone());
         }
 
         int personalizeCount() {

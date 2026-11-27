@@ -64,11 +64,14 @@ export async function completeProfileUpdate(
     throw new UnprocessableEntityException('enrolled publicKey is not a P-256 point');
   }
 
+  if (operation.classCode === null) {
+    throw new ConflictException('legacy profile update must be replaced with a classCode');
+  }
   const message = buildProfileMessage({
     cardId,
     publicKeyHash: sha256PublicKey(publicKey),
     nonce: Buffer.from(operation.nonce),
-    profileHash: profileHash(operation.studentId, operation.displayName),
+    profileHash: profileHash(operation.studentId, operation.displayName, operation.classCode),
   });
   if (!verifyEnrollmentSignature({ publicKey, message, signature })) {
     throw new UnprocessableEntityException('profile update signature does not verify');
@@ -114,6 +117,6 @@ export async function completeProfileUpdate(
   });
 }
 
-function profileHash(studentId: string, displayName: string): Buffer {
-  return createHash('sha256').update(buildProfilePlaintext({ studentId, displayName })).digest();
+function profileHash(studentId: string, displayName: string, classCode: string): Buffer {
+  return createHash('sha256').update(buildProfilePlaintext({ studentId, displayName, classCode })).digest();
 }

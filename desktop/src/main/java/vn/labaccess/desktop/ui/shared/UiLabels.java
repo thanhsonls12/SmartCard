@@ -44,6 +44,7 @@ public final class UiLabels {
     public static final String REOPEN_PROFILE_REQUEST = "Mở lại yêu cầu";
     public static final String REPLACE_STALE_REQUEST = "Thay yêu cầu cũ";
     public static final String REPLACE_STALE_CONFIRM = "Xác nhận thay yêu cầu";
+    public static final String REPLACE_LEGACY_PENDING = "Bổ sung lớp yêu cầu cũ";
     public static final String PROFILE_VERIFY_PENDING = "Chờ xác minh — đọc lại thẻ";
 
     public static final String BUSY_WHY = "đang xử lý thao tác khác";
